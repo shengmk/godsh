@@ -35,3 +35,8 @@ smoke-err.txt
 
 # 冒烟测试输出（任何前缀）
 smoke-*.txt
+
+# 冒烟输出（sm/sme 前缀）
+sm.txt
+sme.txt
+sm*.txt
