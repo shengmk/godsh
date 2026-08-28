@@ -18,7 +18,7 @@ Write-JsonNoBom (Join-Path $homeDir 'profiles\alpha\cordis.patch.yml') "- insert
 
 $env:DSH_HOME = $homeDir
 $env:DSH_LAUNCHER_DATA_DIR = $dataDir
-$port = 48299
+$port = 48329
 $server = Start-Process -FilePath 'node' -ArgumentList @("$root\apps\launcher\dist\server.mjs", 'serve', '--port', "$port") -PassThru -WindowStyle Hidden
 $ok = $true
 function Check($name, $cond, $extra) {
@@ -45,12 +45,15 @@ try {
   Check '安全头: nosniff' ($nosniff -eq 'nosniff') ($nosniff)
   Check '安全头: no-referrer' ($referrer -eq 'no-referrer') ($referrer)
 
-  # A3-3: 配置 allowedOrigins 后 CORS 放行
+  # A3-3: 配置 allowedOrigins 后 CORS 放行（需带 Origin 请求，CORS 按请求 Origin 精确匹配）
   Invoke-RestMethod -Uri "http://127.0.0.1:$port/api/settings" -Method Put -ContentType 'application/json' -Body '{"allowedOrigins":["http://localhost:5173"]}' -TimeoutSec 5 | Out-Null
-  $resp2 = Invoke-WebRequest -Uri "http://127.0.0.1:$port/api/health" -UseBasicParsing
+  $resp2 = Invoke-WebRequest -Uri "http://127.0.0.1:$port/api/health" -Headers @{Origin='http://localhost:5173'} -UseBasicParsing
   Check 'CORS: 配置后放行来源' ($resp2.Headers['Access-Control-Allow-Origin'] -eq 'http://localhost:5173') ($resp2.Headers['Access-Control-Allow-Origin'])
-  # 还原
-  Invoke-RestMethod -Uri "http://127.0.0.1:$port/api/settings" -Method Put -ContentType 'application/json' -Body '{"allowedOrigins":[]}' -TimeoutSec 5 | Out-Null
+  # 白名单外 Origin 仍拒绝
+  $resp3 = Invoke-WebRequest -Uri "http://127.0.0.1:$port/api/health" -Headers @{Origin='http://evil.com'} -UseBasicParsing
+  Check 'CORS: 白名单外拒绝' ($null -eq $resp3.Headers['Access-Control-Allow-Origin']) ($resp3.Headers['Access-Control-Allow-Origin'])
+  # 还原为默认白名单（含 Tauri 来源）
+  Invoke-RestMethod -Uri "http://127.0.0.1:$port/api/settings" -Method Put -ContentType 'application/json' -Body '{"allowedOrigins":["http://tauri.localhost","https://tauri.localhost","tauri://localhost","http://localhost"]}' -TimeoutSec 5 | Out-Null
 
   # A2-1: 正常 patch 可分配写回（简单结构）
   $alloc = Invoke-RestMethod -Uri "http://127.0.0.1:$port/api/allocations" -Method Post -ContentType 'application/json' -Body '{"profile":"alpha","pluginId":"dep-a","pluginName":"dep-a"}' -TimeoutSec 5

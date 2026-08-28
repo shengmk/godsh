@@ -51,11 +51,18 @@ function securityHeaders(): Record<string, string> {
   }
 }
 
-/** 根据配置的允许来源生成 CORS 头；未配置（仅同源）时不返回任何 CORS 头。 */
-function corsHeaders(allowedOrigins: string[]): Record<string, string> {
-  if (!allowedOrigins.length) return {}
+/**
+ * 根据请求的 Origin 生成 CORS 头：只有 Origin 在允许白名单内时才回显该 Origin 的精确值。
+ * - 同源请求（无 Origin 头）不返回任何 CORS 头（浏览器同源访问不受影响）。
+ * - 白名单外的跨域请求不返回 CORS 头 → 浏览器拦截（安全）。
+ * - 白名单内的跨域请求（如 Tauri 桌面端 tauri.localhost → 127.0.0.1:4780）返回精确 Origin。
+ */
+function corsHeaders(allowedOrigins: string[], reqOrigin?: string | null): Record<string, string> {
+  if (!reqOrigin) return {}
+  const matched = allowedOrigins.find((o) => o === reqOrigin)
+  if (!matched) return {}
   return {
-    'Access-Control-Allow-Origin': allowedOrigins.join(','),
+    'Access-Control-Allow-Origin': matched,
     'Access-Control-Allow-Methods': 'GET,POST,PATCH,DELETE,OPTIONS',
     'Access-Control-Allow-Headers': 'Content-Type',
     'Vary': 'Origin',
@@ -248,8 +255,10 @@ export async function startApiServer(ctx: CliContext, opts: ApiServerOptions): P
     return { status: rec.status, message: rec.message, log: readLogTail(rec.logFile, 200) }
   }
 
-  // 允许跨域来源（默认空 = 仅同源）；设置页保存后即时更新
+  // 允许跨域来源（默认含 Tauri 桌面端来源；设置页保存后即时更新）
   const allowedOriginsRef: { value: string[] } = { value: config.allowedOrigins ?? [] }
+  // 当前请求的 Origin（每个请求开始时设置，供 sendJson/OPTIONS 动态匹配 CORS）
+  const reqOriginRef: { value: string | null } = { value: null }
 
   /** 路由共享上下文（不可变装配，运行态通过 Map/引用对象共享）。 */
   const routeCtx: RouteContext = {
@@ -270,11 +279,14 @@ export async function startApiServer(ctx: CliContext, opts: ApiServerOptions): P
     installTasks,
     marketCache,
     allowedOrigins: allowedOriginsRef,
+    get reqOrigin() {
+      return reqOriginRef.value
+    },
     sendJson(res, status, data) {
       const body = JSON.stringify(data)
       res.writeHead(status, {
         'Content-Type': 'application/json; charset=utf-8',
-        ...corsHeaders(allowedOriginsRef.value),
+        ...corsHeaders(allowedOriginsRef.value, reqOriginRef.value),
         ...securityHeaders(),
       })
       res.end(body)
@@ -303,11 +315,13 @@ export async function startApiServer(ctx: CliContext, opts: ApiServerOptions): P
     const url = new URL(req.url ?? '/', 'http://localhost')
     const pathname = url.pathname
     const method = req.method ?? 'GET'
+    // 记录当前请求的 Origin（跨域 CORS 匹配用）
+    reqOriginRef.value = req.headers.origin ?? null
 
-    // CORS 预检（仅对配置了允许来源时放行；同源场景直接 204）
+    // CORS 预检（Origin 在白名单内才放行；同源请求无 Origin 头，直接 204）
     if (method === 'OPTIONS') {
       res.writeHead(204, {
-        ...corsHeaders(allowedOriginsRef.value),
+        ...corsHeaders(allowedOriginsRef.value, reqOriginRef.value),
         ...securityHeaders(),
       })
       return res.end()

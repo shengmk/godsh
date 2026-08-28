@@ -40,3 +40,9 @@ smoke-*.txt
 sm.txt
 sme.txt
 sm*.txt
+
+# NSIS 副产物目录
+release/*-x64/
+
+f1.txt
+f2.txt

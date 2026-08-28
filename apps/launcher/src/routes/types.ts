@@ -78,6 +78,8 @@ export interface RouteContext {
   allowedOrigins: { value: string[] }
 
   sendJson: (res: http.ServerResponse, status: number, data: unknown) => void
+  /** 当前请求的 Origin（CORS 动态匹配用；同源请求为 null） */
+  readonly reqOrigin: string | null
   persistRuntime: () => void
   ensureUnifiedKernel: (profile: string) => void
   resolveDshBin: (profile?: string) => string | undefined

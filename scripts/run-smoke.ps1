@@ -12,7 +12,7 @@ $scripts = @('_smoke-v021.ps1', '_smoke-a-group.ps1', '_smoke-c-group.ps1', '_sm
 $failed = $false
 
 # 预清理：杀掉可能残留的测试 server（避免端口被占导致误判）
-$ports = @(48231, 48299, 48321, 47896, 47902)
+$ports = @(48231, 48329, 48321, 47896, 47902)
 $lines = netstat -ano -p tcp | Select-String 'LISTENING'
 foreach ($line in $lines) {
     foreach ($port in $ports) {

@@ -8,7 +8,9 @@ const DEFAULT_CONFIG: LauncherConfig = {
   runtime: { node: 'node', pnpm: 'pnpm' },
   webKernel: { defaultTemplateId: 'web-default', defaultPort: 3080 },
   pluginMarket: { enabled: true, indexUrl: 'https://awesome-dsh-plugin.com/plugins.json' },
-  allowedOrigins: [],
+  // 默认白名单必须包含 Tauri 桌面端来源（前端在 tauri.localhost，API 在 127.0.0.1:4780，属跨域）。
+  // 同源 Web 场景不受影响（同源请求不校验 Origin）。用户可在设置中追加其它来源。
+  allowedOrigins: ['http://tauri.localhost', 'https://tauri.localhost', 'tauri://localhost', 'http://localhost'],
   dataDir: './data',
 }
 
@@ -60,7 +62,10 @@ export class ConfigStore {
       runtime: { ...DEFAULT_CONFIG.runtime, ...cfg.runtime },
       webKernel: { ...DEFAULT_CONFIG.webKernel, ...cfg.webKernel },
       pluginMarket: { ...DEFAULT_CONFIG.pluginMarket, ...cfg.pluginMarket },
-      allowedOrigins: Array.isArray(cfg.allowedOrigins) ? cfg.allowedOrigins.filter((x): x is string => typeof x === 'string') : [],
+      // 用户未配置时回退默认白名单（必须含 Tauri 桌面端来源，否则前端跨域请求被浏览器拦截 → failed to fetch）
+      allowedOrigins: Array.isArray(cfg.allowedOrigins)
+        ? cfg.allowedOrigins.filter((x): x is string => typeof x === 'string')
+        : DEFAULT_CONFIG.allowedOrigins,
     }
   }
 
