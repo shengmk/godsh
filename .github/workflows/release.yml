@@ -1,0 +1,48 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9
+
+      - name: Install Rust (GNU/MinGW)
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-pc-windows-gnu
+
+      - name: Install deps
+        run: pnpm install --ignore-scripts
+
+      - name: Typecheck & unit tests
+        run: |
+          pnpm typecheck
+          pnpm test
+
+      - name: Build & package
+        shell: pwsh
+        run: |
+          $v = "${{ github.ref_name }}".TrimStart('v')
+          pwsh -File scripts/make-release.ps1 -Version $v
+
+      - name: Upload Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            release/godsh-*.exe
+            release/godsh-*.zip
+            release/SHA256SUMS.txt
+          draft: true

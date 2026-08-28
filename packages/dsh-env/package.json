@@ -1,0 +1,15 @@
+{
+    "name":  "@godsh/dsh-env",
+    "version":  "0.2.5",
+    "private":  true,
+    "type":  "module",
+    "description":  "godsh DSH 环境（base + 并列环境）管理",
+    "exports":  {
+                    ".":  "./src/index.ts"
+                },
+    "main":  "./src/index.ts",
+    "dependencies":  {
+                         "@godsh/core":  "workspace:*",
+                         "@godsh/profile-manager":  "workspace:*"
+                     }
+}

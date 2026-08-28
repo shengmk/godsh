@@ -1,0 +1,11 @@
+{
+  "id": "web-default",
+  "type": "web",
+  "name": "统一 Web 内核默认模板",
+  "entry": "index.html",
+  "defaultPort": 38080,
+  "resource": {
+    "memoryMB": 512,
+    "cpu": 1
+  }
+}

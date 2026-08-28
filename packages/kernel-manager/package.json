@@ -1,0 +1,15 @@
+{
+    "name":  "@godsh/kernel-manager",
+    "version":  "0.2.5",
+    "private":  true,
+    "type":  "module",
+    "description":  "godsh 内核模板与实例管理",
+    "exports":  {
+                    ".":  "./src/index.ts"
+                },
+    "main":  "./src/index.ts",
+    "dependencies":  {
+                         "@godsh/core":  "workspace:*",
+                         "@godsh/profile-manager":  "workspace:*"
+                     }
+}
