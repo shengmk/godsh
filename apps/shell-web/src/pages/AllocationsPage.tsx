@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { api } from '../api'
 import type { Allocation, AvailablePlugin, ProfileView } from '../types'
 import { ContextMenu, Toast, type MenuState } from '../components'
@@ -12,6 +12,8 @@ type ListItem =
 
 const KEY_PREFIX_ALLOC = 'alloc:'
 const KEY_PREFIX_AVAIL = 'avail:'
+/** 拖拽启动阈值（px）：超过才视为拖拽，避免误触点击 */
+const DRAG_THRESHOLD = 5
 
 function itemKey(item: ListItem): string {
   // 可用插件 key 含源环境（bundle/dep），避免同名插件在多个环境时解析歧义
@@ -20,15 +22,27 @@ function itemKey(item: ListItem): string {
     : `${KEY_PREFIX_AVAIL}${item.avail.source === 'bundle' ? 'bundle' : 'dep'}:${item.avail.pluginId}`
 }
 
+interface DragState {
+  key: string
+  startX: number
+  startY: number
+  x: number
+  y: number
+  active: boolean
+  /** 当前悬停的环境面板名 */
+  overProfile: string | null
+  /** 当前悬停的插入目标行 key */
+  overKey: string | null
+}
+
 export default function AllocationsPage() {
   const [profiles, setProfiles] = useState<ProfileView[]>([])
   const [allocations, setAllocations] = useState<Allocation[]>([])
   const [available, setAvailable] = useState<Record<string, AvailablePlugin[]>>({})
   const [expanded, setExpanded] = useState<Set<string>>(new Set())
-  const [draggedKey, setDraggedKey] = useState<string | null>(null)
-  const [dragOverProfile, setDragOverProfile] = useState<string | null>(null)
-  const [dropTargetKey, setDropTargetKey] = useState<string | null>(null)
+  const [drag, setDrag] = useState<DragState | null>(null)
   const [menu, setMenu] = useState<MenuState | null>(null)
+  const dragRef = useRef<DragState | null>(null)
   const { toast, show } = useToast()
   const { t } = useI18n()
 
@@ -67,7 +81,7 @@ export default function AllocationsPage() {
     return m
   }, [available])
 
-  // 每个环境的统一列表：已分配在前，可用插件在后（拖拽操作由 handler 按 kind 分派）
+  // 每个环境的统一列表：已分配在前，可用插件在后
   function unifiedList(profile: string): ListItem[] {
     const allocs = byProfile[profile] ?? []
     const avails = addable[profile] ?? []
@@ -86,7 +100,7 @@ export default function AllocationsPage() {
     })
   }
 
-  // 解析拖拽源 key（可用插件 key 格式：avail:<source>:<pluginId>）
+  /** 解析拖拽源 key（可用插件 key 格式：avail:<source>:<pluginId>） */
   function parseKey(key: string): { kind: 'alloc' | 'avail'; id: string; profile: string } | null {
     if (key.startsWith(KEY_PREFIX_ALLOC)) {
       const id = key.slice(KEY_PREFIX_ALLOC.length)
@@ -107,100 +121,184 @@ export default function AllocationsPage() {
   }
 
   /** 跨环境拖放：已分配卡片 → moveAllocation；可用插件 → 目标已安装才分配。 */
-  async function handleCrossProfileDrop(src: { kind: 'alloc' | 'avail'; id: string; profile: string }, targetProfile: string) {
-    if (src.kind === 'alloc') {
-      try {
-        const moved = await api.moveAllocation(src.id, targetProfile)
-        show(`已把 ${moved.pluginId} 从 ${src.profile} 移动到 ${targetProfile}`)
-        await load()
-      } catch (e) {
-        show(e instanceof Error ? e.message : String(e), true)
-        await load()
-      }
-      return
-    }
-    // 可用插件跨环境：目标环境必须已安装该插件（dependencies ∪ bundles）
-    const target = profiles.find((x) => x.name === targetProfile)
-    const installed = target ? [...target.bundles, ...Object.keys(target.dependencies)] : []
-    if (!installed.includes(src.id)) {
-      show(`目标环境 ${targetProfile} 未安装 ${src.id}，请先在「插件市场」安装`, true)
-      return
-    }
-    try {
-      await api.allocate(targetProfile, src.id, src.id, true)
-      show(`已分配 ${src.id} → ${targetProfile}`)
-      await load()
-    } catch (e) {
-      show(e instanceof Error ? e.message : String(e), true)
-      await load()
-    }
-  }
-
-  /** 拖放统一处理：同环境排序/分配；跨环境移动/分配。sourceKey 从 dataTransfer 读取，不依赖 state。 */
-  async function handleDropOnList(profile: string, targetKey: string | null, sourceKey: string) {
-    const src = sourceKey ? parseKey(sourceKey) : null
-    if (!src) return
-    // 跨环境：源环境 ≠ 目标环境
-    if (src.profile !== profile) {
-      await handleCrossProfileDrop(src, profile)
-      return
-    }
-    const list = unifiedList(profile)
-
-    // 可用插件 → 拖到已分配卡片上（含末尾空白）＝ 分配并插入该位置
-    if (src.kind === 'avail') {
-      const availItem = list.find((i) => i.kind === 'avail' && i.avail.pluginId === src.id)
-      if (!availItem || availItem.kind !== 'avail') return
-      try {
-        await api.allocate(profile, availItem.avail.pluginId, availItem.avail.pluginId, true)
-        await load()
-        show(`已分配 ${availItem.avail.pluginId} → ${profile}`)
-      } catch (e) {
-        show(e instanceof Error ? e.message : String(e), true)
-        await load()
-      }
-      return
-    }
-
-    // 已分配卡片 → 排序（目标为某条目或末尾）
-    const allocIds = (byProfile[profile] ?? []).map((a) => a.id)
-    const from = allocIds.indexOf(src.id)
-    if (from < 0) return
-    let to = allocIds.length - 1 // 默认末尾
-    if (targetKey) {
-      const targetIdx = list.findIndex((i) => itemKey(i) === targetKey)
-      // 目标条目若为可用插件，则插入到它前面的已分配位置
-      if (targetIdx >= 0) {
-        let allocIdx = -1
-        for (let i = targetIdx; i >= 0; i--) {
-          if (list[i]!.kind === 'alloc') {
-            allocIdx = allocIds.indexOf((list[i] as { alloc: Allocation }).alloc.id)
-            break
-          }
+  const handleCrossProfileDrop = useCallback(
+    async (src: { kind: 'alloc' | 'avail'; id: string; profile: string }, targetProfile: string) => {
+      if (src.kind === 'alloc') {
+        try {
+          const moved = await api.moveAllocation(src.id, targetProfile)
+          show(`已把 ${moved.pluginId} 从 ${src.profile} 移动到 ${targetProfile}`)
+          await load()
+        } catch (e) {
+          show(e instanceof Error ? e.message : String(e), true)
+          await load()
         }
-        to = allocIdx >= 0 ? allocIdx : 0
+        return
       }
+      // 可用插件跨环境：目标环境必须已安装该插件（dependencies ∪ bundles）
+      const target = profiles.find((x) => x.name === targetProfile)
+      const installed = target ? [...target.bundles, ...Object.keys(target.dependencies)] : []
+      if (!installed.includes(src.id)) {
+        show(`目标环境 ${targetProfile} 未安装 ${src.id}，请先在「插件市场」安装`, true)
+        return
+      }
+      try {
+        await api.allocate(targetProfile, src.id, src.id, true)
+        show(`已分配 ${src.id} → ${targetProfile}`)
+        await load()
+      } catch (e) {
+        show(e instanceof Error ? e.message : String(e), true)
+        await load()
+      }
+    },
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [profiles, allocations, available],
+  )
+
+  /** 拖放统一处理：同环境排序/分配；跨环境移动/分配。 */
+  const handleDrop = useCallback(
+    async (profile: string, targetKey: string | null, sourceKey: string) => {
+      const src = sourceKey ? parseKey(sourceKey) : null
+      if (!src) return
+      // 跨环境：源环境 ≠ 目标环境
+      if (src.profile !== profile) {
+        await handleCrossProfileDrop(src, profile)
+        return
+      }
+      const list = unifiedList(profile)
+
+      // 可用插件 → 拖到已分配卡片上（含末尾空白）＝ 分配并插入该位置
+      if (src.kind === 'avail') {
+        const availItem = list.find((i) => i.kind === 'avail' && i.avail.pluginId === src.id)
+        if (!availItem || availItem.kind !== 'avail') return
+        try {
+          await api.allocate(profile, availItem.avail.pluginId, availItem.avail.pluginId, true)
+          await load()
+          show(`已分配 ${availItem.avail.pluginId} → ${profile}`)
+        } catch (e) {
+          show(e instanceof Error ? e.message : String(e), true)
+          await load()
+        }
+        return
+      }
+
+      // 已分配卡片 → 排序（目标为某条目或末尾）
+      const allocIds = (byProfile[profile] ?? []).map((a) => a.id)
+      const from = allocIds.indexOf(src.id)
+      if (from < 0) return
+      let to = allocIds.length - 1 // 默认末尾
+      if (targetKey) {
+        const targetIdx = list.findIndex((i) => itemKey(i) === targetKey)
+        if (targetIdx >= 0) {
+          let allocIdx = -1
+          for (let i = targetIdx; i >= 0; i--) {
+            if (list[i]!.kind === 'alloc') {
+              allocIdx = allocIds.indexOf((list[i] as { alloc: Allocation }).alloc.id)
+              break
+            }
+          }
+          to = allocIdx >= 0 ? allocIdx : 0
+        }
+      }
+      if (from === to) return
+      allocIds.splice(from, 1)
+      allocIds.splice(to, 0, src.id)
+      setAllocations((prev) => {
+        const byId = new Map(prev.map((a) => [a.id, a]))
+        const reordered = allocIds
+          .map((id, i) => {
+            const a = byId.get(id)
+            return a ? { ...a, order: i } : null
+          })
+          .filter((a): a is Allocation => a !== null)
+        return [...prev.filter((a) => a.profile !== profile), ...reordered]
+      })
+      try {
+        await api.reorderAllocations(profile, allocIds)
+      } catch (e) {
+        show(e instanceof Error ? e.message : String(e), true)
+        await load()
+      }
+    },
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [allocations, available, profiles],
+  )
+
+  // ---------- Pointer Events 拖拽引擎（绕开浏览器原生 DnD，WebView2 兼容） ----------
+
+  const dragCancel = useCallback(() => {
+    dragRef.current = null
+    setDrag(null)
+  }, [])
+
+  const dragEnd = useCallback(
+    async (overProfile: string | null, overKey: string | null) => {
+      const d = dragRef.current
+      dragRef.current = null
+      setDrag(null)
+      if (!d || !d.active || !overProfile) return
+      await handleDrop(overProfile, overKey, d.key)
+    },
+    [handleDrop],
+  )
+
+  const onRowPointerDown = useCallback((e: React.PointerEvent, key: string) => {
+    // 点按按钮/链接时不启动拖拽
+    const target = e.target as HTMLElement
+    if (target.closest('button') || target.closest('a')) return
+    e.preventDefault()
+    dragRef.current = { key, startX: e.clientX, startY: e.clientY, x: e.clientX, y: e.clientY, active: false, overProfile: null, overKey: null }
+  }, [])
+
+  useEffect(() => {
+    function onPointerMove(e: PointerEvent) {
+      const d = dragRef.current
+      if (!d) return
+      d.x = e.clientX
+      d.y = e.clientY
+      if (!d.active) {
+        if (Math.hypot(e.clientX - d.startX, e.clientY - d.startY) < DRAG_THRESHOLD) return
+        d.active = true
+      }
+      // 用 elementFromPoint 找当前悬停的目标（最近的 .alloc-row 或 .card 面板）
+      const el = document.elementFromPoint(e.clientX, e.clientY)
+      const row = el?.closest?.('.alloc-row') as HTMLElement | null
+      const panel = (row ?? el)?.closest?.('.card') as HTMLElement | null
+      const profileName = panel?.querySelector('strong')?.textContent?.trim() ?? null
+      d.overProfile = profileName
+      d.overKey = row?.dataset?.key ?? null
+      setDrag({ ...d })
+      // 拖拽中禁用文本选择/光标
+      document.body.style.userSelect = 'none'
     }
-    if (from === to) return
-    allocIds.splice(from, 1)
-    allocIds.splice(to, 0, src.id)
-    setAllocations((prev) => {
-      const byId = new Map(prev.map((a) => [a.id, a]))
-      const reordered = allocIds
-        .map((id, i) => {
-          const a = byId.get(id)
-          return a ? { ...a, order: i } : null
-        })
-        .filter((a): a is Allocation => a !== null)
-      return [...prev.filter((a) => a.profile !== profile), ...reordered]
-    })
-    try {
-      await api.reorderAllocations(profile, allocIds)
-    } catch (e) {
-      show(e instanceof Error ? e.message : String(e), true)
-      await load()
+    function onPointerUp() {
+      const d = dragRef.current
+      if (!d) return
+      document.body.style.userSelect = ''
+      void dragEnd(d.overProfile, d.overKey)
     }
-  }
+    function onPointerCancel() {
+      document.body.style.userSelect = ''
+      dragCancel()
+    }
+    window.addEventListener('pointermove', onPointerMove)
+    window.addEventListener('pointerup', onPointerUp)
+    window.addEventListener('pointercancel', onPointerCancel)
+    return () => {
+      window.removeEventListener('pointermove', onPointerMove)
+      window.removeEventListener('pointerup', onPointerUp)
+      window.removeEventListener('pointercancel', onPointerCancel)
+    }
+  }, [dragEnd, dragCancel])
+
+  // 被拖动的条目显示名（用于跟手提示）
+  const dragLabel = useMemo(() => {
+    if (!drag || !drag.active) return null
+    const src = parseKey(drag.key)
+    if (!src) return drag.key
+    return src.id
+  }, [drag])
+
+  // ---------- 行内操作 ----------
 
   async function move(a: Allocation, delta: number) {
     const list = byProfile[a.profile] ?? []
@@ -294,7 +392,7 @@ export default function AllocationsPage() {
       <div className="page-head">
         <h1 className="page-title">{t('page.allocations.title')}</h1>
         <p className="page-desc">
-          {t('page.allocations.desc')} · 变更自动写回 cordis.patch.yml · 本环境内所有插件均可拖动排序
+          {t('page.allocations.desc')} · 变更自动写回 cordis.patch.yml · 按住插件行可拖动排序 / 移动到其它环境
         </p>
       </div>
 
@@ -304,7 +402,7 @@ export default function AllocationsPage() {
         </span>
         <span className="spacer" />
         <span className="muted" style={{ fontSize: 12 }}>
-          💡 插件可拖动：本环境内排序；拖到其它环境面板 = 移动分配（可用插件需目标环境已安装）
+          💡 按住插件行拖到其它环境面板 = 移动分配（可用插件需目标环境已安装）；本环境内拖动 = 排序
         </span>
         <button className="btn sm" onClick={() => load()}>
           刷新
@@ -319,26 +417,12 @@ export default function AllocationsPage() {
           const allocCount = (byProfile[p.name] ?? []).length
           const availCount = (addable[p.name] ?? []).length
           const isOpen = expanded.has(p.name)
-          const isOver = dragOverProfile === p.name
+          const isOver = drag?.active && drag.overProfile === p.name
           return (
             <div
               className={`card${isOver ? ' drop-target' : ''}`}
               key={p.name}
               style={{ marginBottom: 12 }}
-              // 本环境面板是统一的拖放目标：同环境排序 / 跨环境移动（已分配）或分配（可用插件）
-              onDragOver={(e) => {
-                e.preventDefault()
-                setDragOverProfile(p.name)
-              }}
-              onDragLeave={() => setDragOverProfile((prev) => (prev === p.name ? null : prev))}
-              onDrop={(e) => {
-                e.preventDefault()
-                e.stopPropagation()
-                setDragOverProfile(null)
-                setDropTargetKey(null)
-                const sourceKey = e.dataTransfer.getData('text/plain')
-                void handleDropOnList(p.name, null, sourceKey)
-              }}
             >
               <div
                 className="row"
@@ -366,44 +450,25 @@ export default function AllocationsPage() {
                     </p>
                   )}
 
-                  {/* 统一插件列表：已分配卡片 + 可用插件，全部可拖拽（仅本环境内） */}
+                  {/* 统一插件列表：已分配卡片 + 可用插件，全部可拖动 */}
                   <div className="alloc-list">
                     {list.map((item) => {
                       const key = itemKey(item)
                       const isAlloc = item.kind === 'alloc'
                       const a = isAlloc ? item.alloc : null
                       const av = !isAlloc ? item.avail : null
+                      const isDragging = drag?.active && drag.key === key
+                      const isDropLine = drag?.active && drag.overKey === key
                       return (
                         <div
-                          className={`alloc-row${draggedKey === key ? ' dragging' : ''}${dropTargetKey === key ? ' drop-line' : ''}`}
+                          className={`alloc-row${isDragging ? ' dragging' : ''}${isDropLine ? ' drop-line' : ''}`}
                           key={key}
-                          draggable
-                          onDragStart={(e) => {
-                            setDraggedKey(key)
-                            // 关键修复：必须 setData，否则 Chromium/WebView2 不启动拖拽
-                            e.dataTransfer.setData('text/plain', key)
-                            e.dataTransfer.effectAllowed = 'move'
-                          }}
-                          onDragOver={(e) => {
-                            e.preventDefault()
-                            e.stopPropagation()
-                            setDropTargetKey(key)
-                          }}
-                          onDragLeave={() => setDropTargetKey((prev) => (prev === key ? null : prev))}
-                          onDrop={(e) => {
-                            e.preventDefault()
-                            e.stopPropagation()
-                            setDropTargetKey(null)
-                            const sourceKey = e.dataTransfer.getData('text/plain')
-                            void handleDropOnList(p.name, key, sourceKey)
-                          }}
-                          onDragEnd={() => {
-                            setDraggedKey(null)
-                            setDropTargetKey(null)
-                          }}
+                          data-key={key}
+                          style={{ cursor: 'grab' }}
+                          onPointerDown={(e) => onRowPointerDown(e, key)}
                           onContextMenu={(e) => (isAlloc && a ? onContextAlloc(a, e) : av ? onContextAvail(p.name, av, e) : undefined)}
                         >
-                          <span className="drag-grip" title="拖动排序">⠿</span>
+                          <span className="drag-grip" title="按住拖动">⠿</span>
                           {isAlloc && a ? (
                             <>
                               <span style={{ fontFamily: 'Consolas, monospace' }}>{a.pluginId}</span>
@@ -450,6 +515,13 @@ export default function AllocationsPage() {
             </div>
           )
         })
+      )}
+
+      {/* 跟手拖拽提示 */}
+      {drag && drag.active && dragLabel && (
+        <div className="drag-ghost" style={{ left: drag.x + 12, top: drag.y + 12 }}>
+          <span className="drag-grip">⠿</span> {dragLabel}
+        </div>
       )}
 
       {toast && <Toast text={toast.text} error={toast.error} />}

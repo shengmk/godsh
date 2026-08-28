@@ -938,3 +938,23 @@ body {
   cursor: grab;
   flex-shrink: 0;
 }
+
+/* 跟手拖拽提示 */
+.drag-ghost {
+  position: fixed;
+  z-index: 300;
+  pointer-events: none;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  border-radius: var(--radius-sm);
+  background: var(--surface-menu);
+  border: 1px solid var(--brand-2);
+  box-shadow: var(--shadow-strong);
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+}

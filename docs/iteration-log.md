@@ -95,7 +95,30 @@
 ### 下一步
 - 交付 0.2.4 验收。
 
-------------
+## [2026-08-28] v0.2.4 终修：跨环境拖拽改用 Pointer Events（真实鼠标可用）
+
+### 问题（用户二次反馈）
+- 原生 HTML5 拖拽（draggable + dragstart/drop）在 WebView2 下：程序化 dispatchEvent 有效，
+  但真实鼠标拖拽中 drop 事件不触发（CDP 实测仅有 dragstart + 一次 dragover，无 drop）。
+- 根因：WebView2 对原生 DnD 的 drop 目标判定不稳定。
+
+### 修复
+- 彻底改用 **Pointer Events 自研拖拽引擎**（pointerdown → pointermove → pointerup）：
+  - 行条目 onPointerDown 记录拖拽源；window pointermove 超过 5px 阈值激活拖拽；
+  - elementFromPoint 实时判定悬停环境面板与插入目标行；
+  - pointerup 执行统一 handleDrop（同环境排序 / 跨环境移动 / 可用插件分配）；
+  - 跟手拖拽提示（.drag-ghost）与插入位置线（.drop-line）。
+- 完全移除 draggable/onDragStart/onDrop 原生 DnD 依赖。
+
+### 验证（真实鼠标 CDP Input.dispatchMouseEvent）
+- 按下 plugin_bag 的 dsh-memory 已分配行 → 分步移动 → 松开于 desktop 面板：
+  desktop 出现 dsh-memory 分配卡片、plugin_bag 移除（分配关系转移 + patch 双向写回）。
+- 单测 20/20、冒烟 6 组全绿、typecheck / build 全过；桌面端重新打包。
+
+### 下一步
+- 交付 0.2.4 验收。
+
+---------------
 
 ## [2026-08-20] 初始化 dsh Launcher 项目
 
