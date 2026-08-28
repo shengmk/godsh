@@ -74,6 +74,16 @@ function errorLabel(r: { errorType?: string; message?: string; stderr?: string }
   return msg ? `${label}：${msg}` : label
 }
 
+/**
+ * 真实安装包名：市场索引的 `name`（展示名）≠ npm 包名。
+ * 例如 name='dsh-memory'，npm='@furongjun1999/dsh-memory'——必须用 npm 字段才能装。
+ * 返回 p.npm（真实包名）优先，无 npm 字段时回退 name（部分插件 npm 字段为空，可能是同名词或需 tarball）。
+ */
+function pkgName(p: MarketPlugin): string {
+  if (typeof p.npm === 'string' && p.npm.trim()) return p.npm.trim()
+  return p.name
+}
+
 type SortBy = 'default' | 'hot' | 'latest'
 
 interface QueueItem {
@@ -157,13 +167,13 @@ export default function MarketPage() {
     return list
   }, [plugins, sortBy])
 
-  async function install(name: string) {
+  async function install(pkg: string, display: string) {
     if (!profile) return show('请先选择目标 Profile', true)
-    setInstalling(name)
+    setInstalling(pkg)
     try {
-      const r = await api.installPlugin(profile, 'add', name)
+      const r = await api.installPlugin(profile, 'add', pkg)
       if (r.ok) {
-        show(`已安装 ${name} → ${profile}`)
+        show(`已安装 ${display} → ${profile}`)
         await refreshInstalled()
       } else {
         show(errorLabel(r), true)
@@ -175,14 +185,14 @@ export default function MarketPage() {
     }
   }
 
-  async function remove(name: string) {
+  async function remove(pkg: string, display: string) {
     if (!profile) return show('请先选择目标 Profile', true)
-    if (!window.confirm(`确定从 ${profile} 卸载 ${name}？`)) return
-    setInstalling(name)
+    if (!window.confirm(`确定从 ${profile} 卸载 ${display}？`)) return
+    setInstalling(pkg)
     try {
-      const r = await api.installPlugin(profile, 'remove', name)
+      const r = await api.installPlugin(profile, 'remove', pkg)
       if (r.ok) {
-        show(`已卸载 ${name}`)
+        show(`已卸载 ${display}`)
         await refreshInstalled()
       } else {
         show(errorLabel(r), true)
@@ -194,13 +204,13 @@ export default function MarketPage() {
     }
   }
 
-  async function update(name: string) {
+  async function update(pkg: string, display: string) {
     if (!profile) return show('请先选择目标 Profile', true)
-    setInstalling(name)
+    setInstalling(pkg)
     try {
-      const r = await api.installPlugin(profile, 'update', name)
+      const r = await api.installPlugin(profile, 'update', pkg)
       if (r.ok) {
-        show(`已更新 ${name}`)
+        show(`已更新 ${display}`)
         await refreshInstalled()
       } else {
         show(errorLabel(r), true)
@@ -317,26 +327,28 @@ export default function MarketPage() {
         <>
           <div className="muted" style={{ marginBottom: 8, fontSize: 12 }}>
             共 {sortedPlugins.length} 个插件 · 已显示 {Math.min(visibleCount, sortedPlugins.length)} · 可选{' '}
-            {sortedPlugins.filter((p) => !installedNames.includes(p.name)).length} · 已选 {selectedCount}
+            {sortedPlugins.filter((p) => !installedNames.includes(pkgName(p))).length} · 已选 {selectedCount}
           </div>
           <div className="grid">
             {sortedPlugins.slice(0, visibleCount).map((p) => {
-              const installed = installedNames.includes(p.name)
-              const isSelected = selected.has(p.name)
+              const pkg = pkgName(p)
+              const installed = installedNames.includes(pkg)
+              const isSelected = selected.has(pkg)
               return (
-                <div className={`card${isSelected ? ' selected' : ''}`} key={p.name}>
+                <div className={`card${isSelected ? ' selected' : ''}`} key={pkg}>
                   <div className="card-title">
                     <label className="checkbox-wrap" onClick={(e) => e.stopPropagation()}>
                       <input
                         type="checkbox"
                         checked={isSelected}
-                        onChange={() => toggleSelect(p.name)}
+                        onChange={() => toggleSelect(pkg)}
                         disabled={installed}
                         title={installed ? '已安装的插件无需再次选择' : '勾选后可批量安装'}
                       />
                       <span className="checkbox-label">{isSelected ? '已选' : '选择'}</span>
                     </label>
                     {p.name}
+                    {p.npm && p.npm !== p.name ? <span className="badge kind">{p.npm}</span> : null}
                     {p.version ? <span className="badge kind">v{p.version}</span> : null}
                     {installed && <span className="badge enabled">已安装</span>}
                   </div>
@@ -351,27 +363,23 @@ export default function MarketPage() {
                   <div className="row" style={{ marginTop: 10 }}>
                     {installed ? (
                       <>
-                        <button className="btn sm" disabled={installing === p.name} onClick={() => update(p.name)}>
-                          {installing === p.name ? '处理中…' : '更新'}
+                        <button className="btn sm" disabled={installing === pkg} onClick={() => update(pkg, p.name)}>
+                          {installing === pkg ? '处理中…' : '更新'}
                         </button>
-                        <button
-                          className="btn danger sm"
-                          disabled={installing === p.name}
-                          onClick={() => remove(p.name)}
-                        >
+                        <button className="btn danger sm" disabled={installing === pkg} onClick={() => remove(pkg, p.name)}>
                           卸载
                         </button>
                       </>
                     ) : (
                       <>
-                        <button className="btn primary sm" disabled={installing === p.name} onClick={() => install(p.name)}>
-                          {installing === p.name ? '安装中…' : '安装'}
+                        <button className="btn primary sm" disabled={installing === pkg} onClick={() => install(pkg, p.name)}>
+                          {installing === pkg ? '安装中…' : '安装'}
                         </button>
                         <button
                           className="btn sm"
-                          disabled={installing === p.name}
+                          disabled={installing === pkg}
                           onClick={() => {
-                            toggleSelect(p.name)
+                            toggleSelect(pkg)
                             show(isSelected ? '已取消选择' : '已加入批量安装队列')
                           }}
                         >

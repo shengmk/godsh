@@ -73,6 +73,8 @@ export interface MarketPlugin {
   homepage?: string
   repository?: string
   tags?: string[]
+  /** 真实 npm 包名（name 是展示名，可能 ≠ npm；安装必须用 npm 字段） */
+  npm?: string
   [key: string]: unknown
 }
 

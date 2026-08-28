@@ -6,14 +6,18 @@ dsh 环境配置启动器（Anaconda Navigator 类比）—— 管理 DeepSeek H
 
 | 文件 | 说明 |
 | --- | --- |
-| `dsh-launcher-0.2.4-x64-setup.exe` | Windows 安装器（NSIS，安装到 `%LOCALAPPDATA%\dsh-launcher`） |
-| `dsh-launcher-0.2.4-x64.zip` | 便携版（解压后双击 `dsh-launcher.exe` 即可） |
+| `dsh-launcher-0.2.5-x64-setup.exe` | Windows 安装器（NSIS，安装到 `%LOCALAPPDATA%\dsh-launcher`） |
+| `dsh-launcher-0.2.5-x64.zip` | 便携版（解压后双击 `dsh-launcher.exe` 即可） |
 
 校验和见同目录 `SHA256SUMS.txt`。
 
 ## v0.2.5 新增与修复
 
-- **插件市场下载修复**：安装/更新/卸载加 180s 超时（不再无限挂起）；错误分类提示（网络/包不存在/来源拒绝/依赖冲突/超时）；失败日志落盘可查。
+- **插件市场下载修复（根因确认）**：
+  - 旧版桌面端跨域请求被 CORS 白名单拦截 → 市场列表/安装全部失败；v0.2.5 已放行 `tauri.localhost` 等桌面来源，实测 `Access-Control-Allow-Origin` 正确返回。
+  - 安装/更新/卸载加 180s 超时（不再无限挂起）；错误分类提示（网络/包不存在/来源拒绝/依赖冲突/超时）；失败日志落盘可查。
+  - **包名匹配修复**：市场索引 `name` 与真实 npm 包名（`npm` 字段）不一致的插件（如 `dsh-memory` ↔ `@furongjun1999/dsh-memory`）现在以 npm 字段安装与检测已安装状态，不再出现“装了但显示未装”。
+  - 端到端实测通过：市场列表 ✓ / 已安装状态 ✓ / 安装返回成功 ✓ / CORS ✓。
 - **批量选择扩容**：列表分批渲染（初始 60 + 加载更多，全量 2467 个可浏览）；可选/已选计数显示。
 - **更新反馈完善**：DSH base 更新完成/失败 Toast；任务状态变化明确提示。
 - **性能优化**：
