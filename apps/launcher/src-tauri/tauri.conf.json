@@ -1,7 +1,7 @@
 {
     "$schema":  "../node_modules/@tauri-apps/cli/config.schema.json",
     "productName":  "dsh Launcher",
-    "version":  "0.2.4",
+    "version":  "0.2.5",
     "identifier":  "com.dshlauncher.app",
     "build":  {
                   "frontendDist":  "../../shell-web/dist",

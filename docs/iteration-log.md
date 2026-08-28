@@ -133,7 +133,34 @@
 ### 结果
 - typecheck / 单测 20/20 / 冒烟 6 组全绿；桌面端重新打包。
 
-------------------
+## [2026-08-28] v0.2.5：市场下载修复 + 批量扩容 + 更新反馈 + 性能优化
+
+### 目标
+- 修复市场不能下载（超时/无日志/错误不明确）。
+- 批量选择扩容（去 200 截断，分批渲染）。
+- 更新进度与成功/失败提示。
+- 性能优化（扫描/市场缓存、轮询降频、防抖）。
+
+### 改动
+- D1-D4：pluginAction 180s 超时；安装日志落盘 data/logs/plugin-*.log；classifyPluginError 错误归类（network/not-found/auth/version/deps/timeout/policy/other）。
+- D5：前端 errorLabel 展示错误类型 + 原因。
+- B1/B4：市场分批渲染（60 + 加载更多）+ 可选/已选计数。
+- U5-U7：DSH 更新完成/失败 Toast（任务状态变化检测）。
+- P1：scanProfiles 1s TTL + 目录 mtime 签名缓存；分配/统一内核/profile-editor 写回点 invalidateProfileCache。
+- P2：市场索引本地缓存 data/cache/market.json（7 天 + 损坏回退）。
+- P4：日志轮询 2s→3s；全局搜索防抖 300ms；Dashboard 后台页暂停轮询。
+- P5：findDshInstances 版本探测缓存 10s。
+- 版本 0.2.4 → 0.2.5。
+
+### 结果 / 状态（实测）
+- typecheck / build:server / build:web 全过；单测 20/20；冒烟 6 组全绿（scan 缓存未破坏分配/统一内核用例）。
+- 桌面端 0.2.5：health=0.2.5、跨域 200、前端 200。
+- release 只留 0.2.5（setup 4.32MB + zip 6.29MB + SHA256）。
+
+### 下一步
+- 运行验收：断网安装提示、10 个批量、更新结束 Toast、市场秒开。
+
+---------------------
 
 ## [2026-08-20] 初始化 dsh Launcher 项目
 

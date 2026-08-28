@@ -1,6 +1,6 @@
 {
     "name":  "@dsh-launcher/dsh-env",
-    "version":  "0.2.4",
+    "version":  "0.2.5",
     "private":  true,
     "type":  "module",
     "description":  "dsh Launcher DSH 环境（base + 并列环境）管理",

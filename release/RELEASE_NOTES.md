@@ -1,4 +1,4 @@
-# Release Notes — dsh Launcher v0.2.4
+# Release Notes — dsh Launcher v0.2.5
 
 dsh 环境配置启动器（Anaconda Navigator 类比）—— 管理 DeepSeek Harness 的 Profile 环境、插件分配、Web 内核与 DSH 本体版本。
 
@@ -10,6 +10,17 @@ dsh 环境配置启动器（Anaconda Navigator 类比）—— 管理 DeepSeek H
 | `dsh-launcher-0.2.4-x64.zip` | 便携版（解压后双击 `dsh-launcher.exe` 即可） |
 
 校验和见同目录 `SHA256SUMS.txt`。
+
+## v0.2.5 新增与修复
+
+- **插件市场下载修复**：安装/更新/卸载加 180s 超时（不再无限挂起）；错误分类提示（网络/包不存在/来源拒绝/依赖冲突/超时）；失败日志落盘可查。
+- **批量选择扩容**：列表分批渲染（初始 60 + 加载更多，全量 2467 个可浏览）；可选/已选计数显示。
+- **更新反馈完善**：DSH base 更新完成/失败 Toast；任务状态变化明确提示。
+- **性能优化**：
+  - Profile 扫描加内存缓存（1s TTL + mtime 校验）+ 写回点主动失效；
+  - 市场索引本地缓存 7 天（重启免下载，秒开）；
+  - 日志轮询 2s→3s、全局搜索防抖、后台标签页暂停轮询；
+  - dsh 版本探测缓存 10s。
 
 ## v0.2.4 新增与修复
 
