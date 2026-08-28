@@ -1,6 +1,6 @@
 {
     "name":  "@dsh-launcher/allocation",
-    "version":  "0.2.2",
+    "version":  "0.2.3",
     "private":  true,
     "type":  "module",
     "description":  "dsh Launcher 插件分配管理（Profile 级启用/禁用/顺序）",

@@ -1,6 +1,6 @@
 [package]
 name = "dsh-launcher"
-version = "0.2.2"
+version = "0.2.3"
 description = "dsh 环境配置启动器（Tauri 桌面壳）"
 authors = ["dsh-launcher"]
 license = ""

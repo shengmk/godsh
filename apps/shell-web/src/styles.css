@@ -897,3 +897,44 @@ body {
   outline-offset: 3px;
   background: rgba(56, 189, 248, 0.08);
 }
+
+/* ---------- 分配页：统一插件列表（已分配 + 可用，均可拖动） ---------- */
+.alloc-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.alloc-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  border-radius: var(--radius-sm);
+  background: var(--surface-soft);
+  border: 1px solid var(--surface-border);
+  cursor: grab;
+  transition: background 0.12s ease, transform 0.12s ease;
+}
+
+.alloc-row:hover {
+  background: var(--surface-hover);
+}
+
+.alloc-row.dragging {
+  opacity: 0.45;
+  outline: 2px dashed var(--brand-2);
+  outline-offset: 1px;
+}
+
+/* 拖拽插入位置指示线 */
+.alloc-row.drop-line {
+  border-top: 2px solid var(--brand-2);
+  border-top-left-radius: 0;
+  border-top-right-radius: 0;
+}
+
+.alloc-row .drag-grip {
+  cursor: grab;
+  flex-shrink: 0;
+}

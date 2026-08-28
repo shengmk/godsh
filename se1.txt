@@ -1,0 +1,1 @@
+$ powershell -ExecutionPolicy Bypass -File scripts/run-smoke.ps1

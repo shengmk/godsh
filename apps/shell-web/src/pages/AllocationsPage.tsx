@@ -5,17 +5,26 @@ import { ContextMenu, Toast, type MenuState } from '../components'
 import { useToast } from '../hooks'
 import { useI18n } from '../i18n'
 
+/** 统一列表条目：已分配卡片 或 可用插件 */
+type ListItem =
+  | { kind: 'alloc'; alloc: Allocation }
+  | { kind: 'avail'; avail: AvailablePlugin }
+
+const KEY_PREFIX_ALLOC = 'alloc:'
+const KEY_PREFIX_AVAIL = 'avail:'
+
+function itemKey(item: ListItem): string {
+  return item.kind === 'alloc' ? `${KEY_PREFIX_ALLOC}${item.alloc.id}` : `${KEY_PREFIX_AVAIL}${item.avail.pluginId}`
+}
+
 export default function AllocationsPage() {
   const [profiles, setProfiles] = useState<ProfileView[]>([])
   const [allocations, setAllocations] = useState<Allocation[]>([])
   const [available, setAvailable] = useState<Record<string, AvailablePlugin[]>>({})
   const [expanded, setExpanded] = useState<Set<string>>(new Set())
-  // 正在拖拽的分配关系（卡片）
-  const [draggedId, setDraggedId] = useState<string | null>(null)
-  const [draggedFrom, setDraggedFrom] = useState<string | null>(null)
-  // 正在拖拽的「可用插件」（拖入环境面板即新建分配）
-  const [draggedAvailable, setDraggedAvailable] = useState<{ pluginId: string; source: string } | null>(null)
+  const [draggedKey, setDraggedKey] = useState<string | null>(null)
   const [dragOverProfile, setDragOverProfile] = useState<string | null>(null)
+  const [dropTargetKey, setDropTargetKey] = useState<string | null>(null)
   const [menu, setMenu] = useState<MenuState | null>(null)
   const { toast, show } = useToast()
   const { t } = useI18n()
@@ -46,7 +55,7 @@ export default function AllocationsPage() {
     return m
   }, [allocations])
 
-  // profile → 已安装但未分配的插件（拖拽添加用）
+  // profile → 已安装但未分配的插件
   const addable = useMemo(() => {
     const m: Record<string, AvailablePlugin[]> = {}
     for (const [profile, items] of Object.entries(available)) {
@@ -54,6 +63,16 @@ export default function AllocationsPage() {
     }
     return m
   }, [available])
+
+  // 每个环境的统一列表：已分配在前，可用插件在后（拖拽操作由 handler 按 kind 分派）
+  function unifiedList(profile: string): ListItem[] {
+    const allocs = byProfile[profile] ?? []
+    const avails = addable[profile] ?? []
+    return [
+      ...allocs.map((a): ListItem => ({ kind: 'alloc', alloc: a })),
+      ...avails.map((a): ListItem => ({ kind: 'avail', avail: a })),
+    ]
+  }
 
   function toggleExpand(name: string) {
     setExpanded((prev) => {
@@ -64,19 +83,70 @@ export default function AllocationsPage() {
     })
   }
 
-  // 同一 Profile 内排序
-  async function handleDropOnCard(profile: string, targetId: string) {
-    if (!draggedId || draggedId === targetId || draggedFrom !== profile) return
-    const list = byProfile[profile] ?? []
-    const ids = list.map((a) => a.id)
-    const from = ids.indexOf(draggedId)
-    const to = ids.indexOf(targetId)
-    if (from < 0 || to < 0) return
-    ids.splice(from, 1)
-    ids.splice(to, 0, draggedId)
+  // 解析拖拽源 key
+  function parseKey(key: string): { kind: 'alloc' | 'avail'; id: string; profile: string } | null {
+    if (key.startsWith(KEY_PREFIX_ALLOC)) {
+      const id = key.slice(KEY_PREFIX_ALLOC.length)
+      const a = allocations.find((x) => x.id === id)
+      return a ? { kind: 'alloc', id, profile: a.profile } : null
+    }
+    if (key.startsWith(KEY_PREFIX_AVAIL)) {
+      const pluginId = key.slice(KEY_PREFIX_AVAIL.length)
+      for (const [profile, items] of Object.entries(available)) {
+        if (items.some((i) => i.pluginId === pluginId && !i.allocated)) {
+          return { kind: 'avail', id: pluginId, profile }
+        }
+      }
+    }
+    return null
+  }
+
+  /** 同环境拖放统一处理：只处理拖到本环境，不做跨环境移动。 */
+  async function handleDropOnList(profile: string, targetKey: string | null) {
+    const src = draggedKey ? parseKey(draggedKey) : null
+    if (!src || src.profile !== profile) return
+    const list = unifiedList(profile)
+
+    // 可用插件 → 拖到已分配卡片上（含末尾空白）＝ 分配并插入该位置
+    if (src.kind === 'avail') {
+      const availItem = list.find((i) => i.kind === 'avail' && i.avail.pluginId === src.id)
+      if (!availItem || availItem.kind !== 'avail') return
+      try {
+        await api.allocate(profile, availItem.avail.pluginId, availItem.avail.pluginId, true)
+        await load()
+        show(`已分配 ${availItem.avail.pluginId} → ${profile}`)
+      } catch (e) {
+        show(e instanceof Error ? e.message : String(e), true)
+        await load()
+      }
+      return
+    }
+
+    // 已分配卡片 → 排序（目标为某条目或末尾）
+    const allocIds = (byProfile[profile] ?? []).map((a) => a.id)
+    const from = allocIds.indexOf(src.id)
+    if (from < 0) return
+    let to = allocIds.length - 1 // 默认末尾
+    if (targetKey) {
+      const targetIdx = list.findIndex((i) => itemKey(i) === targetKey)
+      // 目标条目若为可用插件，则插入到它前面的已分配位置
+      if (targetIdx >= 0) {
+        let allocIdx = -1
+        for (let i = targetIdx; i >= 0; i--) {
+          if (list[i]!.kind === 'alloc') {
+            allocIdx = allocIds.indexOf((list[i] as { alloc: Allocation }).alloc.id)
+            break
+          }
+        }
+        to = allocIdx >= 0 ? allocIdx : 0
+      }
+    }
+    if (from === to) return
+    allocIds.splice(from, 1)
+    allocIds.splice(to, 0, src.id)
     setAllocations((prev) => {
       const byId = new Map(prev.map((a) => [a.id, a]))
-      const reordered = ids
+      const reordered = allocIds
         .map((id, i) => {
           const a = byId.get(id)
           return a ? { ...a, order: i } : null
@@ -85,32 +155,7 @@ export default function AllocationsPage() {
       return [...prev.filter((a) => a.profile !== profile), ...reordered]
     })
     try {
-      await api.reorderAllocations(profile, ids)
-    } catch (e) {
-      show(e instanceof Error ? e.message : String(e), true)
-      await load()
-    }
-  }
-
-  // 拖到 Profile 面板：可用插件 → 新建分配；已分配插件 → 跨 Profile 移动
-  async function handleDropOnProfile(profile: string) {
-    if (draggedAvailable) {
-      const { pluginId, source } = draggedAvailable
-      try {
-        await api.allocate(profile, pluginId, pluginId, true)
-        show(`已分配 ${pluginId}（${source === 'bundle' ? 'bundle' : '依赖'}）→ ${profile}`)
-        await load()
-      } catch (e) {
-        show(e instanceof Error ? e.message : String(e), true)
-        await load()
-      }
-      return
-    }
-    if (!draggedId || !draggedFrom || draggedFrom === profile) return
-    try {
-      const moved = await api.moveAllocation(draggedId, profile)
-      show(`已把 ${moved.pluginId} 移动到 ${profile}`)
-      await load()
+      await api.reorderAllocations(profile, allocIds)
     } catch (e) {
       show(e instanceof Error ? e.message : String(e), true)
       await load()
@@ -143,7 +188,7 @@ export default function AllocationsPage() {
     }
   }
 
-  function onContext(a: Allocation, e: React.MouseEvent) {
+  function onContextAlloc(a: Allocation, e: React.MouseEvent) {
     e.preventDefault()
     const list = byProfile[a.profile] ?? []
     const idx = list.findIndex((x) => x.id === a.id)
@@ -156,6 +201,18 @@ export default function AllocationsPage() {
         { label: '下移', onClick: () => void move(a, 1), disabled: idx < 0 || idx >= list.length - 1 },
         { separator: true, label: '', onClick: () => {} },
         { label: '移除', onClick: () => void remove(a), danger: true },
+      ],
+    })
+  }
+
+  function onContextAvail(profile: string, item: AvailablePlugin, e: React.MouseEvent) {
+    e.preventDefault()
+    setMenu({
+      x: e.clientX,
+      y: e.clientY,
+      items: [
+        { label: '分配到本环境', onClick: () => void addFromInstalled(profile, item.pluginId) },
+        { label: item.source === 'bundle' ? '来源：bundle' : '来源：依赖', onClick: () => {}, disabled: true },
       ],
     })
   }
@@ -197,7 +254,7 @@ export default function AllocationsPage() {
       <div className="page-head">
         <h1 className="page-title">{t('page.allocations.title')}</h1>
         <p className="page-desc">
-          {t('page.allocations.desc')} · 变更自动写回 cordis.patch.yml · 已安装插件可直接拖入面板完成分配
+          {t('page.allocations.desc')} · 变更自动写回 cordis.patch.yml · 本环境内所有插件均可拖动排序
         </p>
       </div>
 
@@ -207,7 +264,7 @@ export default function AllocationsPage() {
         </span>
         <span className="spacer" />
         <span className="muted" style={{ fontSize: 12 }}>
-          💡 可用插件（已安装依赖 + bundles）可直接拖拽到任意环境面板完成分配
+          💡 每个环境内：已分配卡片与可用插件均可拖动排序；拖动可用插件到分配区即完成分配
         </span>
         <button className="btn sm" onClick={() => load()}>
           刷新
@@ -218,8 +275,9 @@ export default function AllocationsPage() {
         <div className="empty">未发现任何 Profile</div>
       ) : (
         profiles.map((p) => {
-          const list = byProfile[p.name] ?? []
-          const addList = addable[p.name] ?? []
+          const list = unifiedList(p.name)
+          const allocCount = (byProfile[p.name] ?? []).length
+          const availCount = (addable[p.name] ?? []).length
           const isOpen = expanded.has(p.name)
           const isOver = dragOverProfile === p.name
           return (
@@ -227,6 +285,7 @@ export default function AllocationsPage() {
               className={`card${isOver ? ' drop-target' : ''}`}
               key={p.name}
               style={{ marginBottom: 12 }}
+              // 本环境面板是统一的拖放目标；跨环境拖动到此面板被忽略（不移动）
               onDragOver={(e) => {
                 e.preventDefault()
                 setDragOverProfile(p.name)
@@ -234,8 +293,10 @@ export default function AllocationsPage() {
               onDragLeave={() => setDragOverProfile((prev) => (prev === p.name ? null : prev))}
               onDrop={(e) => {
                 e.preventDefault()
+                e.stopPropagation()
                 setDragOverProfile(null)
-                void handleDropOnProfile(p.name)
+                setDropTargetKey(null)
+                void handleDropOnList(p.name, null)
               }}
             >
               <div
@@ -248,8 +309,8 @@ export default function AllocationsPage() {
                 <span className="dot" />
                 <strong>{p.name}</strong>
                 <span className={`badge ${p.running ? 'running' : 'stopped'}`}>{p.running ? '运行中' : '已停止'}</span>
-                <span className="badge">{list.length} 条分配</span>
-                {addList.length > 0 && <span className="badge">{addList.length} 个可添加</span>}
+                <span className="badge">{allocCount} 条分配</span>
+                {availCount > 0 && <span className="badge">{availCount} 个可添加</span>}
                 <span className="spacer" />
                 <span className="muted" style={{ fontSize: 12 }}>
                   {p.exists ? `${p.bundles.length} bundle · ${Object.keys(p.dependencies).length} 依赖` : '（目录缺失）'}
@@ -258,90 +319,89 @@ export default function AllocationsPage() {
 
               {isOpen && (
                 <div style={{ marginTop: 12 }}>
-                  {list.length === 0 && <p className="muted" style={{ marginBottom: 8 }}>暂无分配。可从下方「可用插件」拖入或点选添加。</p>}
-                  <div className="grid">
-                    {list.map((a) => {
-                      const idx = list.findIndex((x) => x.id === a.id)
+                  {list.length === 0 && (
+                    <p className="muted" style={{ marginBottom: 8 }}>
+                      该环境没有已安装插件。可在「插件市场」安装后再来分配。
+                    </p>
+                  )}
+
+                  {/* 统一插件列表：已分配卡片 + 可用插件，全部可拖拽（仅本环境内） */}
+                  <div className="alloc-list">
+                    {list.map((item) => {
+                      const key = itemKey(item)
+                      const isAlloc = item.kind === 'alloc'
+                      const a = isAlloc ? item.alloc : null
+                      const av = !isAlloc ? item.avail : null
                       return (
                         <div
-                          className={`card${draggedId === a.id ? ' dragging' : ''}`}
-                          key={a.id}
+                          className={`alloc-row${draggedKey === key ? ' dragging' : ''}${dropTargetKey === key ? ' drop-line' : ''}`}
+                          key={key}
                           draggable
                           onDragStart={(e) => {
-                            setDraggedId(a.id)
-                            setDraggedFrom(a.profile)
-                            setDraggedAvailable(null)
+                            setDraggedKey(key)
+                            // 关键修复：必须 setData，否则 Chromium/WebView2 不启动拖拽
+                            e.dataTransfer.setData('text/plain', key)
                             e.dataTransfer.effectAllowed = 'move'
                           }}
-                          onDragOver={(e) => e.preventDefault()}
+                          onDragOver={(e) => {
+                            e.preventDefault()
+                            e.stopPropagation()
+                            setDropTargetKey(key)
+                          }}
+                          onDragLeave={() => setDropTargetKey((prev) => (prev === key ? null : prev))}
                           onDrop={(e) => {
                             e.preventDefault()
-                            void handleDropOnCard(a.profile, a.id)
+                            e.stopPropagation()
+                            setDropTargetKey(null)
+                            void handleDropOnList(p.name, key)
                           }}
                           onDragEnd={() => {
-                            setDraggedId(null)
-                            setDraggedFrom(null)
+                            setDraggedKey(null)
+                            setDropTargetKey(null)
                           }}
-                          onContextMenu={(e) => onContext(a, e)}
+                          onContextMenu={(e) => (isAlloc && a ? onContextAlloc(a, e) : av ? onContextAvail(p.name, av, e) : undefined)}
                         >
-                          <div className="card-title">
-                            <span className="drag-grip" title="拖拽排序 / 拖到其它环境">⠿</span>
-                            <span style={{ fontFamily: 'Consolas, monospace' }}>{a.pluginId}</span>
-                            <span className={`badge ${a.enabled ? 'enabled' : 'disabled'}`}>{a.enabled ? '启用' : '禁用'}</span>
-                          </div>
-                          {a.pluginName && a.pluginName !== a.pluginId && <p className="card-sub">{a.pluginName}</p>}
-                          <div className="row">
-                            <button className="btn sm" onClick={() => toggle(a)}>
-                              {a.enabled ? '禁用' : '启用'}
-                            </button>
-                            <button className="btn sm" onClick={() => move(a, -1)} disabled={idx <= 0}>
-                              ↑
-                            </button>
-                            <button className="btn sm" onClick={() => move(a, 1)} disabled={idx >= list.length - 1}>
-                              ↓
-                            </button>
-                            <button className="btn danger sm" onClick={() => remove(a)}>
-                              移除
-                            </button>
-                          </div>
+                          <span className="drag-grip" title="拖动排序">⠿</span>
+                          {isAlloc && a ? (
+                            <>
+                              <span style={{ fontFamily: 'Consolas, monospace' }}>{a.pluginId}</span>
+                              <span className={`badge ${a.enabled ? 'enabled' : 'disabled'}`}>
+                                {a.enabled ? '启用' : '禁用'}
+                              </span>
+                              <span className="spacer" />
+                              <button className="btn sm" onClick={() => toggle(a)}>
+                                {a.enabled ? '禁用' : '启用'}
+                              </button>
+                              <button className="btn sm" onClick={() => move(a, -1)} disabled={(byProfile[p.name] ?? []).findIndex((x) => x.id === a.id) <= 0}>
+                                ↑
+                              </button>
+                              <button
+                                className="btn sm"
+                                onClick={() => move(a, 1)}
+                                disabled={(byProfile[p.name] ?? []).findIndex((x) => x.id === a.id) >= (byProfile[p.name] ?? []).length - 1}
+                              >
+                                ↓
+                              </button>
+                              <button className="btn danger sm" onClick={() => remove(a)}>
+                                移除
+                              </button>
+                            </>
+                          ) : av ? (
+                            <>
+                              <span style={{ fontFamily: 'Consolas, monospace' }}>{av.pluginId}</span>
+                              <span className={`badge ${av.source === 'bundle' ? 'kind' : 'stopped'}`}>
+                                {av.source === 'bundle' ? 'bundle' : '依赖'}
+                              </span>
+                              <span className="badge disabled">未分配</span>
+                              <span className="spacer" />
+                              <button className="btn primary sm" onClick={() => void addFromInstalled(p.name, av.pluginId)}>
+                                分配
+                              </button>
+                            </>
+                          ) : null}
                         </div>
                       )
                     })}
-                  </div>
-
-                  {/* 可用插件区：可拖拽到任意环境面板（拖入即分配），也可点选添加 */}
-                  <div className="available-area">
-                    <div className="row">
-                      <span className="muted" style={{ fontSize: 12 }}>
-                        📦 可用插件（{addList.length}）· 已安装依赖 + bundles，拖到任意环境即分配
-                      </span>
-                    </div>
-                    {addList.length === 0 ? (
-                      <p className="muted" style={{ fontSize: 12, marginTop: 6 }}>
-                        该环境暂无未分配的已安装插件
-                      </p>
-                    ) : (
-                      <div className="chip-list">
-                        {addList.map((i) => (
-                          <span
-                            key={i.pluginId}
-                            className={`chip draggable${draggedAvailable?.pluginId === i.pluginId ? ' dragging' : ''}`}
-                            draggable
-                            title={`拖到任意环境面板分配 ${i.pluginId}`}
-                            onDragStart={(e) => {
-                              setDraggedAvailable({ pluginId: i.pluginId, source: i.source })
-                              setDraggedId(null)
-                              setDraggedFrom(null)
-                              e.dataTransfer.effectAllowed = 'copy'
-                            }}
-                            onDragEnd={() => setDraggedAvailable(null)}
-                            onClick={() => void addFromInstalled(p.name, i.pluginId)}
-                          >
-                            {i.source === 'bundle' ? '📦' : '📥'} {i.pluginId}
-                          </span>
-                        ))}
-                      </div>
-                    )}
                   </div>
                 </div>
               )}

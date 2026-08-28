@@ -1,6 +1,6 @@
 {
     "name":  "@dsh-launcher/profile-manager",
-    "version":  "0.2.2",
+    "version":  "0.2.3",
     "private":  true,
     "type":  "module",
     "description":  "dsh Launcher Profile（环境）扫描与编辑",

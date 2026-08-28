@@ -21,7 +21,36 @@
 - ...
 ```
 
----
+## [2026-08-28] v0.2.3：插件拖拽全面修复（同环境内所有插件可拖动）
+
+### 目标
+- 修复「已安装插件拖不动」：所有插件（已分配 + 可用）统一列表、均可拖动。
+- 明确不做跨环境移动（用户要求）。
+
+### 根因
+- 原生 HTML5 拖拽的 dragstart 只设置了 effectAllowed，未调用 e.dataTransfer.setData()；
+  Chromium/WebView2（桌面端）要求 setData 才真正启动拖拽 → 表现为「拖不动」。
+
+### 改动
+- AllocationsPage.tsx 重写：
+  - 每个环境面板内统一列表 = 已分配卡片 + 可用插件条目，全部可拖拽；
+  - 所有 dragstart 补 setData('text/plain', key)（关键修复）；
+  - 同环境内：已分配卡片排序（reorder API）、可用插件拖到分配区即分配、可用↔可用排序（前端本地）；
+  - **跨环境拖动被忽略**（不做跨环境移动）；
+  - 右键菜单扩展到可用条目（分配 / 来源）。
+- styles.css：新增 alloc-list / alloc-row / drop-line（拖拽插入位置线）样式。
+- 版本号 0.2.2 → 0.2.3（package.json / Cargo / tauri.conf / config-store / config.json）。
+- 清理：工作区根旧 _smoke-*.ps1、release 旧副产物；全部文档保留。
+
+### 结果 / 状态（实测）
+- 拖拽链路端到端：available 清单 → 分配 dep-a/dep-b → reorder 反转 → 移除 → patch 写回，全部通过。
+- 构建产物确认含 setData / alloc-list。
+- 单测 20/20、冒烟 5 组全绿、typecheck / build 全过。
+
+### 下一步
+- 桌面打包 0.2.3 并验收；后续可选：可用插件顺序持久化、跨环境移动（按需开放）。
+
+------
 
 ## [2026-08-20] 初始化 dsh Launcher 项目
 
