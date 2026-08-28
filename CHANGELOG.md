@@ -1,5 +1,26 @@
 # Changelog
 
+## [0.2.4] - 2026-08-28
+
+跨环境插件拖拽（真实鼠标可用）。
+
+### 新增
+- **跨环境插件拖拽**：把已分配插件从 A 环境拖到 B 环境（如 plugin_bag → desktop），两个环境的 `cordis.patch.yml` 自动同步写回。
+- **拖拽引擎重构为 Pointer Events**：绕开 WebView2 原生 HTML5 拖拽 drop 不触发的问题，真实鼠标/触摸可用。
+- **同环境统一列表拖拽排序**：已分配卡片 + 可用插件全部可拖动。
+- 可用插件跨环境需目标环境已安装（未安装提示先到市场安装）。
+
+### 修正
+- 原生 DnD（draggable/drop）在 WebView2 下 drop 不触发 → 改为自研 Pointer Events 拖拽。
+
+## [0.2.3] - 2026-08-28
+
+插件拖拽全面修复。
+
+### 修正
+- dragstart 缺 `setData` 导致 Chromium/WebView2 拖拽不启动 → 统一补 setData。
+- 每个环境内「已分配 + 可用插件」统一列表、全部可拖动排序。
+
 ## [0.2.2] - 2026-08-27
 
 下一迭代：拖拽全面化 + 市场批量安装/排序 + 性能优化 + 删除增强。
@@ -12,6 +33,7 @@
 - **按页代码分割**：7 个页面 `React.lazy` + Suspense，首屏只加载当前页。
 - **删除增强**：Profile 卡片 🗑️ 删除按钮（运行中禁用 + Tooltip）；确认框需输入环境名；勾选批量删除需输入 `DELETE`；通用 `ConfirmDialog` 组件。
 - 隔离环境冒烟测试 `_smoke-v021.ps1`（17 项检查全过）。
+
 
 ### 修正
 - `scripts/bump-version.ps1`：根 package.json 空引用 bug；`Set-Content -Encoding UTF8` 写入 BOM 导致 serde_json 解析失败的问题（改为无 BOM 写回 + 校验）。
