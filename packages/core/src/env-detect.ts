@@ -115,9 +115,19 @@ export function findDshInstances(extraDirs: string[] = []): DshInstance[] {
     if (d && existsSync(join(d, 'package.json'))) add(`dir:${d}`, d, readPackageEntry(d))
   }
 
+  // 版本探测缓存 10s：避免每次 list()/settings 都对每个实例跑 node 子进程
+  const versionCache = new Map<string, { at: number; version: string | null }>()
+  const now = Date.now()
   for (const inst of out.values()) {
+    const cached = versionCache.get(inst.run)
+    if (cached && now - cached.at < 10_000) {
+      inst.version = cached.version
+      continue
+    }
     const r = runSync('node', [inst.run, '--version'])
-    inst.version = r.ok ? (r.stdout.split(/\r?\n/)[0]?.trim() ?? null) : null
+    const version = r.ok ? (r.stdout.split(/\r?\n/)[0]?.trim() ?? null) : null
+    versionCache.set(inst.run, { at: now, version })
+    inst.version = version
   }
   return [...out.values()]
 }

@@ -37,10 +37,22 @@ export default function DashboardPage({ onNavigate }: { onNavigate: (p: PageKey)
 
   useEffect(() => {
     void load()
-    const timer = setInterval(() => {
-      void api.profiles().then(setProfiles).catch(() => {})
-    }, 5000)
-    return () => clearInterval(timer)
+    // 仅页面可见时轮询（后台标签页暂停，省资源）
+    let visible = true
+    const tick = () => {
+      if (document.visibilityState === 'visible') void api.profiles().then(setProfiles).catch(() => {})
+    }
+    const timer = setInterval(tick, 5000)
+    const onVis = () => {
+      const wasHidden = !visible
+      visible = document.visibilityState === 'visible'
+      if (wasHidden && visible) void load()
+    }
+    document.addEventListener('visibilitychange', onVis)
+    return () => {
+      clearInterval(timer)
+      document.removeEventListener('visibilitychange', onVis)
+    }
   }, [])
 
   const running = (profiles ?? []).filter((p) => p.running).length

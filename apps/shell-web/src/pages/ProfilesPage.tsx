@@ -104,7 +104,7 @@ export default function ProfilesPage() {
       } catch {
         /* 忽略轮询错误 */
       }
-      if (!cancelled) timer = setTimeout(poll, 2000)
+      if (!cancelled) timer = setTimeout(poll, 3000)
     }
     void poll()
 
@@ -529,7 +529,7 @@ export default function ProfilesPage() {
               {logFor === p.name && (
                 <>
                   <div className="row" style={{ marginTop: 10 }}>
-                    <span className="muted">每 2s 自动刷新</span>
+                    <span className="muted">每 3s 自动刷新</span>
                     <span className="spacer" />
                     <button className="btn sm" onClick={() => setPaused((v) => !v)}>
                       {paused ? '继续' : '暂停'}

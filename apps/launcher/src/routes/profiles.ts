@@ -1,8 +1,39 @@
 import { join } from 'node:path'
+import { mkdirSync, writeFileSync } from 'node:fs'
 import { readLogTail, spawnWebProfile, stopWeb, waitForPort, isPortListening, findPidByPort, findProcessName } from '@dsh-launcher/core'
 import { createProfile, removeProfile, scanProfiles } from '@dsh-launcher/profile-manager'
-import { pluginAction } from '@dsh-launcher/marketplace'
+import { pluginAction, PLUGIN_ACTION_TIMEOUT_MS } from '@dsh-launcher/marketplace'
 import type { ApiHandler, RouteContext, RuntimeProc } from './types.js'
+
+/** 安装/更新/卸载日志落盘：data/logs/plugin-<profile>-<pkg>-<ts>.log */
+function logPluginAction(logDir: string, profile: string, action: string, pkg: string, r: { ok: boolean; code: number | null; stdout: string; stderr: string }): string {
+  const name = pkg.replace(/[^a-zA-Z0-9@._-]/g, '_').slice(0, 60)
+  const file = join(logDir, `plugin-${profile}-${name}-${Date.now()}.log`)
+  try {
+    mkdirSync(logDir, { recursive: true })
+    writeFileSync(
+      file,
+      `# dsh plugin --profile ${profile} ${action} ${pkg}\n# ok=${r.ok} code=${r.code}\n\n--- stdout ---\n${r.stdout}\n\n--- stderr ---\n${r.stderr}\n`,
+      'utf8',
+    )
+  } catch {
+    /* 日志写失败不阻断 */
+  }
+  return file
+}
+
+/** 从 dsh/pnpm 输出归类错误类型。 */
+function classifyPluginError(r: { ok: boolean; code: number | null; stdout: string; stderr: string }): { errorType: string; message: string } {
+  if (r.ok) return { errorType: 'ok', message: '' }
+  const all = `${r.stdout}\n${r.stderr}`
+  if (/timed?\s*out|ETIMEDOUT|ESOCKETTIMEDOUT|socket hang up|ECONNREFUSED/i.test(all)) return { errorType: 'network', message: '网络错误或连接超时，请检查网络后重试' }
+  if (/not\s+found|No\s+match|E404|does\s+not\s+exist|is\s+not\s+in\s+this\s+registry/i.test(all)) return { errorType: 'not-found', message: `未找到包：请确认包名/版本存在` }
+  if (/403|401|permission|unauthorized/i.test(all)) return { errorType: 'auth', message: '权限不足或包源拒绝访问' }
+  if (/ETARGET|No\s+matching\s+version|no\s+matching/i.test(all)) return { errorType: 'version', message: '找不到匹配的版本（可能未发布或拼写错误）' }
+  if (/resolve|ERR_PNPM|conflict|peer|ERESOLVE/i.test(all)) return { errorType: 'deps', message: '依赖解析/冲突，详见日志' }
+  if (/timeout/i.test(all)) return { errorType: 'timeout', message: `安装超时（${PLUGIN_ACTION_TIMEOUT_MS / 1000}s），见日志` }
+  return { errorType: 'other', message: r.stderr.trim() || r.stdout.trim() || '安装失败（无输出），见日志' }
+}
 
 /** /api/profiles* —— 环境列表 / 新建 / 删除 / 启停 / 日志 / 状态 / 插件（含批量安装）/ 端口占用 */
 export const profilesHandler: ApiHandler = async (ctx, _req, res, method, seg, body, url) => {
@@ -218,11 +249,21 @@ export const profilesHandler: ApiHandler = async (ctx, _req, res, method, seg, b
     }
     const decision = sourcePolicy.check(pkg)
     if (!decision.allowed) {
-      ctx.sendJson(res, 403, { error: decision.reason })
+      ctx.sendJson(res, 403, { error: decision.reason, errorType: 'policy', message: decision.reason })
       return true
     }
     const r = await pluginAction(name, action as 'add' | 'remove' | 'update', pkg)
-    ctx.sendJson(res, r.ok ? 200 : 400, { ok: r.ok, code: r.code, stdout: r.stdout, stderr: r.stderr })
+    const logFile = logPluginAction(ctx.logDir, name, action, pkg, r)
+    const { errorType, message } = classifyPluginError(r)
+    ctx.sendJson(res, r.ok ? 200 : 400, {
+      ok: r.ok,
+      code: r.code,
+      stdout: r.stdout,
+      stderr: r.stderr,
+      errorType: r.ok ? 'ok' : errorType,
+      message: r.ok ? '' : message,
+      logFile: r.ok ? undefined : logFile,
+    })
     return true
   }
 
@@ -234,23 +275,25 @@ export const profilesHandler: ApiHandler = async (ctx, _req, res, method, seg, b
       ctx.sendJson(res, 400, { error: 'body 需要 { packages: string[] }' })
       return true
     }
-    const results: { pkg: string; ok: boolean; error?: string; stdout?: string }[] = []
+    const results: { pkg: string; ok: boolean; error?: string; errorType?: string; logFile?: string }[] = []
     for (const pkg of packages) {
       const p = typeof pkg === 'string' ? pkg.trim() : ''
       if (!p) {
-        results.push({ pkg: String(pkg), ok: false, error: '空包名' })
+        results.push({ pkg: String(pkg), ok: false, error: '空包名', errorType: 'other' })
         continue
       }
       const decision = sourcePolicy.check(p)
       if (!decision.allowed) {
-        results.push({ pkg: p, ok: false, error: decision.reason })
+        results.push({ pkg: p, ok: false, error: decision.reason, errorType: 'policy' })
         continue
       }
       try {
         const r = await pluginAction(name, 'add', p)
-        results.push(r.ok ? { pkg: p, ok: true } : { pkg: p, ok: false, error: r.stderr || '安装失败', stdout: r.stdout })
+        const logFile = logPluginAction(ctx.logDir, name, 'add', p, r)
+        const { errorType, message } = classifyPluginError(r)
+        results.push(r.ok ? { pkg: p, ok: true } : { pkg: p, ok: false, error: message, errorType, logFile })
       } catch (err) {
-        results.push({ pkg: p, ok: false, error: err instanceof Error ? err.message : String(err) })
+        results.push({ pkg: p, ok: false, error: err instanceof Error ? err.message : String(err), errorType: 'other' })
       }
     }
     const okCount = results.filter((r) => r.ok).length

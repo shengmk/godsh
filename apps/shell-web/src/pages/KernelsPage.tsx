@@ -34,7 +34,7 @@ export default function KernelsPage() {
       } catch {
         /* 忽略轮询错误 */
       }
-      if (!cancelled) timer = setTimeout(poll, 2000)
+      if (!cancelled) timer = setTimeout(poll, 3000)
     }
     void poll()
     return () => {
@@ -337,7 +337,7 @@ export default function KernelsPage() {
               {k.error && <p className="muted" style={{ marginTop: 8 }}>⚠ {k.error}</p>}
               {kernelLogFor === k.id && (
                 <div className="row" style={{ marginTop: 10 }}>
-                  <span className="muted">每 2s 自动刷新</span>
+                  <span className="muted">每 3s 自动刷新</span>
                   <span className="spacer" />
                 </div>
               )}

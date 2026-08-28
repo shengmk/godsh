@@ -12,6 +12,7 @@ import type {
   LauncherConfig,
   LocalPlugin,
   MarketPlugin,
+  PluginActionResult,
   PortInfo,
   ProfileStatus,
   ProfileView,
@@ -64,7 +65,7 @@ export const api = {
     req<{ plugins: MarketPlugin[] }>(`/market${q ? `?q=${encodeURIComponent(q)}` : ''}`).then((r) => r.plugins),
 
   installPlugin: (profile: string, action: 'add' | 'remove' | 'update', pkg: string) =>
-    req<{ ok: boolean; stdout: string; stderr: string }>(`/profiles/${encodeURIComponent(profile)}/plugins`, {
+    req<PluginActionResult>(`/profiles/${encodeURIComponent(profile)}/plugins`, {
       method: 'POST',
       body: JSON.stringify({ action, pkg }),
     }),

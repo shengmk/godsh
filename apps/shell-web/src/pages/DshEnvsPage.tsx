@@ -37,7 +37,8 @@ export default function DshEnvsPage() {
     }
   }, [])
 
-  // 后台安装任务轮询
+  // 后台安装任务轮询；任务结束（done/error）时给出明确 Toast
+  const prevTasks = useRef<DshEnvsInfo['tasks']>([])
   useEffect(() => {
     if (info?.tasks.some((x) => x.status === 'running')) {
       if (pollTimer.current) clearInterval(pollTimer.current)
@@ -46,6 +47,17 @@ export default function DshEnvsPage() {
       clearInterval(pollTimer.current)
       pollTimer.current = null
     }
+    // 任务状态变化 → 结束提示（只在有之前状态且本次结束且 key 匹配时触发一次）
+    if (info && prevTasks.current.length > 0) {
+      for (const t of info.tasks) {
+        const prev = prevTasks.current.find((x) => x.key === t.key)
+        if (prev && prev.status === 'running' && t.status !== 'running') {
+          if (t.status === 'done') show(`✅ ${t.key} 已完成`)
+          else show(`❌ ${t.key} 失败${t.message ? `：${t.message}` : ''}`, true)
+        }
+      }
+    }
+    if (info) prevTasks.current = info.tasks
   }, [info])
 
   async function installBase() {

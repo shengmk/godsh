@@ -1,7 +1,7 @@
 import http from 'node:http'
 import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from 'node:fs'
 import { extname, join } from 'node:path'
-import { MONOREPO_ROOT, findPidByPort, isPortListening, readLogTail } from '@dsh-launcher/core'
+import { MONOREPO_ROOT, DATA_DIR, findPidByPort, isPortListening, readLogTail } from '@dsh-launcher/core'
 import { fetchMarketIndex } from '@dsh-launcher/marketplace'
 import { scanProfiles } from '@dsh-launcher/profile-manager'
 import type { CliContext } from './context.js'
@@ -154,13 +154,14 @@ export async function startApiServer(ctx: CliContext, opts: ApiServerOptions): P
     }
   }
 
-  // 市场索引缓存（5 分钟）；用可变引用供 routes/market 共享
+  // 市场索引缓存（5 分钟内存 + 7 天本地 data/cache/market.json）；用可变引用供 routes/market 共享
   let marketCache: { at: number; plugins: unknown[] } | null = null
+  const marketCacheDir = join(DATA_DIR, 'cache')
 
   async function getMarket(): Promise<unknown[]> {
     if (marketCache && Date.now() - marketCache.at < 5 * 60_000) return marketCache.plugins
     if (!config.pluginMarket.enabled) return []
-    const index = await fetchMarketIndex(config.pluginMarket.indexUrl)
+    const index = await fetchMarketIndex(config.pluginMarket.indexUrl, 15_000, marketCacheDir)
     marketCache = { at: Date.now(), plugins: index.plugins }
     return index.plugins
   }

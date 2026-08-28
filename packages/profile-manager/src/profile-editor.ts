@@ -1,7 +1,7 @@
 import { existsSync, mkdirSync, rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { readPatchChecked, serializePatchList } from './patch.js'
-import { findProfile, scanProfiles } from './scanner.js'
+import { findProfile, invalidateProfileCache, scanProfiles } from './scanner.js'
 import type { PatchEntry, ProfileManifest } from './types.js'
 
 export interface CreateProfileOptions {
@@ -29,6 +29,7 @@ export function createProfile(profilesDir: string, name: string, opts: CreatePro
   writeFileSync(join(dir, 'package.json'), JSON.stringify(manifest, null, 2) + '\n', 'utf8')
   writeFileSync(join(dir, 'cordis.patch.yml'), '# 用户的启用/禁用/配置层\n[]\n', 'utf8')
   writeFileSync(join(dir, 'cordis.yml'), '[]\n', 'utf8')
+  invalidateProfileCache(profilesDir)
   return dir
 }
 
@@ -38,6 +39,7 @@ export function removeProfile(profilesDir: string, name: string): void {
   if (!profile) throw new Error(`Profile 不存在: ${name}`)
   if (!existsSync(profile.packageJsonPath)) throw new Error(`拒绝删除非 Profile 目录: ${name}`)
   rmSync(profile.dir, { recursive: true, force: true })
+  invalidateProfileCache(profilesDir)
 }
 
 /** 更新 Profile 的 bundles 列表。 */
@@ -49,6 +51,7 @@ export function setProfileBundles(profilesDir: string, name: string, bundles: st
     dsh: { profile: { bundles } },
   }
   writeFileSync(profile.packageJsonPath, JSON.stringify(next, null, 2) + '\n', 'utf8')
+  invalidateProfileCache(profilesDir)
 }
 
 /**
@@ -85,6 +88,7 @@ export function setPluginDisabled(
   }
 
   writeFileSync(patchPath, serializePatchList(entries), 'utf8')
+  invalidateProfileCache(profilesDir)
 }
 
 export { scanProfiles, findProfile }

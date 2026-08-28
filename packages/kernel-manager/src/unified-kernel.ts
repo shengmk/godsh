@@ -1,7 +1,7 @@
 import { existsSync, readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import type { ConfigStore } from '@dsh-launcher/core'
-import type { ProfileInfo } from '@dsh-launcher/profile-manager'
+import { invalidateProfileCache, type ProfileInfo } from '@dsh-launcher/profile-manager'
 
 export interface UnifiedKernelPlugin {
   /** 插件 id（bundle 名，如 @deepseek-ai/dsh-web-app、dshmarket） */
@@ -156,6 +156,8 @@ export class UnifiedKernelManager {
     dsh.profile = profile
     manifest.dsh = dsh
     writeFileSync(join(dir, 'package.json'), JSON.stringify(manifest, null, 2) + '\n', 'utf8')
+    // bundles 已变更：失效该 Profile 的扫描缓存
+    invalidateProfileCache(join(dir, '..', '..'))
   }
 
   /**

@@ -56,6 +56,24 @@ function fmtCount(n: unknown): string {
   return String(num)
 }
 
+const ERROR_TYPE_LABEL: Record<string, string> = {
+  network: '网络错误',
+  'not-found': '包不存在',
+  auth: '权限/源拒绝',
+  version: '版本不匹配',
+  deps: '依赖冲突',
+  timeout: '安装超时',
+  policy: '来源策略拒绝',
+  other: '安装失败',
+}
+
+function errorLabel(r: { errorType?: string; message?: string; stderr?: string }): string {
+  const type = r.errorType ?? 'other'
+  const label = ERROR_TYPE_LABEL[type] ?? '安装失败'
+  const msg = r.message || r.stderr || ''
+  return msg ? `${label}：${msg}` : label
+}
+
 type SortBy = 'default' | 'hot' | 'latest'
 
 interface QueueItem {
@@ -75,6 +93,9 @@ export default function MarketPage() {
   const [selected, setSelected] = useState<Set<string>>(new Set())
   const [queue, setQueue] = useState<QueueItem[] | null>(null)
   const [queueDone, setQueueDone] = useState(false)
+  // 分批渲染：初始 60，滚动/「加载更多」每次 +60（市场全量 2467 条不一次性渲染）
+  const [visibleCount, setVisibleCount] = useState(60)
+  const PAGE_STEP = 60
   const { toast, show } = useToast()
   const { t } = useI18n()
 
@@ -102,6 +123,7 @@ export default function MarketPage() {
 
   useEffect(() => {
     const t = setTimeout(() => {
+      setVisibleCount(PAGE_STEP)
       api
         .market(query)
         .then(setPlugins)
@@ -109,6 +131,11 @@ export default function MarketPage() {
     }, 300)
     return () => clearTimeout(t)
   }, [query])
+
+  // 排序切换时重置分批
+  useEffect(() => {
+    setVisibleCount(PAGE_STEP)
+  }, [sortBy])
 
   // 排序：热门（下载量降序）/ 最新（更新时间或创建时间降序）/ 默认
   const sortedPlugins = useMemo(() => {
@@ -135,8 +162,12 @@ export default function MarketPage() {
     setInstalling(name)
     try {
       const r = await api.installPlugin(profile, 'add', name)
-      show(r.ok ? `已安装 ${name} → ${profile}` : `安装失败：${r.stderr || '未知错误'}`, !r.ok)
-      if (r.ok) await refreshInstalled()
+      if (r.ok) {
+        show(`已安装 ${name} → ${profile}`)
+        await refreshInstalled()
+      } else {
+        show(errorLabel(r), true)
+      }
     } catch (e) {
       show(e instanceof Error ? e.message : String(e), true)
     } finally {
@@ -150,8 +181,12 @@ export default function MarketPage() {
     setInstalling(name)
     try {
       const r = await api.installPlugin(profile, 'remove', name)
-      show(r.ok ? `已卸载 ${name}` : `卸载失败：${r.stderr || '未知错误'}`, !r.ok)
-      if (r.ok) await refreshInstalled()
+      if (r.ok) {
+        show(`已卸载 ${name}`)
+        await refreshInstalled()
+      } else {
+        show(errorLabel(r), true)
+      }
     } catch (e) {
       show(e instanceof Error ? e.message : String(e), true)
     } finally {
@@ -164,8 +199,12 @@ export default function MarketPage() {
     setInstalling(name)
     try {
       const r = await api.installPlugin(profile, 'update', name)
-      show(r.ok ? `已更新 ${name}` : `更新失败：${r.stderr || '未知错误'}`, !r.ok)
-      if (r.ok) await refreshInstalled()
+      if (r.ok) {
+        show(`已更新 ${name}`)
+        await refreshInstalled()
+      } else {
+        show(errorLabel(r), true)
+      }
     } catch (e) {
       show(e instanceof Error ? e.message : String(e), true)
     } finally {
@@ -207,7 +246,9 @@ export default function MarketPage() {
         setQueue((prev) =>
           prev
             ? prev.map((q, idx) =>
-                idx === i ? { ...q, status: r.ok ? ('done' as const) : ('error' as const), error: r.ok ? undefined : r.stderr || '安装失败' } : q,
+                idx === i
+                  ? { ...q, status: r.ok ? ('done' as const) : ('error' as const), error: r.ok ? undefined : errorLabel(r) }
+                  : q,
               )
             : prev,
         )
@@ -274,8 +315,12 @@ export default function MarketPage() {
         <ErrorText message="没有匹配的插件" />
       ) : (
         <>
+          <div className="muted" style={{ marginBottom: 8, fontSize: 12 }}>
+            共 {sortedPlugins.length} 个插件 · 已显示 {Math.min(visibleCount, sortedPlugins.length)} · 可选{' '}
+            {sortedPlugins.filter((p) => !installedNames.includes(p.name)).length} · 已选 {selectedCount}
+          </div>
           <div className="grid">
-            {sortedPlugins.slice(0, 200).map((p) => {
+            {sortedPlugins.slice(0, visibleCount).map((p) => {
               const installed = installedNames.includes(p.name)
               const isSelected = selected.has(p.name)
               return (
@@ -339,6 +384,14 @@ export default function MarketPage() {
               )
             })}
           </div>
+
+          {visibleCount < sortedPlugins.length && (
+            <div className="row" style={{ marginTop: 14, justifyContent: 'center' }}>
+              <button className="btn" onClick={() => setVisibleCount((v) => v + PAGE_STEP)}>
+                加载更多（已显示 {Math.min(visibleCount, sortedPlugins.length)} / {sortedPlugins.length}）
+              </button>
+            </div>
+          )}
 
           {queue && (
             <div className="queue-panel">

@@ -5,6 +5,7 @@ import type { ConfigStore } from '@dsh-launcher/core'
 import {
   readPatchChecked,
   serializePatchList,
+  invalidateProfileCache,
   type PatchEntry,
 } from '@dsh-launcher/profile-manager'
 import type { Allocation } from './types.js'
@@ -141,6 +142,8 @@ export class AllocationManager {
       }
     }
     writeFileSync(patchPath, serializePatchList(next), 'utf8')
+    // patch 已变更：失效该 Profile 的扫描缓存
+    invalidateProfileCache(profilesDir)
     return patchPath
   }
 }

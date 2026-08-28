@@ -97,7 +97,20 @@ export interface BatchInstallResult {
   pkg: string
   ok: boolean
   error?: string
+  errorType?: string
+  logFile?: string
   stdout?: string
+}
+
+/** 单插件安装/更新/卸载结果 */
+export interface PluginActionResult {
+  ok: boolean
+  code: number | null
+  stdout: string
+  stderr: string
+  errorType?: string
+  message?: string
+  logFile?: string
 }
 
 export interface KernelTemplate {

@@ -53,13 +53,17 @@ export default function App() {
       setSearchOpen(false)
       return
     }
-    try {
-      const [p, pl, k] = await Promise.all([api.profiles(), api.plugins(), api.kernels()])
-      setSearchData({ profiles: p, plugins: pl, kernels: k.instances })
-      setSearchOpen(true)
-    } catch {
-      setSearchOpen(false)
-    }
+    // 防抖 300ms：输入期间不重复请求（避免每次击键打 profiles+plugins+kernels 3 个接口）
+    if (searchTimer.current) clearTimeout(searchTimer.current)
+    searchTimer.current = setTimeout(async () => {
+      try {
+        const [p, pl, k] = await Promise.all([api.profiles(), api.plugins(), api.kernels()])
+        setSearchData({ profiles: p, plugins: pl, kernels: k.instances })
+        setSearchOpen(true)
+      } catch {
+        setSearchOpen(false)
+      }
+    }, 300)
   }
 
   async function quickStart(name: string) {
