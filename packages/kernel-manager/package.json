@@ -1,6 +1,6 @@
 {
     "name":  "@dsh-launcher/kernel-manager",
-    "version":  "0.2.3",
+    "version":  "0.2.4",
     "private":  true,
     "type":  "module",
     "description":  "dsh Launcher 内核模板与实例管理",

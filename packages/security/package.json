@@ -1,6 +1,6 @@
 {
     "name":  "@dsh-launcher/security",
-    "version":  "0.2.3",
+    "version":  "0.2.4",
     "private":  true,
     "type":  "module",
     "description":  "dsh Launcher 安全：来源校验、构建授权",

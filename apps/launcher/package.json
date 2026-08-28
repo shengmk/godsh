@@ -1,6 +1,6 @@
 {
     "name":  "@dsh-launcher/launcher",
-    "version":  "0.2.3",
+    "version":  "0.2.4",
     "private":  true,
     "type":  "module",
     "description":  "dsh Launcher 主启动器 CLI（后端逻辑编排）",

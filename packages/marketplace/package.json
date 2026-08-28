@@ -1,6 +1,6 @@
 {
     "name":  "@dsh-launcher/marketplace",
-    "version":  "0.2.3",
+    "version":  "0.2.4",
     "private":  true,
     "type":  "module",
     "description":  "dsh Launcher 插件市场与安装封装",

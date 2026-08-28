@@ -3,7 +3,7 @@ import { dirname, join } from 'node:path'
 import type { LauncherConfig } from './types.js'
 
 const DEFAULT_CONFIG: LauncherConfig = {
-  launcher: { name: 'dsh Launcher', version: '0.2.3' },
+  launcher: { name: 'dsh Launcher', version: '0.2.4' },
   dsh: { home: '', bin: 'dsh', profilesDir: 'profiles', instances: {}, activeVersion: '', byProfile: {}, dirs: [] },
   runtime: { node: 'node', pnpm: 'pnpm' },
   webKernel: { defaultTemplateId: 'web-default', defaultPort: 3080 },

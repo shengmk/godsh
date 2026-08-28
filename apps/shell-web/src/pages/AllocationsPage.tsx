@@ -101,10 +101,45 @@ export default function AllocationsPage() {
     return null
   }
 
-  /** 同环境拖放统一处理：只处理拖到本环境，不做跨环境移动。 */
+  /** 跨环境拖放：已分配卡片 → moveAllocation；可用插件 → 目标已安装才分配。 */
+  async function handleCrossProfileDrop(src: { kind: 'alloc' | 'avail'; id: string; profile: string }, targetProfile: string) {
+    if (src.kind === 'alloc') {
+      try {
+        const moved = await api.moveAllocation(src.id, targetProfile)
+        show(`已把 ${moved.pluginId} 从 ${src.profile} 移动到 ${targetProfile}`)
+        await load()
+      } catch (e) {
+        show(e instanceof Error ? e.message : String(e), true)
+        await load()
+      }
+      return
+    }
+    // 可用插件跨环境：目标环境必须已安装该插件（dependencies ∪ bundles）
+    const target = profiles.find((x) => x.name === targetProfile)
+    const installed = target ? [...target.bundles, ...Object.keys(target.dependencies)] : []
+    if (!installed.includes(src.id)) {
+      show(`目标环境 ${targetProfile} 未安装 ${src.id}，请先在「插件市场」安装`, true)
+      return
+    }
+    try {
+      await api.allocate(targetProfile, src.id, src.id, true)
+      show(`已分配 ${src.id} → ${targetProfile}`)
+      await load()
+    } catch (e) {
+      show(e instanceof Error ? e.message : String(e), true)
+      await load()
+    }
+  }
+
+  /** 拖放统一处理：同环境排序/分配；跨环境移动/分配。 */
   async function handleDropOnList(profile: string, targetKey: string | null) {
     const src = draggedKey ? parseKey(draggedKey) : null
-    if (!src || src.profile !== profile) return
+    if (!src) return
+    // 跨环境：源环境 ≠ 目标环境
+    if (src.profile !== profile) {
+      await handleCrossProfileDrop(src, profile)
+      return
+    }
     const list = unifiedList(profile)
 
     // 可用插件 → 拖到已分配卡片上（含末尾空白）＝ 分配并插入该位置
@@ -264,7 +299,7 @@ export default function AllocationsPage() {
         </span>
         <span className="spacer" />
         <span className="muted" style={{ fontSize: 12 }}>
-          💡 每个环境内：已分配卡片与可用插件均可拖动排序；拖动可用插件到分配区即完成分配
+          💡 插件可拖动：本环境内排序；拖到其它环境面板 = 移动分配（可用插件需目标环境已安装）
         </span>
         <button className="btn sm" onClick={() => load()}>
           刷新
@@ -285,7 +320,7 @@ export default function AllocationsPage() {
               className={`card${isOver ? ' drop-target' : ''}`}
               key={p.name}
               style={{ marginBottom: 12 }}
-              // 本环境面板是统一的拖放目标；跨环境拖动到此面板被忽略（不移动）
+              // 本环境面板是统一的拖放目标：同环境排序 / 跨环境移动（已分配）或分配（可用插件）
               onDragOver={(e) => {
                 e.preventDefault()
                 setDragOverProfile(p.name)

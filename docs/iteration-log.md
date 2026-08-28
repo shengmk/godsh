@@ -50,7 +50,28 @@
 ### 下一步
 - 桌面打包 0.2.3 并验收；后续可选：可用插件顺序持久化、跨环境移动（按需开放）。
 
-------
+## [2026-08-28] v0.2.4：跨环境插件拖拽（plugin_bag → desktop 移动）
+
+### 目标
+- 支持跨环境拖拽：把已分配插件从 A 环境移动到 B 环境（如 plugin_bag 的 dsh-memory 拖到 desktop）。
+- 可用插件跨环境分配需目标环境已安装该插件。
+
+### 改动
+- AllocationsPage.tsx：
+  - 新增 handleCrossProfileDrop：已分配卡片拖到其它环境 → moveAllocation（后端已有，patch 双向写回）；
+  - 可用插件拖到其它环境 → 检查目标环境 installedNames（profiles 数据中的 dependencies∪bundles），已安装才分配，否则提示先到市场安装；
+  - handleDropOnList 按源/目标环境是否相同分派同环境排序 或 跨环境移动。
+- 新增冒烟 scripts/smoke/_smoke-cross-drag.ps1（7 项：分配→移动→双向 patch 写回→已安装判断→最终分配），纳入 pnpm test:smoke。
+- 版本号 0.2.3 → 0.2.4。
+
+### 结果 / 状态（实测）
+- 用户核心场景验证：plugin_bag 分配 dsh-memory → move 到 desktop → plugin_bag patch 移除、desktop patch 加入，全部正确（5 次稳定性测试全过）。
+- 单测 20/20、冒烟 6 组全绿（含 cross-drag）、typecheck / build 全过。
+
+### 下一步
+- 打包 0.2.4 验收；可选：可用插件跨环境顺序持久化、右键「移动到…」菜单。
+
+---------
 
 ## [2026-08-20] 初始化 dsh Launcher 项目
 
