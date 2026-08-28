@@ -1,0 +1,11 @@
+{
+    "name":  "@dsh-launcher/plugin-registry",
+    "version":  "0.2.2",
+    "private":  true,
+    "type":  "module",
+    "description":  "dsh Launcher 插件识别：bundle / client 插件",
+    "exports":  {
+                    ".":  "./src/index.ts"
+                },
+    "main":  "./src/index.ts"
+}

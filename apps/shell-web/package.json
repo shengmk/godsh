@@ -1,0 +1,24 @@
+{
+    "name":  "@dsh-launcher/shell-web",
+    "version":  "0.2.2",
+    "private":  true,
+    "type":  "module",
+    "description":  "dsh Launcher Web 管理界面（Vite + React + TS，玻璃拟态）",
+    "scripts":  {
+                    "dev":  "vite",
+                    "build":  "tsc --noEmit -p tsconfig.json \u0026\u0026 vite build",
+                    "build:tauri":  "tsc --noEmit -p tsconfig.json \u0026\u0026 vite build --mode tauri",
+                    "preview":  "vite preview"
+                },
+    "dependencies":  {
+                         "react":  "^18.3.1",
+                         "react-dom":  "^18.3.1"
+                     },
+    "devDependencies":  {
+                            "@types/react":  "^18.3.12",
+                            "@types/react-dom":  "^18.3.1",
+                            "@vitejs/plugin-react":  "^4.3.4",
+                            "typescript":  "^5.6.3",
+                            "vite":  "^5.4.11"
+                        }
+}

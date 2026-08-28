@@ -1,0 +1,37 @@
+node_modules/
+dist/
+*.log
+.DS_Store
+Thumbs.db
+
+# 构建产物
+apps/launcher/dist/
+apps/launcher/src-tauri/target/
+apps/launcher/src-tauri/resources/
+
+# 运行时数据（用户本机特定，可再生成；仅保留占位 .gitkeep）
+data/*
+!data/logs/
+data/logs/*
+!data/logs/.gitkeep
+data/runtime/
+data/config.json
+data/dsh-envs.json
+data/plugins.json
+data/kernels.json
+data/allocations.json
+data/profiles.json
+data/unified-kernel.json
+data/build-permissions.json
+
+# release 二进制（作为 GitHub Release 附件，不提交到仓库）
+release/*.exe
+release/*.zip
+release/SHA256SUMS.txt
+
+# 冒烟测试临时输出
+smoke-out.txt
+smoke-err.txt
+
+# 冒烟测试输出（任何前缀）
+smoke-*.txt

@@ -1,0 +1,26 @@
+{
+    "name":  "dsh-launcher",
+    "version":  "0.2.2",
+    "private":  true,
+    "type":  "module",
+    "packageManager":  "pnpm@11.22.0",
+    "description":  "dsh 环境配置启动器（Anaconda Navigator 类比）",
+    "scripts":  {
+                    "dev":  "tsx apps/launcher/src/cli.ts",
+                    "launcher":  "tsx apps/launcher/src/cli.ts",
+                    "serve":  "tsx apps/launcher/src/cli.ts serve",
+                    "typecheck":  "tsc --noEmit -p tsconfig.json",
+                    "test":  "node --import tsx --test packages/profile-manager/src/patch.test.ts packages/allocation/src/allocation-manager.test.ts packages/kernel-manager/src/unified-kernel.test.ts",
+                    "test:smoke":  "powershell -ExecutionPolicy Bypass -File scripts/run-smoke.ps1",
+                    "dev:web":  "pnpm --filter @dsh-launcher/shell-web dev",
+                    "build:web":  "pnpm --filter @dsh-launcher/shell-web build",
+                    "build:server":  "esbuild apps/launcher/src/cli.ts --bundle --platform=node --format=esm --outfile=apps/launcher/dist/server.mjs"
+                },
+    "devDependencies":  {
+                            "@tauri-apps/cli":  "^2.11.4",
+                            "@types/node":  "^22.10.0",
+                            "esbuild":  "^0.28.2",
+                            "tsx":  "^4.19.2",
+                            "typescript":  "^5.6.3"
+                        }
+}
