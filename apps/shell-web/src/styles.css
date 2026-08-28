@@ -939,7 +939,9 @@ body {
   flex-shrink: 0;
 }
 
-/* 跟手拖拽提示 */
+/* 跟手拖拽提示
+   注意：不加 backdrop-filter（模糊层会盖住鼠标指针，浅色主题下指针显示不清晰）；
+   背景用不透明色，并让浮条远离指针（前端已偏移 +16px）。 */
 .drag-ghost {
   position: fixed;
   z-index: 300;
@@ -955,6 +957,4 @@ body {
   font-size: 12px;
   font-weight: 600;
   color: var(--text);
-  backdrop-filter: blur(12px);
-  -webkit-backdrop-filter: blur(12px);
 }

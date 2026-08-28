@@ -517,9 +517,9 @@ export default function AllocationsPage() {
         })
       )}
 
-      {/* 跟手拖拽提示 */}
+      {/* 跟手拖拽提示（偏移 +16/+22，避免遮挡鼠标指针） */}
       {drag && drag.active && dragLabel && (
-        <div className="drag-ghost" style={{ left: drag.x + 12, top: drag.y + 12 }}>
+        <div className="drag-ghost" style={{ left: drag.x + 16, top: drag.y + 22 }}>
           <span className="drag-grip">⠿</span> {dragLabel}
         </div>
       )}
