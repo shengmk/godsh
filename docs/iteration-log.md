@@ -71,7 +71,31 @@
 ### 下一步
 - 打包 0.2.4 验收；可选：可用插件跨环境顺序持久化、右键「移动到…」菜单。
 
----------
+## [2026-08-28] v0.2.4 修复：跨环境拖拽真正可用（getData 修复）
+
+### 问题（用户实测反馈）
+- v0.2.4 初版跨环境拖拽「并不能实现」。
+- 根因：drop 处理器读取拖拽源用的是 React state draggedKey，而 HTML5 拖拽中 drop 事件发生在目标元素上，
+  state 更新可能未及时生效 → draggedKey 为 null → 静默失败。
+
+### 修复
+- handleDropOnList 增加 sourceKey 参数，drop 时从 e.dataTransfer.getData('text/plain') 读取（不依赖 state）。
+- 可用插件 key 改为 vail:<source>:<pluginId>（含源环境），避免同名插件跨环境解析歧义。
+- 面板与行条目的 onDrop 均传入 getData 结果。
+
+### 验证（真实浏览器 CDP，WebView2）
+- 页面真实加载（tauri.localhost），导航插件分配页；
+- plugin_bag 分配 dsh-memory 成为已分配卡片 → 拖到 desktop 面板 →
+  **desktop 出现 dsh-memory 分配卡片、plugin_bag 移除**（分配关系转移，patch 双向写回）；
+- 可用插件（未分配）跨环境且目标未安装时被正确拦截提示。
+
+### 结果 / 状态
+- 单测 20/20、冒烟 6 组全绿、typecheck / build 全过；桌面端 0.2.4 打包验证通过。
+
+### 下一步
+- 交付 0.2.4 验收。
+
+------------
 
 ## [2026-08-20] 初始化 dsh Launcher 项目
 

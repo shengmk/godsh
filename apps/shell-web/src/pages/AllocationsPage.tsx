@@ -14,7 +14,10 @@ const KEY_PREFIX_ALLOC = 'alloc:'
 const KEY_PREFIX_AVAIL = 'avail:'
 
 function itemKey(item: ListItem): string {
-  return item.kind === 'alloc' ? `${KEY_PREFIX_ALLOC}${item.alloc.id}` : `${KEY_PREFIX_AVAIL}${item.avail.pluginId}`
+  // 可用插件 key 含源环境（bundle/dep），避免同名插件在多个环境时解析歧义
+  return item.kind === 'alloc'
+    ? `${KEY_PREFIX_ALLOC}${item.alloc.id}`
+    : `${KEY_PREFIX_AVAIL}${item.avail.source === 'bundle' ? 'bundle' : 'dep'}:${item.avail.pluginId}`
 }
 
 export default function AllocationsPage() {
@@ -83,7 +86,7 @@ export default function AllocationsPage() {
     })
   }
 
-  // 解析拖拽源 key
+  // 解析拖拽源 key（可用插件 key 格式：avail:<source>:<pluginId>）
   function parseKey(key: string): { kind: 'alloc' | 'avail'; id: string; profile: string } | null {
     if (key.startsWith(KEY_PREFIX_ALLOC)) {
       const id = key.slice(KEY_PREFIX_ALLOC.length)
@@ -91,7 +94,9 @@ export default function AllocationsPage() {
       return a ? { kind: 'alloc', id, profile: a.profile } : null
     }
     if (key.startsWith(KEY_PREFIX_AVAIL)) {
-      const pluginId = key.slice(KEY_PREFIX_AVAIL.length)
+      const rest = key.slice(KEY_PREFIX_AVAIL.length)
+      const sep = rest.indexOf(':')
+      const pluginId = sep >= 0 ? rest.slice(sep + 1) : rest
       for (const [profile, items] of Object.entries(available)) {
         if (items.some((i) => i.pluginId === pluginId && !i.allocated)) {
           return { kind: 'avail', id: pluginId, profile }
@@ -131,9 +136,9 @@ export default function AllocationsPage() {
     }
   }
 
-  /** 拖放统一处理：同环境排序/分配；跨环境移动/分配。 */
-  async function handleDropOnList(profile: string, targetKey: string | null) {
-    const src = draggedKey ? parseKey(draggedKey) : null
+  /** 拖放统一处理：同环境排序/分配；跨环境移动/分配。sourceKey 从 dataTransfer 读取，不依赖 state。 */
+  async function handleDropOnList(profile: string, targetKey: string | null, sourceKey: string) {
+    const src = sourceKey ? parseKey(sourceKey) : null
     if (!src) return
     // 跨环境：源环境 ≠ 目标环境
     if (src.profile !== profile) {
@@ -331,7 +336,8 @@ export default function AllocationsPage() {
                 e.stopPropagation()
                 setDragOverProfile(null)
                 setDropTargetKey(null)
-                void handleDropOnList(p.name, null)
+                const sourceKey = e.dataTransfer.getData('text/plain')
+                void handleDropOnList(p.name, null, sourceKey)
               }}
             >
               <div
@@ -388,7 +394,8 @@ export default function AllocationsPage() {
                             e.preventDefault()
                             e.stopPropagation()
                             setDropTargetKey(null)
-                            void handleDropOnList(p.name, key)
+                            const sourceKey = e.dataTransfer.getData('text/plain')
+                            void handleDropOnList(p.name, key, sourceKey)
                           }}
                           onDragEnd={() => {
                             setDraggedKey(null)
