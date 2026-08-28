@@ -1,4 +1,4 @@
-import { run, type RunResult } from '@dsh-launcher/core'
+import { run, type RunResult } from '@godsh/core'
 
 export type InstallAction = 'add' | 'remove' | 'update'
 

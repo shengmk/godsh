@@ -1,12 +1,12 @@
-# dsh Launcher — dsh 环境配置启动器
+# godsh — dsh 环境配置启动器
 
 一个面向 **DeepSeek Harness（dsh）** 的图形化环境配置启动器，整体类比 **Anaconda Navigator**。
 
-> 当前版本：**v0.2.4** ｜ Windows 10 / 11 ｜ 桌面（Tauri 2）+ Web
+> 当前版本：**v0.2.5** ｜ Windows 10 / 11 ｜ 桌面（Tauri 2）+ Web
 >
-> ⚠️ 推送到 GitHub 前，请把本文档中所有 `YOUR_NAME` 替换为你的 GitHub 用户名。
+> ⚠️ 推送到 GitHub 前，请把本文档中所有 `shengmk` 替换为你的 GitHub 用户名。
 
-| Anaconda | DSH | dsh Launcher |
+| Anaconda | DSH | godsh |
 | --- | --- | --- |
 | Anaconda Navigator | dsh web / CLI | 本启动器 |
 | conda | dsh CLI | 启动器底层调用 |
@@ -30,14 +30,14 @@
 
 ### 方式一：桌面版（推荐）
 
-1. 从 [Releases](https://github.com/YOUR_NAME/dsh-launcher/releases) 下载 `dsh-launcher-0.2.4-x64-setup.exe`（安装版）或 `-x64.zip`（便携版）。2. 运行并启动：应用会自动拉起内置 Node API 后端（端口 4780）。
+1. 从 [Releases](https://github.com/shengmk/godsh/releases) 下载 `godsh-0.2.5-x64-setup.exe`（安装版）或 `-x64.zip`（便携版）。2. 运行并启动：应用会自动拉起内置 Node API 后端（端口 4780）。
 3. 首次使用建议点击「控制台」→「快速启动默认模板」（无 dsh 会自动安装 base + 初始化官方模板）。
 
 ### 方式二：Web 版 / 源码运行
 
 ```powershell
-git clone https://github.com/YOUR_NAME/dsh-launcher.git
-cd dsh-launcher
+git clone https://github.com/shengmk/godsh.git
+cd godsh
 pnpm install          # 安装依赖
 pnpm build:web        # 构建前端
 pnpm serve            # 启动 API + 前端（http://127.0.0.1:4780）
@@ -73,7 +73,7 @@ pnpm serve            # 启动 API + 前端（http://127.0.0.1:4780）
 | 测试 | `node:test` 单元测试 + PowerShell 冒烟回归（`pnpm test` / `pnpm test:smoke`） |
 
 ```text
-dsh-launcher/
+godsh/
 ├─ apps/
 │  ├─ launcher/           # 主应用（CLI + HTTP API + Tauri 桌面壳）
 │  └─ shell-web/          # Web 管理界面（7 页，玻璃拟态）
@@ -118,7 +118,7 @@ pwsh -File scripts/make-release.ps1 -Version 0.2.5
 
 ## 📝 迭代记录
 
-项目通过 `docs/iteration-log.md` 持续记录每一轮迭代（v0.1.0 → v0.2.4），包括关键机制修正（`dsh web` 别名、统一内核 bundle 注入、Windows shim/pid 陷阱、CORS 白名单、拖拽引擎选型等）。
+项目通过 `docs/iteration-log.md` 持续记录每一轮迭代（v0.1.0 → v0.2.5），包括关键机制修正（`dsh web` 别名、统一内核 bundle 注入、Windows shim/pid 陷阱、CORS 白名单、拖拽引擎选型等）。
 
 ## 📄 License
 

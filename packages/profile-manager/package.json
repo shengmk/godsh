@@ -1,14 +1,14 @@
 {
-    "name":  "@dsh-launcher/profile-manager",
+    "name":  "@godsh/profile-manager",
     "version":  "0.2.5",
     "private":  true,
     "type":  "module",
-    "description":  "dsh Launcher Profile（环境）扫描与编辑",
+    "description":  "godsh Profile（环境）扫描与编辑",
     "exports":  {
                     ".":  "./src/index.ts"
                 },
     "main":  "./src/index.ts",
     "dependencies":  {
-                         "@dsh-launcher/core":  "workspace:*"
+                         "@godsh/core":  "workspace:*"
                      }
 }

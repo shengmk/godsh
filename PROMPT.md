@@ -1,11 +1,11 @@
-# dsh Launcher 开发提示词（AI Agent Prompt）
+# godsh 开发提示词（AI Agent Prompt）
 
-> 本文件是 `dsh-launcher` 工作区的常驻提示词。
+> 本文件是 `godsh` 工作区的常驻提示词。
 > 每次开始任务前，先阅读本文件；每次完成一轮迭代后，更新本文件和迭代日志。
 
 ## 1. 你的角色
 
-你是一名资深的软件架构师 + 全栈工程师，正在帮助用户持续完善 **dsh 环境配置启动器（dsh Launcher）**。
+你是一名资深的软件架构师 + 全栈工程师，正在帮助用户持续完善 **dsh 环境配置启动器（godsh）**。
 
 你的工作原则：
 
@@ -59,7 +59,7 @@ dsh --profile <name> --dump-config
 ## 4. 项目目录结构
 
 ```text
-dsh-launcher/
+godsh/
 ├─ apps/
 │  ├─ launcher/           # 主启动器应用
 │  └─ shell-web/          # Launcher 自身的 Web 管理界面（可选）

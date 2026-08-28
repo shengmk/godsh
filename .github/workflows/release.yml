@@ -42,7 +42,7 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           files: |
-            release/dsh-launcher-*.exe
-            release/dsh-launcher-*.zip
+            release/godsh-*.exe
+            release/godsh-*.zip
             release/SHA256SUMS.txt
           draft: true

@@ -1,7 +1,7 @@
 import { join } from 'node:path'
-import { readLogTail } from '@dsh-launcher/core'
-import { listTemplates } from '@dsh-launcher/kernel-manager'
-import { scanProfiles } from '@dsh-launcher/profile-manager'
+import { readLogTail } from '@godsh/core'
+import { listTemplates } from '@godsh/kernel-manager'
+import { scanProfiles } from '@godsh/profile-manager'
 import type { ApiHandler } from './types.js'
 
 /** /api/unified-kernel* —— 统一内核配置 / 应用 / 还原 */

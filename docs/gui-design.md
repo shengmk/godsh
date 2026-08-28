@@ -1,4 +1,4 @@
-# dsh Launcher GUI 风格设计
+# godsh GUI 风格设计
 
 > 本文用于确认 Launcher 的 GUI 风格，并作为后续 UI 实现的设计依据。
 > 在开始实现 UI 前，需要用户回答下面的风格问卷。

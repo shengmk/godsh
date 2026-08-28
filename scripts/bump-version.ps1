@@ -1,4 +1,4 @@
-# dsh Launcher 版本号统一更新脚本
+# godsh 版本号统一更新脚本
 # 用法: pwsh -File scripts/bump-version.ps1 -Version 0.2.0
 param([Parameter(Mandatory=$true)][string]$Version)
 

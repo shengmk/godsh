@@ -2,10 +2,10 @@ import { useCallback, useMemo, useState } from 'react'
 
 export type Locale = 'zh-CN' | 'en'
 
-const STORAGE_KEY = 'dsh-launcher-locale'
+const STORAGE_KEY = 'godsh-locale'
 
 const ZH: Record<string, string> = {
-  'app.name': 'dsh Launcher',
+  'app.name': 'godsh',
   'app.subtitle': '环境配置启动器',
   'nav.dashboard': '仪表盘',
   'nav.dashboardDesc': '环境 / 插件 / 内核总览',
@@ -44,7 +44,7 @@ const ZH: Record<string, string> = {
   'topbar.start': '启动',
   'topbar.noResult': '无匹配结果',
   'page.dashboard.title': '仪表盘',
-  'page.dashboard.desc': 'dsh Launcher 状态总览',
+  'page.dashboard.desc': 'godsh 状态总览',
   'page.profiles.title': '环境',
   'page.profiles.desc': '管理 DSH Profile：启动 / 停止 / 查看日志',
   'page.market.title': '插件市场',
@@ -101,7 +101,7 @@ const ZH: Record<string, string> = {
 }
 
 const EN: Record<string, string> = {
-  'app.name': 'dsh Launcher',
+  'app.name': 'godsh',
   'app.subtitle': 'Environment Launcher',
   'nav.dashboard': 'Dashboard',
   'nav.dashboardDesc': 'Overview of env / plugins / kernels',
@@ -140,7 +140,7 @@ const EN: Record<string, string> = {
   'topbar.start': 'Start',
   'topbar.noResult': 'No matches',
   'page.dashboard.title': 'Dashboard',
-  'page.dashboard.desc': 'dsh Launcher overview',
+  'page.dashboard.desc': 'godsh overview',
   'page.profiles.title': 'Environments',
   'page.profiles.desc': 'Manage DSH profiles: start / stop / view logs',
   'page.market.title': 'Plugin Market',

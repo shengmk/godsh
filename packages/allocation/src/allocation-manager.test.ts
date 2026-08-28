@@ -3,7 +3,7 @@ import assert from 'node:assert/strict'
 import { mkdtempSync, mkdirSync, writeFileSync, rmSync, readFileSync, existsSync, readdirSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { ConfigStore } from '@dsh-launcher/core'
+import { ConfigStore } from '@godsh/core'
 import { AllocationManager } from './allocation-manager.js'
 
 function setup(): { store: ConfigStore; manager: AllocationManager; dir: string; dataDir: string } {

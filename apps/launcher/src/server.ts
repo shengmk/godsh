@@ -1,9 +1,9 @@
 import http from 'node:http'
 import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from 'node:fs'
 import { extname, join } from 'node:path'
-import { MONOREPO_ROOT, DATA_DIR, findPidByPort, isPortListening, readLogTail } from '@dsh-launcher/core'
-import { fetchMarketIndex } from '@dsh-launcher/marketplace'
-import { scanProfiles } from '@dsh-launcher/profile-manager'
+import { MONOREPO_ROOT, DATA_DIR, findPidByPort, isPortListening, readLogTail } from '@godsh/core'
+import { fetchMarketIndex } from '@godsh/marketplace'
+import { scanProfiles } from '@godsh/profile-manager'
 import type { CliContext } from './context.js'
 import { routeHandlers } from './routes/index.js'
 import type { ApiHandler, RouteContext, RuntimeProc } from './routes/types.js'
@@ -90,7 +90,7 @@ export interface ApiServerOptions {
 }
 
 /**
- * dsh Launcher HTTP API 服务：
+ * godsh HTTP API 服务：
  * - /api/* 按资源域分派到 routes/ 下的 handler（见 routeHandlers）
  * - 其它路径回退到 apps/shell-web/dist 的静态资源（若已构建）
  */
@@ -368,7 +368,7 @@ export async function startApiServer(ctx: CliContext, opts: ApiServerOptions): P
     }
     if (!existsSync(filePath)) {
       res.writeHead(200, { 'Content-Type': 'text/plain; charset=utf-8', ...securityHeaders() })
-      res.end('dsh Launcher API 服务运行中。前端尚未构建：请在 apps/shell-web 运行 pnpm build。\n')
+      res.end('godsh API 服务运行中。前端尚未构建：请在 apps/shell-web 运行 pnpm build。\n')
       return
     }
     const ext = extname(filePath).toLowerCase()
@@ -377,6 +377,6 @@ export async function startApiServer(ctx: CliContext, opts: ApiServerOptions): P
   }
 
   await new Promise<void>((resolve) => server.listen(opts.port, opts.host ?? '127.0.0.1', resolve))
-  console.log(`dsh Launcher API: http://${opts.host ?? '127.0.0.1'}:${opts.port}`)
+  console.log(`godsh API: http://${opts.host ?? '127.0.0.1'}:${opts.port}`)
   return server
 }

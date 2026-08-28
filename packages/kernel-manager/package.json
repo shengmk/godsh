@@ -1,15 +1,15 @@
 {
-    "name":  "@dsh-launcher/kernel-manager",
+    "name":  "@godsh/kernel-manager",
     "version":  "0.2.5",
     "private":  true,
     "type":  "module",
-    "description":  "dsh Launcher 内核模板与实例管理",
+    "description":  "godsh 内核模板与实例管理",
     "exports":  {
                     ".":  "./src/index.ts"
                 },
     "main":  "./src/index.ts",
     "dependencies":  {
-                         "@dsh-launcher/core":  "workspace:*",
-                         "@dsh-launcher/profile-manager":  "workspace:*"
+                         "@godsh/core":  "workspace:*",
+                         "@godsh/profile-manager":  "workspace:*"
                      }
 }

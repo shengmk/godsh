@@ -1,4 +1,4 @@
-# dsh Launcher v0.2.2 新增功能冒烟测试（隔离环境，不碰真实 .dsh）
+# godsh v0.2.2 新增功能冒烟测试（隔离环境，不碰真实 .dsh）
 # 覆盖：合并轮询 /profiles/status、批量安装 /plugins/batch、可用插件 /allocations/available
 $ErrorActionPreference = 'Stop'
 $root = Split-Path -Parent (Split-Path -Parent (Split-Path -Parent $MyInvocation.MyCommand.Path))

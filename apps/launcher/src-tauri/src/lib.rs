@@ -29,11 +29,11 @@ fn resolve_resource(app: &tauri::App, rel: &str) -> Option<PathBuf> {
   None
 }
 
-/// 运行时数据目录：优先 DSH_LAUNCHER_DATA_DIR，否则 %APPDATA%\dsh-launcher\data。
+/// 运行时数据目录：优先 DSH_LAUNCHER_DATA_DIR，否则 %APPDATA%\godsh\data。
 fn data_dir() -> String {
   std::env::var("DSH_LAUNCHER_DATA_DIR").unwrap_or_else(|_| {
     let appdata = std::env::var("APPDATA").unwrap_or_default();
-    format!("{}\\dsh-launcher\\data", appdata)
+    format!("{}\\godsh\\data", appdata)
   })
 }
 
@@ -76,11 +76,11 @@ pub fn run() {
             *app.state::<ServerProc>().0.lock().unwrap() = Some(child);
           }
           Err(e) => {
-            eprintln!("[dsh-launcher] 启动后端失败: {e}");
+            eprintln!("[godsh] 启动后端失败: {e}");
           }
         }
       } else {
-        eprintln!("[dsh-launcher] 未找到 server.mjs，后端未启动");
+        eprintln!("[godsh] 未找到 server.mjs，后端未启动");
       }
 
       Ok(())

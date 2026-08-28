@@ -182,7 +182,7 @@ DSH 的“同一个 Web 内核”具体指：
 
 ## 6. 对照我们想做的 Launcher（Anaconda 类比）
 
-| 概念 | Anaconda | DSH | dsh Launcher |
+| 概念 | Anaconda | DSH | godsh |
 | --- | --- | --- | --- |
 | 运行环境 | conda env | DSH profile | 环境/Profile 管理 |
 | 语言运行时 | Python 版本 | dsh 本体 + Node runtime | 内核管理 |

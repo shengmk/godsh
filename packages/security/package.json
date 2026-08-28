@@ -1,14 +1,14 @@
 {
-    "name":  "@dsh-launcher/security",
+    "name":  "@godsh/security",
     "version":  "0.2.5",
     "private":  true,
     "type":  "module",
-    "description":  "dsh Launcher 安全：来源校验、构建授权",
+    "description":  "godsh 安全：来源校验、构建授权",
     "exports":  {
                     ".":  "./src/index.ts"
                 },
     "main":  "./src/index.ts",
     "dependencies":  {
-                         "@dsh-launcher/core":  "workspace:*"
+                         "@godsh/core":  "workspace:*"
                      }
 }

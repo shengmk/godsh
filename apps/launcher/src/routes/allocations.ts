@@ -1,4 +1,4 @@
-import { scanProfiles } from '@dsh-launcher/profile-manager'
+import { scanProfiles } from '@godsh/profile-manager'
 import type { ApiHandler } from './types.js'
 
 /** /api/allocations* —— 分配 CRUD / 排序 / 移动 / 可分配清单（含 patch 写回守护与回滚） */

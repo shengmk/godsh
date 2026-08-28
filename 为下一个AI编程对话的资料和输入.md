@@ -1,6 +1,6 @@
 # 为下一个 AI 编程对话的资料和输入
 
-> 本文件是 **dsh Launcher** 项目交接给下一个 AI 编程会话的**完整输入**。
+> 本文件是 **godsh** 项目交接给下一个 AI 编程会话的**完整输入**。
 > 请新会话先完整阅读本文件，再读 `PROMPT.md`、`docs/iteration-log.md`、`docs/dsh-study.md`，然后开始工作。
 > 目标：让新 AI 在**不依赖旧会话记忆**的情况下，快速理解项目全貌、当前状态、技术约束与下一步方向。
 
@@ -8,7 +8,7 @@
 
 ## 0. 一句话概括
 
-**dsh Launcher** 是 DeepSeek Harness（dsh）的图形化环境配置启动器（类比 Anaconda Navigator）：管理 DSH 的 Profile（环境）、插件分配、Web 内核与 DSH 本体版本；Windows 桌面（Tauri 2）+ Web 双形态。
+**godsh** 是 DeepSeek Harness（dsh）的图形化环境配置启动器（类比 Anaconda Navigator）：管理 DSH 的 Profile（环境）、插件分配、Web 内核与 DSH 本体版本；Windows 桌面（Tauri 2）+ Web 双形态。
 
 **当前版本：v0.2.4**（git 13 个提交，仓库干净，release 产物齐全）。
 
@@ -16,7 +16,7 @@
 
 ## 1. 项目目的与类比
 
-| Anaconda | DSH | dsh Launcher |
+| Anaconda | DSH | godsh |
 | --- | --- | --- |
 | Anaconda Navigator | dsh web / CLI | 本启动器 |
 | conda | dsh CLI | 启动器底层调用 |
@@ -45,7 +45,7 @@
 ## 3. 目录结构
 
 ```text
-dsh-launcher-project-0.2.2/
+godsh-project-0.2.2/
 ├─ apps/
 │  ├─ launcher/            # 主应用：CLI + HTTP API + Tauri 桌面壳
 │  │  ├─ src/
@@ -155,7 +155,7 @@ pwsh -File scripts/bump-version.ps1 -Version 0.2.5
 pwsh -File scripts/make-release.ps1 -Version 0.2.5
 ```
 
-> GNU 工具链限制：构建要求项目路径不含空格（`make-release.ps1` 内部复制到 `%USERPROFILE%\dshlauncher`）。
+> GNU 工具链限制：构建要求项目路径不含空格（`make-release.ps1` 内部复制到 `%USERPROFILE%\godsh`）。
 
 ---
 

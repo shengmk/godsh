@@ -1,4 +1,4 @@
-import { scanLocalPlugins } from '@dsh-launcher/plugin-registry'
+import { scanLocalPlugins } from '@godsh/plugin-registry'
 import type { ApiHandler } from './types.js'
 
 /** /api/plugins、/api/market —— 本地插件清单 + 市场浏览（带 5 分钟缓存） */

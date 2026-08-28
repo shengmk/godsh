@@ -1,7 +1,7 @@
 import { existsSync, readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
-import type { ConfigStore } from '@dsh-launcher/core'
-import { invalidateProfileCache, type ProfileInfo } from '@dsh-launcher/profile-manager'
+import type { ConfigStore } from '@godsh/core'
+import { invalidateProfileCache, type ProfileInfo } from '@godsh/profile-manager'
 
 export interface UnifiedKernelPlugin {
   /** 插件 id（bundle 名，如 @deepseek-ai/dsh-web-app、dshmarket） */

@@ -7,16 +7,16 @@ import {
   startWeb,
   stopWeb,
   type EnvInfo,
-} from '@dsh-launcher/core'
+} from '@godsh/core'
 import {
   createProfile,
   removeProfile,
   scanProfiles,
   type ProfileInfo,
-} from '@dsh-launcher/profile-manager'
-import { scanLocalPlugins, type PluginInfo } from '@dsh-launcher/plugin-registry'
-import { fetchMarketIndex, listInstalled, pluginAction, type MarketPlugin } from '@dsh-launcher/marketplace'
-import { listTemplates, KernelManager, type KernelTemplate } from '@dsh-launcher/kernel-manager'
+} from '@godsh/profile-manager'
+import { scanLocalPlugins, type PluginInfo } from '@godsh/plugin-registry'
+import { fetchMarketIndex, listInstalled, pluginAction, type MarketPlugin } from '@godsh/marketplace'
+import { listTemplates, KernelManager, type KernelTemplate } from '@godsh/kernel-manager'
 import { createContext } from './context.js'
 import { startApiServer } from './server.js'
 
@@ -87,7 +87,7 @@ function marketDescription(p: MarketPlugin): string | null {
 }
 
 function showHelp(): void {
-  console.log(`dsh Launcher CLI
+  console.log(`godsh CLI
 用法: pnpm launcher <command> [args]
 
 命令:

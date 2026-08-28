@@ -5,7 +5,7 @@ import { fileURLToPath } from 'node:url'
 const here = dirname(fileURLToPath(import.meta.url)) // packages/core/src
 
 /**
- * dsh-launcher 工作区根目录。
+ * godsh 工作区根目录。
  * 打包成单文件后 `import.meta.url` 指向产物而非源码，因此允许用
  * `DSH_LAUNCHER_ROOT` 显式指定根目录（Tauri 侧启动后端时传入）。
  */

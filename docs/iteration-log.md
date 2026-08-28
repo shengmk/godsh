@@ -1,6 +1,6 @@
-# dsh Launcher 迭代日志
+# godsh 迭代日志
 
-> 本文件记录 dsh Launcher 的每一轮迭代，便于持续完善。
+> 本文件记录 godsh 的每一轮迭代，便于持续完善。
 > 新需求/新改动都要在这里追加记录。
 
 ## 迭代记录格式
@@ -162,14 +162,14 @@
 
 ---------------------
 
-## [2026-08-20] 初始化 dsh Launcher 项目
+## [2026-08-20] 初始化 godsh 项目
 
 ### 目标
 - 建立 dsh 环境配置启动器的项目骨架。
 - 学习 DSH 真实框架，并整理成文档。
 
 ### 改动
-- 创建 `dsh-launcher/` 目录骨架。
+- 创建 `godsh/` 目录骨架。
 - 新增：
   - `README.md`
   - `docs/workflow.md`
@@ -235,7 +235,7 @@
 
 ### 改动
 - 建立 pnpm workspace monorepo：根 `package.json`、`pnpm-workspace.yaml`、`tsconfig.base.json`、`tsconfig.json`、`.gitignore`、`scripts/`（dev/build/pack-plugin）。
-- 新增 7 个包（均 `@dsh-launcher/*`，ESM + TS，tsx 直跑）：
+- 新增 7 个包（均 `@godsh/*`，ESM + TS，tsx 直跑）：
   - `core`：`env-detect`（node/pnpm/dsh + DSH_HOME 检测）、`run`（Windows cmd shim 兼容 + 参数转义）、`config-store`、`events`（类型安全事件总线）、`process-manager`（dsh web 启动/停止/端口就绪/pid 文件）、`paths`。
   - `profile-manager`：`scanner`（扫描 `$DSH_HOME/profiles` 的 bundles/依赖/patch）、`patch`（轻量 cordis.patch.yml 解析/序列化）、`profile-editor`（创建/删除/禁用插件）。
   - `plugin-registry`：`bundle`（识别 bundle / client / both 插件）。
@@ -368,12 +368,12 @@
 - 安装 Rust 工具链（rustup，用户级，minimal + stable）：rustc/cargo 1.98.0。
 - 因本机**无 MSVC 链接器**（未装 VS Build Tools），改用已装 MinGW 的 **GNU 工具链**（`x86_64-pc-windows-gnu`），并配置清华镜像（rustup dist + cargo sparse index）。
 - 安装 `@tauri-apps/cli`，用 `tauri init --ci` 生成 `apps/launcher/src-tauri/`（含默认图标、Cargo.toml、tauri.conf.json、main.rs/lib.rs、capabilities）。
-- 修正 tauri.conf.json 的 `identifier`/`productName`/窗口尺寸，Cargo 包名改为 `dsh-launcher`。
+- 修正 tauri.conf.json 的 `identifier`/`productName`/窗口尺寸，Cargo 包名改为 `godsh`。
 - 前端 `api.ts` 的 API 基址改为可用 `VITE_API_BASE` 覆盖（Tauri 模式可指向 `http://127.0.0.1:4780/api`）。
 
 ### 关键发现 / 坑
-- **路径含空格 + GNU 工具链**：`tauri-winres`（嵌入图标/版本信息）调用 MinGW `windres` 时不能处理带空格的路径（项目在 `...\dsh projects\dsh launcher\...`），导致构建失败。
-  - 解法：把 `src-tauri/` + `apps/shell-web/dist` 复制到**无空格路径**（`%USERPROFILE%\dshlauncher\`）构建，`CARGO_TARGET_DIR` 也设为无空格路径。
+- **路径含空格 + GNU 工具链**：`tauri-winres`（嵌入图标/版本信息）调用 MinGW `windres` 时不能处理带空格的路径（项目在 `...\dsh projects\godsh\...`），导致构建失败。
+  - 解法：把 `src-tauri/` + `apps/shell-web/dist` 复制到**无空格路径**（`%USERPROFILE%\godsh\`）构建，`CARGO_TARGET_DIR` 也设为无空格路径。
 - **旧 MinGW binutils 太旧**：本机 `D:\mingw64` 是 GCC 8.1.0，链接报 `export ordinal too large`。
   - 解法：从清华镜像装 MSYS2 + `mingw-w64-x86_64-gcc`（binutils 2.47）。
 - **GNU 下 cdylib 导出表溢出**：Tauri 默认 `crate-type = ["staticlib","cdylib","rlib"]`，GNU 链接 cdylib 时导出表 `export ordinal too large`（binutils 2.47 仍复现）。
@@ -381,8 +381,8 @@
 - 本机已具备 WebView2 运行时（Windows 11 自带）。
 
 ### 结果 / 状态（实测）
-- Rust/GNU 工具链可链接；Tauri `dsh-launcher.exe`（debug，206MB）**构建成功**。
-- 运行 `.exe`：进程存活、内存 54.8MB、**窗口标题 "dsh Launcher"**，桌面窗口正常打开。
+- Rust/GNU 工具链可链接；Tauri `godsh.exe`（debug，206MB）**构建成功**。
+- 运行 `.exe`：进程存活、内存 54.8MB、**窗口标题 "godsh"**，桌面窗口正常打开。
 - 新增 `scripts/build-tauri.ps1` 固化「无空格目录 + MinGW + cargo build」构建流程。
 - 已同步 `crate-type = ["rlib"]` 修正到 `apps/launcher/src-tauri/Cargo.toml`。
 
@@ -406,12 +406,12 @@
 
 ### 结果 / 状态（实测）
 - 打包版后端独立运行正常（`node dist/server.mjs profiles` → 10 个 Profile）。
-- 运行 `.exe`（带 `DSH_LAUNCHER_SERVER`/`DSH_LAUNCHER_ROOT`）：窗口「dsh Launcher」打开，后端 4780 响应 `/api/health`（dsh 0.1.1-rc.1）、`/api/profiles`（10 个 Profile）。
+- 运行 `.exe`（带 `DSH_LAUNCHER_SERVER`/`DSH_LAUNCHER_ROOT`）：窗口「godsh」打开，后端 4780 响应 `/api/health`（dsh 0.1.1-rc.1）、`/api/profiles`（10 个 Profile）。
 - 桌面端到端链路（Tauri 窗口 → Node API → DSH）打通。
 
 ### 下一步
 - 自包含化：把 `server.mjs` 打进 Tauri 资源（`bundle.resources`），运行时用资源目录解析路径，去掉环境变量依赖。
-- 运行时数据目录迁移到用户级（`%APPDATA%\dsh-launcher\`）。
+- 运行时数据目录迁移到用户级（`%APPDATA%\godsh\`）。
 - 托盘/通知；`tauri build` 打包安装器（NSIS/MSI）。
 
 ---
@@ -425,12 +425,12 @@
 ### 改动
 - `paths.ts`：`DATA_DIR` 支持 `DSH_LAUNCHER_DATA_DIR` 覆盖；`KERNEL_TEMPLATES_DIR` 支持 `DSH_LAUNCHER_TEMPLATES_DIR` 覆盖。
 - `src-tauri/resources/`：新增运行时资源目录（`server.mjs` + `templates/`），`bundle.resources = ["resources"]`。
-- `src-tauri/lib.rs`：`resolve_resource` 从 `resource_dir()/resources/` 解析 server.mjs/templates，并设置 `DSH_LAUNCHER_DATA_DIR`（默认 `%APPDATA%\dsh-launcher\data`）与 `DSH_LAUNCHER_TEMPLATES_DIR`；`RunEvent::Exit` 杀后端。
+- `src-tauri/lib.rs`：`resolve_resource` 从 `resource_dir()/resources/` 解析 server.mjs/templates，并设置 `DSH_LAUNCHER_DATA_DIR`（默认 `%APPDATA%\godsh\data`）与 `DSH_LAUNCHER_TEMPLATES_DIR`；`RunEvent::Exit` 杀后端。
 - `scripts/build-tauri.ps1`：填充 resources 目录（server.mjs + templates）。
 - 踩坑：`resource_dir()` 返回 `\\?\C:\...`（verbatim）前缀，node 无法解析，加 `clean_path` 去掉前缀；资源 `../dist` 会落在 `_up_/`，改为 `resources/` 子目录避免歧义。
 
 ### 结果 / 状态（实测）
-- 无环境变量运行 `.exe`：窗口 + 后端 4780 均正常；`/api/kernels` 返回 1 个模板（资源）；创建内核实例写入 `%APPDATA%\dsh-launcher\data\kernels.json`（数据目录迁移成功）。
+- 无环境变量运行 `.exe`：窗口 + 后端 4780 均正常；`/api/kernels` 返回 1 个模板（资源）；创建内核实例写入 `%APPDATA%\godsh\data\kernels.json`（数据目录迁移成功）。
 - `tauri build`（release + NSIS）进行中。
 
 ### 下一步
@@ -444,7 +444,7 @@
 - 整理发布产物、统一版本号，编写快速开始与使用说明文档。
 
 ### 改动
-- 新增 `release/`：`dsh-launcher-0.1.0-x64-setup.exe`（NSIS 安装器）、`dsh-launcher-0.1.0-x64.exe`（免安装单文件）、`SHA256SUMS.txt`、`RELEASE_NOTES.md`。
+- 新增 `release/`：`godsh-0.1.0-x64-setup.exe`（NSIS 安装器）、`godsh-0.1.0-x64.exe`（免安装单文件）、`SHA256SUMS.txt`、`RELEASE_NOTES.md`。
 - 新增 `scripts/bump-version.ps1`：一键统一升级 package.json / Cargo.toml / tauri.conf.json / config.json 的版本号。
 - 新增 `QUICKSTART.md`（快速开始）、`使用说明.md`（完整使用手册：功能/CLI/API/配置/桌面构建/故障排查/开发）。
 - 新增 `LICENSE`（MIT，可自行修改版权人）、`CHANGELOG.md`。
@@ -467,18 +467,18 @@
   Tauri 默认 NSIS 打包只把资源放进 `resources/` 子目录，未放到 exe 旁；且旧版 `release/` 裸 exe 也未附带 DLL。
 
 ### 修复
-- 新增 `scripts/make-release.ps1`：受控打包（`dsh-launcher.exe` + `WebView2Loader.dll`（exe 旁）+ `resources/`）：
-  - 生成便携 ZIP（`dsh-launcher-<v>-x64.zip`）。
-  - 用自定义 NSIS 脚本生成安装器（`dsh-launcher-<v>-x64-setup.exe`，安装到 `%LOCALAPPDATA%\dsh-launcher`，DLL 放 exe 旁）。
+- 新增 `scripts/make-release.ps1`：受控打包（`godsh.exe` + `WebView2Loader.dll`（exe 旁）+ `resources/`）：
+  - 生成便携 ZIP（`godsh-<v>-x64.zip`）。
+  - 用自定义 NSIS 脚本生成安装器（`godsh-<v>-x64-setup.exe`，安装到 `%LOCALAPPDATA%\godsh`，DLL 放 exe 旁）。
   - 自动生成 SHA256SUMS.txt。
-- 移除会误导用户的旧裸 `release/dsh-launcher-0.1.0-x64.exe`（缺 DLL 无法运行）。
+- 移除会误导用户的旧裸 `release/godsh-0.1.0-x64.exe`（缺 DLL 无法运行）。
 - 还原 `main.rs`（放弃不可靠的运行时自愈复制方案；DLL 是启动期依赖，进程到不了 main）。
 - 更新 `QUICKSTART.md` / `使用说明.md` / `RELEASE_NOTES.md` / `CHANGELOG.md`。
 
 ### 结果 / 状态（实测）
-- 新安装器静默安装：exe 旁 DLL 存在；运行 → 窗口「dsh Launcher」+ 后端 4780 响应。
+- 新安装器静默安装：exe 旁 DLL 存在；运行 → 窗口「godsh」+ 后端 4780 响应。
 - 便携 ZIP 解压：exe 旁 DLL 存在；运行 → 窗口 + 后端均正常。
-- `release/` 最终产物：`dsh-launcher-0.1.0-x64-setup.exe`（3.6MB）+ `dsh-launcher-0.1.0-x64.zip`（5.4MB）+ `SHA256SUMS.txt` + `RELEASE_NOTES.md`。
+- `release/` 最终产物：`godsh-0.1.0-x64-setup.exe`（3.6MB）+ `godsh-0.1.0-x64.zip`（5.4MB）+ `SHA256SUMS.txt` + `RELEASE_NOTES.md`。
 
 ### 下一步
 - 推 GitHub + 打 tag v0.1.0，上传 setup/zip 作为 Release 附件。
@@ -504,7 +504,7 @@
 ### 结果 / 状态（实测，CDP 读取窗口内容）
 - 安装器 / ZIP 安装运行：窗口加载 `http://tauri.localhost/`（内嵌前端），**UI 完整渲染**（侧边栏四页 + 环境列表 + 后端数据 DSH 0.1.1-rc.1）。
 - 后端 4780 全部接口 200。
-- `release/`：`dsh-launcher-0.1.0-x64-setup.exe` + `.zip` + `SHA256SUMS.txt` + `RELEASE_NOTES.md`。
+- `release/`：`godsh-0.1.0-x64-setup.exe` + `.zip` + `SHA256SUMS.txt` + `RELEASE_NOTES.md`。
 
 ### 下一步
 - 推 GitHub + 打 tag v0.1.0，上传 Release 附件。
@@ -798,8 +798,8 @@
 
 ### 改动
 - **升级 0.2.1 → 0.2.2**：`scripts/bump-version.ps1` 统一更新全部 package.json / Cargo.toml / tauri.conf.json / data/config.json。
-- **备份**：`_backup/dsh-launcher-project-0.2.1-pre-0.2.2/`（源码不含 node_modules/dist/target + release 产物）。
-- **打包**：`make-release.ps1 -Version 0.2.2` → `release/dsh-launcher-0.2.2-x64-setup.exe` + `-x64.zip` + `SHA256SUMS.txt`（tauri build 内嵌前端 + custom-protocol，WebView2Loader.dll 在 exe 旁）。
+- **备份**：`_backup/godsh-project-0.2.1-pre-0.2.2/`（源码不含 node_modules/dist/target + release 产物）。
+- **打包**：`make-release.ps1 -Version 0.2.2` → `release/godsh-0.2.2-x64-setup.exe` + `-x64.zip` + `SHA256SUMS.txt`（tauri build 内嵌前端 + custom-protocol，WebView2Loader.dll 在 exe 旁）。
 - **修复（打包中发现）**：
   1. `bump-version.ps1`：根 package.json `Get-Item` 空引用 bug；`Set-Content -Encoding UTF8` 写 BOM 导致 serde_json 解析失败 → 改为 `Write-NoBom`（`UTF8Encoding($false)`）+ 末尾无 BOM 校验；新增同步 `config-store.ts` 的 `DEFAULT_CONFIG.launcher.version`。
   2. `config-store.ts`：`readConfig` 中 launcher 版本号不再被用户 `data/config.json` 残留旧版本覆盖（launcher 是应用元数据），升级安装后 `/api/health` 正确显示新版本。
@@ -807,7 +807,7 @@
 
 ### 结果 / 状态（实测）
 - `pnpm typecheck` / `build:server` / `build:web` 通过；冒烟 17/17。
-- 打包后运行桌面版（含旧 APPDATA config 残留场景）：窗口「dsh Launcher」打开、后端 4780 就绪、`launcher.version=0.2.2`、前端 200。
+- 打包后运行桌面版（含旧 APPDATA config 残留场景）：窗口「godsh」打开、后端 4780 就绪、`launcher.version=0.2.2`、前端 200。
 - 排查记录：首次验证显示 0.2.1 是**残留旧后端进程占用 4780 端口**导致 health 来自旧进程（清理后正常），与打包无关。
 
 ### 下一步

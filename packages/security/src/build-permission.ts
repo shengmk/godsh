@@ -1,4 +1,4 @@
-import type { ConfigStore } from '@dsh-launcher/core'
+import type { ConfigStore } from '@godsh/core'
 import type { SourceKind } from './types.js'
 import { classifySource } from './source-policy.js'
 

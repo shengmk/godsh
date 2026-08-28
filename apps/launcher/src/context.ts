@@ -11,11 +11,11 @@ import {
   type EnvInfo,
   type LauncherBus,
   type LauncherEvents,
-} from '@dsh-launcher/core'
-import { KernelManager, UnifiedKernelManager } from '@dsh-launcher/kernel-manager'
-import { AllocationManager } from '@dsh-launcher/allocation'
-import { DshEnvManager } from '@dsh-launcher/dsh-env'
-import { SourcePolicy } from '@dsh-launcher/security'
+} from '@godsh/core'
+import { KernelManager, UnifiedKernelManager } from '@godsh/kernel-manager'
+import { AllocationManager } from '@godsh/allocation'
+import { DshEnvManager } from '@godsh/dsh-env'
+import { SourcePolicy } from '@godsh/security'
 
 export interface CliContext {
   store: ConfigStore

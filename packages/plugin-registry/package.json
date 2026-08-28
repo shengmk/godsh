@@ -1,9 +1,9 @@
 {
-    "name":  "@dsh-launcher/plugin-registry",
+    "name":  "@godsh/plugin-registry",
     "version":  "0.2.5",
     "private":  true,
     "type":  "module",
-    "description":  "dsh Launcher 插件识别：bundle / client 插件",
+    "description":  "godsh 插件识别：bundle / client 插件",
     "exports":  {
                     ".":  "./src/index.ts"
                 },

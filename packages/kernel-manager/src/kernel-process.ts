@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto'
 import type { ChildProcess } from 'node:child_process'
-import { run, type ConfigStore, getPortStatus, startWeb, stopWeb } from '@dsh-launcher/core'
+import { run, type ConfigStore, getPortStatus, startWeb, stopWeb } from '@godsh/core'
 import { findTemplate } from './kernel-template.js'
 import type { KernelInstance, KernelTemplate } from './types.js'
 

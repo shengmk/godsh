@@ -1,4 +1,4 @@
-# dsh Launcher 快速开始（Quick Start）
+# godsh 快速开始（Quick Start）
 
 > dsh 环境配置启动器 —— 像 **Anaconda Navigator** 一样管理你的 **DeepSeek Harness（dsh）** 环境、插件与内核。
 
@@ -15,18 +15,18 @@
 
 **方式 A：桌面安装器**
 
-1. 下载 `release/dsh-launcher-0.1.0-x64-setup.exe`
-2. 双击安装（安装到 `%LOCALAPPDATA%\dsh-launcher`），从开始菜单/桌面启动「dsh Launcher」
+1. 下载 `release/godsh-0.1.0-x64-setup.exe`
+2. 双击安装（安装到 `%LOCALAPPDATA%\godsh`），从开始菜单/桌面启动「godsh」
 
 **方式 B：便携版（ZIP）**
 
-1. 下载 `release/dsh-launcher-0.1.0-x64.zip`，解压
-2. 双击文件夹里的 `dsh-launcher.exe` 即可（**保持解压后文件夹内文件完整，不要单独拷走 exe**——需要旁边的 `WebView2Loader.dll`）
+1. 下载 `release/godsh-0.1.0-x64.zip`，解压
+2. 双击文件夹里的 `godsh.exe` 即可（**保持解压后文件夹内文件完整，不要单独拷走 exe**——需要旁边的 `WebView2Loader.dll`）
 
 **方式 C：源码运行（Web 模式 / 开发）**
 
 ```powershell
-cd dsh-launcher
+cd godsh
 pnpm install          # 安装依赖
 pnpm build:web        # 构建前端
 pnpm serve            # 启动 API + Web UI → http://127.0.0.1:4780
@@ -34,7 +34,7 @@ pnpm serve            # 启动 API + Web UI → http://127.0.0.1:4780
 
 ## 3. 第一次启动
 
-打开 dsh Launcher 后，你会看到四个页：
+打开 godsh 后，你会看到四个页：
 
 | 页面 | 作用 |
 | --- | --- |

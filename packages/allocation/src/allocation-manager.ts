@@ -1,13 +1,13 @@
 import { randomUUID } from 'node:crypto'
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
-import type { ConfigStore } from '@dsh-launcher/core'
+import type { ConfigStore } from '@godsh/core'
 import {
   readPatchChecked,
   serializePatchList,
   invalidateProfileCache,
   type PatchEntry,
-} from '@dsh-launcher/profile-manager'
+} from '@godsh/profile-manager'
 import type { Allocation } from './types.js'
 
 interface AllocationsFile {

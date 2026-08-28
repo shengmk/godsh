@@ -65,12 +65,12 @@
 首个可用版本。
 
 ### 新增
-- 后端 monorepo（7 个 `@dsh-launcher/*` 包）：环境检测、Profile 扫描、进程管理、插件市场封装、内核管理、插件分配、来源校验。
+- 后端 monorepo（7 个 `@godsh/*` 包）：环境检测、Profile 扫描、进程管理、插件市场封装、内核管理、插件分配、来源校验。
 - CLI：`detect / profiles / profile / plugins / market / plugin / start / stop / status / kernels / kernel / allocate / allocations / apply / sync / unallocate / serve / help`。
 - HTTP API 服务（默认端口 4780）。
 - Web 管理界面（Vite + React + TS，玻璃拟态）：环境、插件市场、插件分配、内核管理四页。
   - 交互：一键启停、状态徽标、拖拽排序、实时日志、右键菜单、快捷键（Ctrl+1..4）。
-- Tauri 2 桌面壳：自包含（后端 + 内核模板打进资源），运行时数据存 `%APPDATA%\dsh-launcher\data`。
+- Tauri 2 桌面壳：自包含（后端 + 内核模板打进资源），运行时数据存 `%APPDATA%\godsh\data`。
 - NSIS 安装器打包。
 
 ### 修正

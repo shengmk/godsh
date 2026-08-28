@@ -1,5 +1,5 @@
 {
-    "name":  "dsh-launcher",
+    "name":  "godsh",
     "version":  "0.2.5",
     "private":  true,
     "type":  "module",
@@ -12,8 +12,8 @@
                     "typecheck":  "tsc --noEmit -p tsconfig.json",
                     "test":  "node --import tsx --test packages/profile-manager/src/patch.test.ts packages/allocation/src/allocation-manager.test.ts packages/kernel-manager/src/unified-kernel.test.ts",
                     "test:smoke":  "powershell -ExecutionPolicy Bypass -File scripts/run-smoke.ps1",
-                    "dev:web":  "pnpm --filter @dsh-launcher/shell-web dev",
-                    "build:web":  "pnpm --filter @dsh-launcher/shell-web build",
+                    "dev:web":  "pnpm --filter @godsh/shell-web dev",
+                    "build:web":  "pnpm --filter @godsh/shell-web build",
                     "build:server":  "esbuild apps/launcher/src/cli.ts --bundle --platform=node --format=esm --outfile=apps/launcher/dist/server.mjs"
                 },
     "devDependencies":  {

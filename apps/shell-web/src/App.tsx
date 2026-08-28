@@ -108,7 +108,7 @@ export default function App() {
     <div className="app">
       <aside className="sidebar">
         <div className="brand">
-          <div className="brand-logo">d</div>
+          <img className="brand-logo" src="/logo.png" alt="godsh" />
           <div>
             <div className="brand-name">{t('app.name')}</div>
             <div className="brand-sub">{t('app.subtitle')}</div>

@@ -1,10 +1,10 @@
 import http from 'node:http'
 import type { ChildProcess } from 'node:child_process'
-import type { ConfigStore, EnvInfo, LauncherConfig } from '@dsh-launcher/core'
-import type { AllocationManager } from '@dsh-launcher/allocation'
-import type { KernelManager, UnifiedKernelManager } from '@dsh-launcher/kernel-manager'
-import type { DshEnvManager } from '@dsh-launcher/dsh-env'
-import type { SourcePolicy } from '@dsh-launcher/security'
+import type { ConfigStore, EnvInfo, LauncherConfig } from '@godsh/core'
+import type { AllocationManager } from '@godsh/allocation'
+import type { KernelManager, UnifiedKernelManager } from '@godsh/kernel-manager'
+import type { DshEnvManager } from '@godsh/dsh-env'
+import type { SourcePolicy } from '@godsh/security'
 
 /** 会话内运行中的 dsh web 进程。 */
 export interface RuntimeProc {

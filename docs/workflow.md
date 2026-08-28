@@ -20,7 +20,7 @@
 
 ```text
 ┌─────────────────────────────────────────────────────────┐
-│              dsh Launcher UI（Anaconda Navigator）     │
+│              godsh UI（Anaconda Navigator）     │
 │  环境管理 · 插件管理 · 内核管理 · 插件市场              │
 └─────────────────────────────────────────────────────────┘
               │ 调用
@@ -78,7 +78,7 @@
   → 检测环境：node、pnpm、dsh
   → 扫描 $DSH_HOME/profiles/
   → 读取 profiles/*/package.json 得到每个环境的状态
-  → 读取 dsh-launcher 自己的 data/config.json
+  → 读取 godsh 自己的 data/config.json
   → 显示环境列表、插件列表、内核状态
   → 用户选择 Profile 启动
 ```
@@ -238,7 +238,7 @@ $DSH_HOME/
 │  │  └─ pnpm-lock.yaml
 │  └─ ui-skins/
 │     └─ ...
-├─ dsh-launcher/
+├─ godsh/
 │  ├─ dsh.log
 │  └─ service-pid-<port>.txt
 └─ cordis.patch.yml          # home 级 patch

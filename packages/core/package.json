@@ -1,9 +1,9 @@
 {
-    "name":  "@dsh-launcher/core",
+    "name":  "@godsh/core",
     "version":  "0.2.5",
     "private":  true,
     "type":  "module",
-    "description":  "dsh Launcher 核心：环境检测、进程管理、配置存储、事件总线",
+    "description":  "godsh 核心：环境检测、进程管理、配置存储、事件总线",
     "exports":  {
                     ".":  "./src/index.ts"
                 },

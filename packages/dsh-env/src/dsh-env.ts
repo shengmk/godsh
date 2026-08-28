@@ -1,7 +1,7 @@
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
-import { findDshInstances, runSync, spawnCommand, type ConfigStore, type DshInstance } from '@dsh-launcher/core'
-import { createProfile } from '@dsh-launcher/profile-manager'
+import { findDshInstances, runSync, spawnCommand, type ConfigStore, type DshInstance } from '@godsh/core'
+import { createProfile } from '@godsh/profile-manager'
 
 export type DshEnvKind = 'base' | 'managed' | 'external'
 

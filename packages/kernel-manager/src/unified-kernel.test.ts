@@ -3,9 +3,9 @@ import assert from 'node:assert/strict'
 import { mkdtempSync, mkdirSync, writeFileSync, rmSync, readFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { ConfigStore } from '@dsh-launcher/core'
+import { ConfigStore } from '@godsh/core'
 import { UnifiedKernelManager, WEB_APP_BUNDLE } from './unified-kernel.js'
-import type { ProfileInfo } from '@dsh-launcher/profile-manager'
+import type { ProfileInfo } from '@godsh/profile-manager'
 
 function setup(): { uk: UnifiedKernelManager; dir: string } {
   const dataDir = mkdtempSync(join(tmpdir(), 'dshl-uk-data-'))

@@ -1,8 +1,8 @@
 [package]
-name = "dsh-launcher"
+name = "godsh"
 version = "0.2.5"
 description = "dsh 环境配置启动器（Tauri 桌面壳）"
-authors = ["dsh-launcher"]
+authors = ["godsh"]
 license = ""
 repository = ""
 edition = "2021"
@@ -11,7 +11,7 @@ rust-version = "1.77.2"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [lib]
-name = "dsh_launcher_lib"
+name = "godsh_lib"
 # 桌面端仅需 rlib；cdylib/staticlib 用于移动端，且在 GNU 工具链下会触发
 # "export ordinal too large" 链接错误（导出表溢出）。需要移动端时改用 MSVC 工具链。
 crate-type = ["rlib"]

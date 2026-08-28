@@ -1,20 +1,20 @@
 {
-    "name":  "@dsh-launcher/launcher",
+    "name":  "@godsh/launcher",
     "version":  "0.2.5",
     "private":  true,
     "type":  "module",
-    "description":  "dsh Launcher 主启动器 CLI（后端逻辑编排）",
+    "description":  "godsh 主启动器 CLI（后端逻辑编排）",
     "bin":  {
-                "dsh-launcher":  "./src/cli.ts"
+                "godsh":  "./src/cli.ts"
             },
     "dependencies":  {
-                         "@dsh-launcher/allocation":  "workspace:*",
-                         "@dsh-launcher/core":  "workspace:*",
-                         "@dsh-launcher/dsh-env":  "workspace:*",
-                         "@dsh-launcher/kernel-manager":  "workspace:*",
-                         "@dsh-launcher/marketplace":  "workspace:*",
-                         "@dsh-launcher/plugin-registry":  "workspace:*",
-                         "@dsh-launcher/profile-manager":  "workspace:*",
-                         "@dsh-launcher/security":  "workspace:*"
+                         "@godsh/allocation":  "workspace:*",
+                         "@godsh/core":  "workspace:*",
+                         "@godsh/dsh-env":  "workspace:*",
+                         "@godsh/kernel-manager":  "workspace:*",
+                         "@godsh/marketplace":  "workspace:*",
+                         "@godsh/plugin-registry":  "workspace:*",
+                         "@godsh/profile-manager":  "workspace:*",
+                         "@godsh/security":  "workspace:*"
                      }
 }

@@ -1,9 +1,9 @@
 {
-    "name":  "@dsh-launcher/shell-web",
+    "name":  "@godsh/shell-web",
     "version":  "0.2.5",
     "private":  true,
     "type":  "module",
-    "description":  "dsh Launcher Web 管理界面（Vite + React + TS，玻璃拟态）",
+    "description":  "godsh Web 管理界面（Vite + React + TS，玻璃拟态）",
     "scripts":  {
                     "dev":  "vite",
                     "build":  "tsc --noEmit -p tsconfig.json \u0026\u0026 vite build",

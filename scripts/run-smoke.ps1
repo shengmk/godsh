@@ -1,4 +1,4 @@
-# dsh Launcher 隔离环境冒烟测试运行器（供 pnpm test:smoke 调用）
+# godsh 隔离环境冒烟测试运行器（供 pnpm test:smoke 调用）
 # 运行不依赖真实 DSH 安装、使用临时 DSH_HOME/数据目录的回归冒烟脚本（scripts/smoke/）。
 # 注意：_smoke.ps1 / _smoke-p1.ps1 / _smoke-p3.ps1 / _smoke-unified.ps1
 # 依赖真实 dsh 启动或历史 _extracted 产物，不在自动化范围内。

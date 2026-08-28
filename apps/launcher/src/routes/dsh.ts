@@ -2,8 +2,8 @@ import { spawn } from 'node:child_process'
 import { existsSync, rmSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { dirname, join } from 'node:path'
-import { DATA_DIR, readLogTail, stopWeb } from '@dsh-launcher/core'
-import { removeProfile, scanProfiles } from '@dsh-launcher/profile-manager'
+import { DATA_DIR, readLogTail, stopWeb } from '@godsh/core'
+import { removeProfile, scanProfiles } from '@godsh/profile-manager'
 import type { ApiHandler } from './types.js'
 
 /** /api/dsh*、/api/dsh-envs* —— DSH 本体状态 / 安装 / 并列环境 */

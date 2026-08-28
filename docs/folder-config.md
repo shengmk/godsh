@@ -15,7 +15,7 @@ $DSH_HOME/                          # 例如 C:\Users\<user>\.dsh
 │  │  └─ pnpm-workspace.yaml
 │  ├─ ui-skins/
 │  └─ ...
-├─ dsh-launcher/                    # 现有启动器运行时目录
+├─ godsh/                    # 现有启动器运行时目录
 │  ├─ dsh.log
 │  └─ service-pid-<port>.txt
 ├─ sessions/                        # 会话数据
@@ -49,7 +49,7 @@ deepseek-harness/
 ## 2. Launcher 推荐目录结构
 
 ```text
-dsh-launcher/
+godsh/
 ├─ apps/
 │  ├─ launcher/
 │  │  ├─ src/                       # 主启动器逻辑
@@ -236,7 +236,7 @@ dsh-launcher/
 ## 6. 最小可运行版本（MVP）
 
 ```text
-dsh-launcher/
+godsh/
 ├─ packages/core/env-detect.ts
 ├─ packages/profile-manager/scanner.ts
 ├─ packages/marketplace/installer.ts

@@ -71,7 +71,7 @@ export default function SettingsPage({ locale, changeLocale, theme, changeTheme,
       const url = URL.createObjectURL(blob)
       const a = document.createElement('a')
       a.href = url
-      a.download = `dsh-launcher-backup-${new Date().toISOString().slice(0, 10)}.json`
+      a.download = `godsh-backup-${new Date().toISOString().slice(0, 10)}.json`
       a.click()
       URL.revokeObjectURL(url)
       show('备份已导出')
@@ -295,7 +295,7 @@ export default function SettingsPage({ locale, changeLocale, theme, changeTheme,
         <div className="card-title">关于</div>
         <div className="row" style={{ marginTop: 8 }}>
           <span className="muted">
-            dsh Launcher v{config.launcher.version} · DSH 环境管理请前往「DSH 环境」页
+            godsh v{config.launcher.version} · DSH 环境管理请前往「DSH 环境」页
           </span>
           <span className="spacer" />
           <button className="btn danger" onClick={() => void doUninstall()}>

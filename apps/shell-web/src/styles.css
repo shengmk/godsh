@@ -88,9 +88,9 @@ body {
   width: 36px;
   height: 36px;
   border-radius: 10px;
-  background: linear-gradient(135deg, var(--brand-1), var(--brand-2));
-  display: grid;
-  place-items: center;
+  object-fit: cover;
+  background: #000;
+  display: block;
   color: #fff;
   font-weight: 800;
   font-size: 16px;

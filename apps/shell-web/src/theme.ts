@@ -2,7 +2,7 @@ import { useCallback, useEffect, useState } from 'react'
 
 export type Theme = 'light' | 'dark' | 'system'
 
-const STORAGE_KEY = 'dsh-launcher-theme'
+const STORAGE_KEY = 'godsh-theme'
 
 export function getTheme(): Theme {
   try {

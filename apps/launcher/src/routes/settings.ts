@@ -1,4 +1,4 @@
-import { DATA_DIR, KERNEL_TEMPLATES_DIR, LOGS_DIR, PLUGINS_DIR, findDshInstances, type LauncherConfig } from '@dsh-launcher/core'
+import { DATA_DIR, KERNEL_TEMPLATES_DIR, LOGS_DIR, PLUGINS_DIR, findDshInstances, type LauncherConfig } from '@godsh/core'
 import type { ApiHandler } from './types.js'
 
 /** /api/settings*、/api/backup* —— 配置读写 / 数据导出导入 */
@@ -57,7 +57,7 @@ export const settingsHandler: ApiHandler = async (ctx, _req, res, method, seg, b
   // GET /api/backup
   if (seg.length === 1 && seg[0] === 'backup' && method === 'GET') {
     const backup = {
-      app: 'dsh-launcher',
+      app: 'godsh',
       version: ctx.config.launcher.version,
       exportedAt: new Date().toISOString(),
       config: store.readConfig(),

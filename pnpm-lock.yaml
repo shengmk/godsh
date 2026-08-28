@@ -26,28 +26,28 @@ importers:
 
   apps/launcher:
     dependencies:
-      '@dsh-launcher/allocation':
+      '@godsh/allocation':
         specifier: workspace:*
         version: link:../../packages/allocation
-      '@dsh-launcher/core':
+      '@godsh/core':
         specifier: workspace:*
         version: link:../../packages/core
-      '@dsh-launcher/dsh-env':
+      '@godsh/dsh-env':
         specifier: workspace:*
         version: link:../../packages/dsh-env
-      '@dsh-launcher/kernel-manager':
+      '@godsh/kernel-manager':
         specifier: workspace:*
         version: link:../../packages/kernel-manager
-      '@dsh-launcher/marketplace':
+      '@godsh/marketplace':
         specifier: workspace:*
         version: link:../../packages/marketplace
-      '@dsh-launcher/plugin-registry':
+      '@godsh/plugin-registry':
         specifier: workspace:*
         version: link:../../packages/plugin-registry
-      '@dsh-launcher/profile-manager':
+      '@godsh/profile-manager':
         specifier: workspace:*
         version: link:../../packages/profile-manager
-      '@dsh-launcher/security':
+      '@godsh/security':
         specifier: workspace:*
         version: link:../../packages/security
 
@@ -78,10 +78,10 @@ importers:
 
   packages/allocation:
     dependencies:
-      '@dsh-launcher/core':
+      '@godsh/core':
         specifier: workspace:*
         version: link:../core
-      '@dsh-launcher/profile-manager':
+      '@godsh/profile-manager':
         specifier: workspace:*
         version: link:../profile-manager
 
@@ -89,25 +89,25 @@ importers:
 
   packages/dsh-env:
     dependencies:
-      '@dsh-launcher/core':
+      '@godsh/core':
         specifier: workspace:*
         version: link:../core
-      '@dsh-launcher/profile-manager':
+      '@godsh/profile-manager':
         specifier: workspace:*
         version: link:../profile-manager
 
   packages/kernel-manager:
     dependencies:
-      '@dsh-launcher/core':
+      '@godsh/core':
         specifier: workspace:*
         version: link:../core
-      '@dsh-launcher/profile-manager':
+      '@godsh/profile-manager':
         specifier: workspace:*
         version: link:../profile-manager
 
   packages/marketplace:
     dependencies:
-      '@dsh-launcher/core':
+      '@godsh/core':
         specifier: workspace:*
         version: link:../core
 
@@ -115,13 +115,13 @@ importers:
 
   packages/profile-manager:
     dependencies:
-      '@dsh-launcher/core':
+      '@godsh/core':
         specifier: workspace:*
         version: link:../core
 
   packages/security:
     dependencies:
-      '@dsh-launcher/core':
+      '@godsh/core':
         specifier: workspace:*
         version: link:../core
 

@@ -1,10 +1,10 @@
-# dsh Launcher — Tauri 桌面壳构建脚本
+# godsh — Tauri 桌面壳构建脚本
 # 背景：本机无 MSVC，使用 Rust GNU 工具链 + MinGW；GNU 工具链要求「路径无空格」，
 # 因此把 src-tauri + 前端 dist 复制到无空格路径再构建。
 $ErrorActionPreference = "Stop"
 
 $projectRoot = Split-Path -Parent $PSScriptRoot
-$buildRoot = Join-Path $env:USERPROFILE "dshlauncher"
+$buildRoot = Join-Path $env:USERPROFILE "godsh"
 $targetDir = Join-Path $buildRoot "target"
 
 # 0) 打包后端 + 构建前端（Tauri 模式：API 基址指向 127.0.0.1:4780）
@@ -12,7 +12,7 @@ Write-Host "打包后端 + 构建前端..." -ForegroundColor Cyan
 Set-Location $projectRoot
 pnpm build:server
 if ($LASTEXITCODE -ne 0) { Write-Host "后端打包失败" -ForegroundColor Red; exit 1 }
-pnpm --filter @dsh-launcher/shell-web build:tauri
+pnpm --filter @godsh/shell-web build:tauri
 if ($LASTEXITCODE -ne 0) { Write-Host "前端构建失败" -ForegroundColor Red; exit 1 }
 
 # 0.5) 填充 resources 目录（server.mjs + 内核模板 + WebView2Loader.dll）
@@ -63,7 +63,7 @@ Set-Location "$buildRoot\apps\launcher\src-tauri"
 cargo build
 if ($LASTEXITCODE -ne 0) { Write-Host "构建失败" -ForegroundColor Red; exit $LASTEXITCODE }
 
-$exe = Join-Path $targetDir "debug\dsh-launcher.exe"
+$exe = Join-Path $targetDir "debug\godsh.exe"
 if (Test-Path $exe) {
   Write-Host "产物: $exe ($([math]::Round((Get-Item $exe).Length/1MB,1)) MB)" -ForegroundColor Green
 } else {

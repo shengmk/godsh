@@ -1,8 +1,8 @@
 import { join } from 'node:path'
 import { mkdirSync, writeFileSync } from 'node:fs'
-import { readLogTail, spawnWebProfile, stopWeb, waitForPort, isPortListening, findPidByPort, findProcessName } from '@dsh-launcher/core'
-import { createProfile, removeProfile, scanProfiles } from '@dsh-launcher/profile-manager'
-import { pluginAction, PLUGIN_ACTION_TIMEOUT_MS } from '@dsh-launcher/marketplace'
+import { readLogTail, spawnWebProfile, stopWeb, waitForPort, isPortListening, findPidByPort, findProcessName } from '@godsh/core'
+import { createProfile, removeProfile, scanProfiles } from '@godsh/profile-manager'
+import { pluginAction, PLUGIN_ACTION_TIMEOUT_MS } from '@godsh/marketplace'
 import type { ApiHandler, RouteContext, RuntimeProc } from './types.js'
 
 /** 安装/更新/卸载日志落盘：data/logs/plugin-<profile>-<pkg>-<ts>.log */
