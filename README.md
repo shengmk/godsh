@@ -48,6 +48,7 @@ pnpm serve            # 启动 API + 前端（http://127.0.0.1:4780）
 | 文档 | 说明 |
 | --- | --- |
 | [QUICKSTART.md](QUICKSTART.md) | 快速开始（安装 / 首次启动 / 三步上手） |
+| [为下一个AI编程对话的资料和输入.md](为下一个AI编程对话的资料和输入.md) | **AI 交接文档**（项目全貌 / 技术约束 / 下一步方向） |
 | [使用说明.md](使用说明.md) | 完整使用手册（功能 / CLI / API / 配置 / 故障排查） |
 | [release/RELEASE_NOTES.md](release/RELEASE_NOTES.md) | 版本发布说明 |
 | [项目文件总结.md](项目文件总结.md) | 项目文件全貌（目录 / 职责 / 架构） |
