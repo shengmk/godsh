@@ -15,6 +15,22 @@ interface AllocationsFile {
 }
 
 /**
+ * 官方 bundle id：由 dsh 的 dsh.profile.bundles 机制加载，
+ * 绝不能写进 cordis.patch.yml（会与 bundles 重复加载导致 loader 报
+ * "Cannot read properties of undefined (reading 'startsWith')" 而启动失败）。
+ */
+const OFFICIAL_BUNDLE_IDS = new Set([
+  '@deepseek-ai/dsh-base',
+  '@deepseek-ai/dsh-web-app',
+  '@deepseek-ai/dsh-headless',
+])
+
+/** 判断某 pluginId 是否为官方 bundle（不应出现在 patch 中）。 */
+export function isOfficialBundleId(id: string): boolean {
+  return OFFICIAL_BUNDLE_IDS.has(id)
+}
+
+/**
  * 插件分配管理：把插件分配给 Profile，决定启用/禁用与顺序。
  * 分配关系持久化在 data/allocations.json，最终落地为 Profile 的 cordis.patch.yml。
  */
@@ -118,15 +134,15 @@ export class AllocationManager {
     ])
     const existing = existsSync(patchPath) ? readPatchChecked(patchPath) : []
 
-    // 移除本管理器管理的条目（含本次删除的），保留其它用户自定义条目
+    // 移除本管理器管理的条目（含本次删除的）与官方 bundle，保留其它用户自定义条目
     const retained = existing
       .map((e) => {
-        const ids = e.ids.filter((id) => !managedIds.has(id))
-        return ids.length ? { ...e, ids, disabledIds: e.disabledIds.filter((d) => !managedIds.has(d)) } : null
+        const ids = e.ids.filter((id) => !managedIds.has(id) && !isOfficialBundleId(id))
+        return ids.length ? { ...e, ids, disabledIds: e.disabledIds.filter((d) => !managedIds.has(d) && !isOfficialBundleId(d)) } : null
       })
       .filter((e): e is PatchEntry => e !== null)
 
-    const next = [...retained, ...this.toPatchEntries(profile)]
+    const next = [...retained, ...this.toPatchEntries(profile).filter((e) => !e.ids.some((id) => isOfficialBundleId(id)))]
     mkdirSync(dir, { recursive: true })
     // 没有条目且原本不存在 patch 文件时，不创建空文件（避免自动写回在无关 Profile 上制造垃圾文件）
     if (next.length === 0 && !existsSync(patchPath)) return patchPath

@@ -60,6 +60,9 @@ function classifyPluginError(r: { ok: boolean; code: number | null; stdout: stri
   if (/not\s+found|No\s+match|E404|does\s+not\s+exist|is\s+not\s+in\s+this\s+registry/i.test(all)) return { errorType: 'not-found', message: `未找到包：请确认包名/版本存在` }
   if (/403|401|permission|unauthorized/i.test(all)) return { errorType: 'auth', message: '权限不足或包源拒绝访问' }
   if (/ETARGET|No\s+matching\s+version|no\s+matching/i.test(all)) return { errorType: 'version', message: '找不到匹配的版本（可能未发布或拼写错误）' }
+  if (/ERR_PNPM_CANNOT_REMOVE_MISSING_DEPS|Cannot remove.*no such dependency/i.test(all)) {
+    return { errorType: 'not-installed', message: '该插件不是独立依赖（可能是官方内核 bundle），无法直接卸载' }
+  }
   if (/resolve|ERR_PNPM|conflict|peer|ERESOLVE/i.test(all)) return { errorType: 'deps', message: '依赖解析/冲突，详见日志' }
   if (/timeout/i.test(all)) return { errorType: 'timeout', message: `安装超时（${PLUGIN_ACTION_TIMEOUT_MS / 1000}s），见日志` }
   return { errorType: 'other', message: r.stderr.trim() || r.stdout.trim() || '安装失败（无输出），见日志' }

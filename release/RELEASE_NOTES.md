@@ -9,12 +9,13 @@ godsh — DeepSeek Harness 图形化环境配置启动器（Anaconda Navigator �
 
 ## v0.2.6 更新
 
-- **修复环境无法启动**：
-  - patch 序列化补引号（@ 开头 id 不再被 YAML 解析拒绝）
-  - 启动自愈：DSH Desktop junction 断链自动提取官方 bundle 并重建（首次约 30s，之后毫秒级）
+- **修复环境无法启动（完整解决）**：
+  - 清理 patch 中残留的官方 bundle id（由 bundles 机制加载，写在 patch 里会导致 loader 崩溃）
+  - patch 序列化对 @ 开头 id 补引号（新版 dsh YAML schema 拒绝裸值）
+  - DSH junction 断链自愈：从 app.asar 提取官方 bundle（含 sharp/koffi 原生二进制）并重建各 profile 依赖
   - 启动失败给出可操作诊断（配置损坏 / 缺依赖 / Python 模块缺失 / 端口占用）
-- **插件分配页新增「卸载」**：真正从环境删除插件依赖（不再只是移除分配）
-- **性能优化**：端口就绪探测加 2s 缓存，轮询不再反复发 HTTP 请求
+- **插件分配页新增「卸载」**：真正删除环境依赖并同步移除分配；官方内核 bundle 提示不可卸载
+- **性能优化**：端口就绪探测 2s 缓存
 - **品牌**：godsh（版本 0.2.6）
 
 ## 环境要求

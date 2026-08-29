@@ -388,6 +388,10 @@ export default function AllocationsPage() {
 
   /** 卸载插件：真正从环境删除依赖（dsh plugin remove），并同步移除分配记录。 */
   async function uninstall(a: Allocation) {
+    if (/^@deepseek-ai\/(dsh-base|dsh-web-app|dsh-headless)$/.test(a.pluginId)) {
+      show('官方内核 bundle 不能卸载（由 dsh 自动加载）', true)
+      return
+    }
     if (!window.confirm(`确定从环境 ${a.profile} 卸载插件 ${a.pluginId}？\n这会删除它的依赖（含其它环境引用时不受影响）。`)) return
     try {
       const r = await api.installPlugin(a.profile, 'remove', a.pluginId)

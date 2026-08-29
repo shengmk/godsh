@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync, lstatSync, statSync, renameSync, symlinkSync } from 'node:fs'
+import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync, lstatSync, statSync, renameSync, symlinkSync, copyFileSync } from 'node:fs'
 import { join, dirname } from 'node:path'
 import { homedir } from 'node:os'
 
@@ -60,6 +60,8 @@ export function findDshDesktopAsar(): string | null {
 interface AsarFile {
   size: number
   offset: string
+  /** 原生二进制标记：真实文件在 app.asar.unpacked，不在 asar 数据区 */
+  unpacked?: boolean
 }
 
 /** 解析 asar header，返回 { dataStart, flat: Record<路径, AsarFile> }。 */
@@ -72,9 +74,10 @@ export function parseAsar(buf: Buffer): { dataStart: number; flat: Map<string, A
   const flat = new Map<string, AsarFile>()
   const walk = (files: Record<string, unknown>, prefix: string): void => {
     for (const [k, v] of Object.entries(files)) {
-      const f = v as { files?: Record<string, unknown>; size?: number; offset?: string }
+      const f = v as { files?: Record<string, unknown>; size?: number; offset?: string; unpacked?: boolean }
       if (f.files) walk(f.files, prefix + k + '/')
-      else if (f.size !== undefined && f.offset !== undefined) flat.set(prefix + k, { size: f.size, offset: f.offset })
+      else if (f.size !== undefined)
+        flat.set(prefix + k, { size: f.size, offset: f.offset ?? '0', unpacked: f.unpacked === true })
     }
   }
   walk(header.files, '')
@@ -82,8 +85,10 @@ export function parseAsar(buf: Buffer): { dataStart: number; flat: Map<string, A
 }
 
 /**
- * 提取 asar 内 node_modules 到目标目录（全量）。
+ * 提取 asar 内 node_modules 到目标目录（全量，含 unpacked 原生二进制）。
  * 完整性用 `.complete` 标记文件判断：提取中断（无标记）时下次重新完整提取。
+ * unpacked 文件（sharp/koffi 等原生模块的 .node/.dll）不在 asar 数据区，
+ * 需从同目录 `app.asar.unpacked/node_modules` 真实目录复制。
  * @returns 是否执行了提取
  */
 export function extractAsarNodeModules(asarPath: string, dest: string): boolean {
@@ -93,6 +98,8 @@ export function extractAsarNodeModules(asarPath: string, dest: string): boolean 
   // 先写临时目录（dest 同级，避免被 dest 替换操作连带删除），成功后再原子替换
   const tmp = join(dirname(dest), '.tmp-' + Date.now())
   mkdirSync(tmp, { recursive: true })
+  // unpacked 文件源：app.asar 同目录的 app.asar.unpacked/node_modules
+  const unpackedRoot = join(dirname(asarPath), 'app.asar.unpacked', 'node_modules')
   try {
     const buf = readFileSync(asarPath)
     const { dataStart, flat } = parseAsar(buf)
@@ -103,6 +110,17 @@ export function extractAsarNodeModules(asarPath: string, dest: string): boolean 
       const target = join(tmp, rel)
       const dir = dirname(target)
       if (!existsSync(dir)) mkdirSync(dir, { recursive: true })
+      if (f.unpacked) {
+        // 原生二进制：从 unpacked 目录复制（真实文件）
+        const srcFile = join(unpackedRoot, rel)
+        try {
+          copyFileSync(srcFile, target)
+          count++
+          continue
+        } catch {
+          // unpacked 源缺失则尝试从 asar 数据区（降级，通常失败但尽力）
+        }
+      }
       const off = Number(f.offset) + dataStart
       writeFileSync(target, buf.slice(off, off + f.size))
       count++
