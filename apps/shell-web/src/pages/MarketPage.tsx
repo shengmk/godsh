@@ -192,12 +192,12 @@ export default function MarketPage() {
     if (!window.confirm(`确定从 ${profile} 卸载 ${display}？`)) return
     setInstalling(pkg)
     try {
-      const r = await api.installPlugin(profile, 'remove', pkg)
+      const r = await api.uninstallPlugin(profile, pkg)
       if (r.ok) {
         show(`已卸载 ${display}`)
         await refreshInstalled()
       } else {
-        show(errorLabel(r), true)
+        show(r.message || `卸载失败（${r.errorType ?? 'unknown'}）`, true)
       }
     } catch (e) {
       show(e instanceof Error ? e.message : String(e), true)
