@@ -361,12 +361,17 @@ export const profilesHandler: ApiHandler = async (ctx, _req, res, method, seg, b
     }
 
     // 情况 1：dependencies 里有该包（或可匹配的）→ dsh plugin remove
-    if (Object.keys(deps).some((d) => d === pkg || d.endsWith('/' + pkg) || pkg.endsWith('/' + d))) {
-      const r = await pluginAction(name, 'remove', pkg)
-      const logFile = logPluginAction(ctx.logDir, name, 'remove', pkg, r)
+    // 注意：必须用「匹配到的真实依赖名」执行 remove —— 市场 npm 字段名(如 @furongjun1999/dsh-memory)
+    // 可能 ≠ 实际安装名(如 dsh-memory)，用 pkg 直接 remove 会报 no such dependency
+    const matchedDep = Object.keys(deps).find(
+      (d) => d === pkg || d.endsWith('/' + pkg) || pkg.endsWith('/' + d),
+    )
+    if (matchedDep) {
+      const r = await pluginAction(name, 'remove', matchedDep)
+      const logFile = logPluginAction(ctx.logDir, name, 'remove', matchedDep, r)
       const { errorType, message } = classifyPluginError(r)
       if (r.ok) {
-        ctx.sendJson(res, 200, { ok: true, removed: pkg, method: 'pnpm' })
+        ctx.sendJson(res, 200, { ok: true, removed: matchedDep, method: 'pnpm' })
         return true
       }
       ctx.sendJson(res, 400, { ok: false, code: r.code, errorType, message, logFile })
