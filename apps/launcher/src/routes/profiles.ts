@@ -1,9 +1,24 @@
 import { join } from 'node:path'
 import { mkdirSync, writeFileSync } from 'node:fs'
-import { readLogTail, spawnWebProfile, stopWeb, waitForPort, isPortListening, findPidByPort, findProcessName, invalidatePortProbe } from '@godsh/core'
+import { readLogTail, spawnWebProfile, stopWeb, waitForPort, isPortListening, findPidByPort, findProcessName, invalidatePortProbe, ensureProfileBundles } from '@godsh/core'
 import { createProfile, removeProfile, scanProfiles } from '@godsh/profile-manager'
 import { pluginAction, PLUGIN_ACTION_TIMEOUT_MS } from '@godsh/marketplace'
 import type { ApiHandler, RouteContext, RuntimeProc } from './types.js'
+
+/**
+ * 启动串行队列：多个环境同时点「启动」时逐个执行，避免并发 spawn 的 dsh
+ * 同时操作 profiles/node_modules fallback 导致 junction 竞争冲突
+ * （"exists and is not a symlink" / EEXIST）。
+ */
+let startQueue: Promise<unknown> = Promise.resolve()
+function enqueueStart<T>(task: () => Promise<T>): Promise<T> {
+  const run = startQueue.then(task, task)
+  startQueue = run.then(
+    () => {},
+    () => {},
+  )
+  return run
+}
 
 /**
  * 启动失败诊断：读 dsh 日志，识别常见失败模式，给出可操作提示。
@@ -163,47 +178,55 @@ export const profilesHandler: ApiHandler = async (ctx, _req, res, method, seg, b
   // POST /api/profiles/:name/start
   if (seg.length === 3 && seg[0] === 'profiles' && seg[2] === 'start' && method === 'POST') {
     const name = decodeURIComponent(seg[1] ?? '')
-    const existing = running.get(name)
-    if (existing && existing.status !== 'error') {
-      ctx.sendJson(res, 409, { error: `Profile "${name}" 已在运行` })
-      return true
-    }
-    if (existing) running.delete(name)
-    ctx.ensureUnifiedKernel(name)
-    const basePort = Number(body.port) || config.webKernel.defaultPort || 3080
-    const port = await ctx.findFreePort(basePort)
-    invalidatePortProbe(port)
-    const { info, child } = spawnWebProfile({
-      profile: name,
-      port,
-      logDir,
-      pidDir,
-      dshBin: ctx.resolveDshBin(name),
-    })
-    const proc: RuntimeProc = { port, child, startedAt: Date.now(), status: 'starting' }
-    running.set(name, proc)
-    ctx.persistRuntime()
-    child.on('close', () => {
-      if (running.get(name) !== proc) return
-      if (proc.status === 'starting') {
-        proc.status = 'error'
-        proc.error = diagnoseStartFailure(info.logFile, port)
-      } else {
-        running.delete(name)
+    await enqueueStart(async () => {
+      const existing = running.get(name)
+      if (existing && existing.status !== 'error') {
+        ctx.sendJson(res, 409, { error: `Profile "${name}" 已在运行` })
+        return
       }
+      if (existing) running.delete(name)
+      // 启动前确保该 profile 的官方 bundle 就绪（自愈 + fallback 预建，防并发冲突）
+      try {
+        ensureProfileBundles(ctx.env.dshHome, name)
+      } catch {
+        /* 自愈失败不阻断，dsh 会尽力启动 */
+      }
+      ctx.ensureUnifiedKernel(name)
+      const basePort = Number(body.port) || config.webKernel.defaultPort || 3080
+      const port = await ctx.findFreePort(basePort)
+      invalidatePortProbe(port)
+      const { info, child } = spawnWebProfile({
+        profile: name,
+        port,
+        logDir,
+        pidDir,
+        dshBin: ctx.resolveDshBin(name),
+      })
+      const proc: RuntimeProc = { port, child, startedAt: Date.now(), status: 'starting' }
+      running.set(name, proc)
       ctx.persistRuntime()
-    })
-    void (async () => {
-      const ready = await waitForPort(port, 60_000)
-      if (running.get(name) === proc) {
-        if (ready) proc.status = 'running'
-        else {
+      child.on('close', () => {
+        if (running.get(name) !== proc) return
+        if (proc.status === 'starting') {
           proc.status = 'error'
-          proc.error = `启动超时：端口 ${port} 在 60 秒内未就绪，请查看日志诊断`
+          proc.error = diagnoseStartFailure(info.logFile, port)
+        } else {
+          running.delete(name)
         }
-      }
-    })()
-    ctx.sendJson(res, 202, { status: 'starting', profile: name, port, pid: child.pid ?? null })
+        ctx.persistRuntime()
+      })
+      void (async () => {
+        const ready = await waitForPort(port, 60_000)
+        if (running.get(name) === proc) {
+          if (ready) proc.status = 'running'
+          else {
+            proc.status = 'error'
+            proc.error = `启动超时：端口 ${port} 在 60 秒内未就绪，请查看日志诊断`
+          }
+        }
+      })()
+      ctx.sendJson(res, 202, { status: 'starting', profile: name, port, pid: child.pid ?? null })
+    })
     return true
   }
 
@@ -288,16 +311,30 @@ export const profilesHandler: ApiHandler = async (ctx, _req, res, method, seg, b
       return true
     }
     const r = await pluginAction(name, action as 'add' | 'remove' | 'update', pkg)
-    const logFile = logPluginAction(ctx.logDir, name, action, pkg, r)
-    const { errorType, message } = classifyPluginError(r)
-    ctx.sendJson(res, r.ok ? 200 : 400, {
-      ok: r.ok,
-      code: r.code,
-      stdout: r.stdout,
-      stderr: r.stderr,
-      errorType: r.ok ? 'ok' : errorType,
-      message: r.ok ? '' : message,
-      logFile: r.ok ? undefined : logFile,
+    // 卸载容错：目标包名不在 dependencies（如市场 npm 字段 ≠ 实际安装名）时，
+    // 自动查找该环境已安装依赖中匹配的包名重试（如 @furongjun1999/dsh-memory ↔ dsh-memory）
+    let effective = pkg
+    let result = r
+    if (action === 'remove' && !r.ok && /ERR_PNPM_CANNOT_REMOVE_MISSING_DEPS|no such dependency/i.test(`${r.stdout}\n${r.stderr}`)) {
+      const installed = scanProfiles(profilesDir).find((p) => p.name === name)?.dependencies ?? {}
+      const match = Object.keys(installed).find(
+        (dep) => dep === pkg || dep.endsWith('/' + pkg) || pkg.endsWith('/' + dep) || dep.replace(/^@[^/]+\//, '') === pkg.replace(/^@[^/]+\//, ''),
+      )
+      if (match) {
+        effective = match
+        result = await pluginAction(name, 'remove', match)
+      }
+    }
+    const logFile = logPluginAction(ctx.logDir, name, action, effective, result)
+    const { errorType, message } = classifyPluginError(result)
+    ctx.sendJson(res, result.ok ? 200 : 400, {
+      ok: result.ok,
+      code: result.code,
+      stdout: result.stdout,
+      stderr: result.stderr,
+      errorType: result.ok ? 'ok' : errorType,
+      message: result.ok ? '' : message,
+      logFile: result.ok ? undefined : logFile,
     })
     return true
   }

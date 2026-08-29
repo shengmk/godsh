@@ -175,8 +175,14 @@ export async function startApiServer(ctx: CliContext, opts: ApiServerOptions): P
     return index.plugins
   }
 
+  /**
+   * 找空闲端口：跳过「已在监听」和「已分配给运行中/启动中环境」的端口。
+   * 后者保证多个环境可同时启动且端口互不冲突（即使进程还没就绪也占住端口）。
+   */
   async function findFreePort(base: number): Promise<number> {
+    const allocated = new Set([...running.values()].map((p) => p.port))
     for (let port = base; port < base + 100; port++) {
+      if (allocated.has(port)) continue
       if (!(await isPortListening(port))) return port
     }
     throw new Error('找不到可用端口')

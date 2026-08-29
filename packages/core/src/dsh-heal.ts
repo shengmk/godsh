@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync, lstatSync, statSync, renameSync, symlinkSync, copyFileSync } from 'node:fs'
+import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync, lstatSync, statSync, renameSync, symlinkSync, copyFileSync, readlinkSync } from 'node:fs'
 import { join, dirname } from 'node:path'
 import { homedir } from 'node:os'
 
@@ -261,6 +261,14 @@ export function healProfilesNodeModules(dshHome: string, force = false): { heale
 }
 
 /** 递归复制目录内容（rename 退化路径用）。 */
+function readlinkSafe(p: string): string | null {
+  try {
+    return readlinkSync(p)
+  } catch {
+    return null
+  }
+}
+
 function copyDir(src: string, dest: string): void {
   for (const name of readdirSync(src)) {
     const s = join(src, name)
@@ -293,6 +301,76 @@ export function ensureDshBundles(dshHome: string): { healed: number; message: st
   } catch {
     anyBroken = true
   }
-  if (!anyBroken) return { healed: 0, message: 'bundle 可解析' }
-  return healProfilesNodeModules(dshHome)
+  let healed = 0
+  let message = 'bundle 可解析'
+  if (anyBroken) {
+    const r = healProfilesNodeModules(dshHome)
+    healed = r.healed
+    message = r.message
+  }
+  // 预建 dsh 平铺 fallback（profiles/node_modules/@deepseek-ai/*）为指向 asar 的 junction：
+  // dsh 每次启动都会跑 healProfilesModuleFallback，若 fallback 条目缺失/指向不一致，
+  // 它会 unlink/重建 junction（Windows 上对断链 junction unlink 失败 → 启动报错）。
+  // 预建为「readlink === asar 目标」的 junction 后，dsh heal 检查一致即跳过，多环境并发启动不再冲突。
+  try {
+    const prep = prepDshFallback(dshHome)
+    healed += prep
+  } catch {
+    /* fallback 预建失败不阻断（dsh 首次启动会自建） */
+  }
+  return { healed, message }
+}
+
+/**
+ * 预建 dsh 平铺 fallback：确保 profiles/node_modules/@deepseek-ai/* 全部是指向
+ * `app.asar\node_modules\@deepseek-ai\<pkg>` 的 junction（与 dsh heal 的期望一致）。
+ * 幂等：已正确指向则跳过。
+ */
+export function prepDshFallback(dshHome: string): number {
+  const asar = findDshDesktopAsar()
+  if (!asar) return 0
+  const cache = dshModulesCacheDir()
+  const scopedCache = join(cache, '@deepseek-ai')
+  if (!existsSync(scopedCache)) return 0
+  const fallback = join(dshHome, 'profiles', 'node_modules', '@deepseek-ai')
+  const asarDsa = join(dirname(asar), 'app.asar', 'node_modules', '@deepseek-ai')
+  mkdirSync(fallback, { recursive: true })
+  let built = 0
+  for (const name of readdirSync(scopedCache)) {
+    let st: ReturnType<typeof statSync> | null = null
+    try {
+      st = statSync(join(scopedCache, name))
+    } catch {
+      continue
+    }
+    if (!st.isDirectory()) continue
+    const link = join(fallback, name)
+    const target = join(asarDsa, name)
+    try {
+      if (existsSync(link) || true) {
+        const lst = lstatSync(link)
+        if (lst.isSymbolicLink() && readlinkSafe(link) === target) continue
+      }
+    } catch {
+      /* link 不存在或不可读 → 重建 */
+    }
+    try {
+      rmSync(link, { recursive: true, force: true })
+      symlinkSync(target, link, 'junction')
+      built++
+    } catch {
+      /* 单包失败不阻断 */
+    }
+  }
+  return built
+}
+
+/** 便捷入口：启动单个 profile 前调用（确保该 profile 的 bundle 就绪）。 */
+export function ensureProfileBundles(dshHome: string, profile: string): { healed: number; message: string } {
+  const dir = join(dshHome, 'profiles', profile)
+  if (bundleResolvable(dir)) {
+    prepDshFallback(dshHome)
+    return { healed: 0, message: 'bundle 可解析' }
+  }
+  return ensureDshBundles(dshHome)
 }
