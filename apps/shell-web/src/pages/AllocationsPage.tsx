@@ -386,17 +386,21 @@ export default function AllocationsPage() {
     }
   }
 
-  /** 卸载插件：真正从环境删除依赖（dsh plugin remove），并同步移除分配记录。 */
+  /** 卸载插件：智能卸载（依赖 → pnpm remove；纯 bundle → 从 bundles 移除不再加载），并同步移除分配记录。 */
   async function uninstall(a: Allocation) {
-    if (/^@deepseek-ai\/(dsh-base|dsh-web-app|dsh-headless)$/.test(a.pluginId)) {
-      show('官方内核 bundle 不能卸载（由 dsh 自动加载）', true)
+    if (a.pluginId === '@deepseek-ai/dsh-base') {
+      show('dsh-base 是核心内核 bundle，不能卸载（环境依赖它才能启动）', true)
       return
     }
-    if (!window.confirm(`确定从环境 ${a.profile} 卸载插件 ${a.pluginId}？\n这会删除它的依赖（含其它环境引用时不受影响）。`)) return
+    const isWebApp = a.pluginId === '@deepseek-ai/dsh-web-app'
+    const hint = isWebApp
+      ? '卸载 @deepseek-ai/dsh-web-app 后，该环境将失去 Web 界面（仅保留命令行能力）。确定继续？'
+      : `确定从环境 ${a.profile} 卸载插件 ${a.pluginId}？`
+    if (!window.confirm(hint)) return
     try {
-      const r = await api.installPlugin(a.profile, 'remove', a.pluginId)
+      const r = await api.uninstallPlugin(a.profile, a.pluginId)
       if (!r.ok) {
-        show(r.message || `卸载失败（${r.errorType ?? 'unknown'}），见日志：${r.logFile ?? ''}`, true)
+        show(r.message || `卸载失败（${r.errorType ?? 'unknown'}）`, true)
         return
       }
       // 卸载成功后同步移除分配记录（若仍存在）

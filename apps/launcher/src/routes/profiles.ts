@@ -1,7 +1,7 @@
 import { join } from 'node:path'
-import { mkdirSync, writeFileSync } from 'node:fs'
+import { mkdirSync, readFileSync, writeFileSync, existsSync } from 'node:fs'
 import { readLogTail, spawnWebProfile, stopWeb, waitForPort, isPortListening, findPidByPort, findProcessName, invalidatePortProbe, ensureProfileBundles } from '@godsh/core'
-import { createProfile, removeProfile, scanProfiles } from '@godsh/profile-manager'
+import { createProfile, removeProfile, scanProfiles, setProfileBundles } from '@godsh/profile-manager'
 import { pluginAction, PLUGIN_ACTION_TIMEOUT_MS } from '@godsh/marketplace'
 import type { ApiHandler, RouteContext, RuntimeProc } from './types.js'
 
@@ -336,6 +336,69 @@ export const profilesHandler: ApiHandler = async (ctx, _req, res, method, seg, b
       message: result.ok ? '' : message,
       logFile: result.ok ? undefined : logFile,
     })
+    return true
+  }
+
+  // POST /api/profiles/:name/plugins/uninstall  { pkg } —— 智能卸载：
+  // 1) 若 pkg 是 dependencies（用户安装的），走 dsh plugin remove（连带 reconcile bundles）；
+  // 2) 若 pkg 只在 bundles（官方内核 bundle / 无依赖的 bundle），从 dsh.profile.bundles 移除，
+  //    让该 bundle 不再被加载（等效于"删除"），而不是报 400。
+  if (seg.length === 4 && seg[0] === 'profiles' && seg[2] === 'plugins' && seg[3] === 'uninstall' && method === 'POST') {
+    const name = decodeURIComponent(seg[1] ?? '')
+    const pkg = typeof body.pkg === 'string' ? body.pkg.trim() : ''
+    if (!pkg) {
+      ctx.sendJson(res, 400, { error: 'body 需要 { pkg }' })
+      return true
+    }
+    const profile = scanProfiles(profilesDir).find((p) => p.name === name)
+    const deps = profile?.dependencies ?? {}
+    const bundles = profile?.bundles ?? []
+
+    // 硬保护：@deepseek-ai/dsh-base 是每个 profile 的核心内核，删除后环境完全无法启动
+    if (pkg === '@deepseek-ai/dsh-base') {
+      ctx.sendJson(res, 400, { ok: false, errorType: 'protected', message: 'dsh-base 是核心内核 bundle，不能卸载（环境依赖它才能启动）' })
+      return true
+    }
+
+    // 情况 1：dependencies 里有该包（或可匹配的）→ dsh plugin remove
+    if (Object.keys(deps).some((d) => d === pkg || d.endsWith('/' + pkg) || pkg.endsWith('/' + d))) {
+      const r = await pluginAction(name, 'remove', pkg)
+      const logFile = logPluginAction(ctx.logDir, name, 'remove', pkg, r)
+      const { errorType, message } = classifyPluginError(r)
+      if (r.ok) {
+        ctx.sendJson(res, 200, { ok: true, removed: pkg, method: 'pnpm' })
+        return true
+      }
+      ctx.sendJson(res, 400, { ok: false, code: r.code, errorType, message, logFile })
+      return true
+    }
+
+    // 情况 2：只在 bundles → 从 bundles 移除（不再加载），并同步清理 patch 里的残留条目
+    if (bundles.includes(pkg)) {
+      const next = bundles.filter((b) => b !== pkg)
+      setProfileBundles(profilesDir, name, next)
+      // 同步清理 patch 中的该 bundle 条目（若 launcher 分配机制写过）
+      try {
+        const patchPath = join(profilesDir, name, 'cordis.patch.yml')
+        if (existsSync(patchPath)) {
+          const raw = readFileSync(patchPath, 'utf8')
+          const cleaned = raw
+            .split(/\r?\n/)
+            .filter((line) => !line.includes(`id: "${pkg}"`) && !line.includes(`id: ${pkg}`))
+          // 若只剩 "- insert:" 或空, 写空数组
+          let final = cleaned
+          if (final.every((l) => !l.trim() || l.trim() === '- insert:')) final = ['[]']
+          writeFileSync(patchPath, final.join('\n') + '\n', 'utf8')
+        }
+      } catch {
+        /* 忽略 patch 清理失败 */
+      }
+      ctx.sendJson(res, 200, { ok: true, removed: pkg, method: 'bundle' })
+      return true
+    }
+
+    // 两者都没有：给出友好提示
+    ctx.sendJson(res, 404, { ok: false, errorType: 'not-installed', message: `该插件不在环境 ${name} 中，无需卸载` })
     return true
   }
 

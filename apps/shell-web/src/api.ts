@@ -70,6 +70,16 @@ export const api = {
       body: JSON.stringify({ action, pkg }),
     }),
 
+  /** 智能卸载：dependencies 里的走 pnpm remove；纯 bundle 的从 bundles 移除（不再加载）。 */
+  uninstallPlugin: (profile: string, pkg: string) =>
+    req<{ ok: boolean; removed: string; method?: string; message?: string; errorType?: string }>(
+      `/profiles/${encodeURIComponent(profile)}/plugins/uninstall`,
+      {
+        method: 'POST',
+        body: JSON.stringify({ pkg }),
+      },
+    ),
+
   /** 批量安装：一次安装多个插件到同一 Profile（串行队列，返回每个包的结果） */
   installPluginsBatch: (profile: string, packages: string[]) =>
     req<{ profile: string; results: BatchInstallResult[]; ok: number; failed: number }>(
