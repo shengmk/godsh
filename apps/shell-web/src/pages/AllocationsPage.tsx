@@ -123,10 +123,22 @@ export default function AllocationsPage() {
   /** 跨环境拖放 = 剪切并复制：目标环境未安装时自动安装，再从源环境移除分配。 */
   const handleCrossProfileDrop = useCallback(
     async (src: { kind: 'alloc' | 'avail'; id: string; profile: string }, targetProfile: string) => {
+      // src.id 对 alloc 是分配记录 id，需要解析出真实 pluginId
+      let pluginId = src.id
+      let fromProfile: string | undefined
+      if (src.kind === 'alloc') {
+        const a = allocations.find((x) => x.id === src.id)
+        if (!a) {
+          show('未找到该分配记录', true)
+          return
+        }
+        pluginId = a.pluginId
+        fromProfile = a.profile
+      }
       try {
-        const r = await api.moveWithInstall(src.id, targetProfile, src.kind === 'alloc' ? src.profile : undefined)
+        const r = await api.moveWithInstall(pluginId, targetProfile, fromProfile)
         if (r.ok) {
-          show(`已把 ${src.id} 复制到 ${targetProfile}${r.installed ? '' : '（已自动安装）'}`)
+          show(`已把 ${pluginId} 复制到 ${targetProfile}${r.installed ? '' : '（已自动安装）'}`)
           await load()
         }
       } catch (e) {
@@ -246,8 +258,8 @@ export default function AllocationsPage() {
       // 用 elementFromPoint 找当前悬停的目标（最近的 .alloc-row 或 .card 面板）
       const el = document.elementFromPoint(e.clientX, e.clientY)
       const row = el?.closest?.('.alloc-row') as HTMLElement | null
-      const panel = (row ?? el)?.closest?.('.card') as HTMLElement | null
-      const profileName = panel?.querySelector('strong')?.textContent?.trim() ?? null
+      const panel = (row ?? el)?.closest?.('.card[data-profile]') as HTMLElement | null
+      const profileName = panel?.dataset?.profile ?? panel?.querySelector('strong')?.textContent?.trim() ?? null
       d.overProfile = profileName
       d.overKey = row?.dataset?.key ?? null
       setDrag({ ...d })
@@ -406,7 +418,7 @@ export default function AllocationsPage() {
         </span>
         <span className="spacer" />
         <span className="muted" style={{ fontSize: 12 }}>
-          💡 按住插件行拖到其它环境面板 = 移动分配（可用插件需目标环境已安装）；本环境内拖动 = 排序
+          💡 拖动插件到其它环境 = 剪切并复制（自动安装到目标环境）；本环境内拖动 = 排序
         </span>
         <button className="btn sm" onClick={() => load()}>
           刷新
@@ -426,6 +438,7 @@ export default function AllocationsPage() {
             <div
               className={`card${isOver ? ' drop-target' : ''}`}
               key={p.name}
+              data-profile={p.name}
               style={{ marginBottom: 12 }}
             >
               <div
