@@ -169,11 +169,11 @@ export default function MarketPage() {
     return list
   }, [plugins, sortBy])
 
-  async function install(pkg: string, display: string) {
+  async function install(pkg: string, display: string, marketName?: string) {
     if (!profile) return show('请先选择目标 Profile', true)
     setInstalling(pkg)
     try {
-      const r = await api.installPlugin(profile, 'add', pkg)
+      const r = await api.installPlugin(profile, 'add', pkg, marketName)
       if (r.ok) {
         show(`已安装 ${display} → ${profile}`)
         await refreshInstalled()
@@ -206,11 +206,11 @@ export default function MarketPage() {
     }
   }
 
-  async function update(pkg: string, display: string) {
+  async function update(pkg: string, display: string, marketName?: string) {
     if (!profile) return show('请先选择目标 Profile', true)
     setInstalling(pkg)
     try {
-      const r = await api.installPlugin(profile, 'update', pkg)
+      const r = await api.installPlugin(profile, 'update', pkg, marketName)
       if (r.ok) {
         show(`已更新 ${display}`)
         await refreshInstalled()
@@ -244,16 +244,21 @@ export default function MarketPage() {
 
   /** 批量安装：串行队列安装，逐个显示进度（1/3、2/3…），失败时标出具体包。 */
   async function batchInstall() {
-    const pkgs = Array.from(selected)
-    if (pkgs.length === 0) return show('请先勾选要安装的插件', true)
+    const selectedNames = Array.from(selected)
+    if (selectedNames.length === 0) return show('请先勾选要安装的插件', true)
     if (!profile) return show('请先选择目标 Profile', true)
+    // 每个选中项对应的市场插件（解析真实安装参数）
+    const selectedPlugins = sortedPlugins.filter((p) => selected.has(p.name))
+    const pkgs = selectedPlugins.map((p) => pkgName(p))
+    const marketNames = selectedPlugins.map((p) => p.name)
+    if (pkgs.length === 0) return show('选中的插件不在当前列表，请重新选择', true)
     setQueue(pkgs.map((p) => ({ pkg: p, status: 'pending' as const })))
     setQueueDone(false)
     let failedCount = 0
     for (let i = 0; i < pkgs.length; i++) {
       setQueue((prev) => (prev ? prev.map((q, idx) => (idx === i ? { ...q, status: 'installing' as const } : q)) : prev))
       try {
-        const r = await api.installPlugin(profile, 'add', pkgs[i]!)
+        const r = await api.installPlugin(profile, 'add', pkgs[i]!, marketNames[i])
         if (!r.ok) failedCount++
         setQueue((prev) =>
           prev
@@ -335,7 +340,7 @@ export default function MarketPage() {
             {sortedPlugins.slice(0, visibleCount).map((p) => {
               const pkg = pkgName(p)
               const installed = installedNames.includes(pkg)
-              const isSelected = selected.has(pkg)
+              const isSelected = selected.has(p.name)
               return (
                 <div className={`card${isSelected ? ' selected' : ''}`} key={pkg}>
                   <div className="card-title">
@@ -343,7 +348,7 @@ export default function MarketPage() {
                       <input
                         type="checkbox"
                         checked={isSelected}
-                        onChange={() => toggleSelect(pkg)}
+                        onChange={() => toggleSelect(p.name)}
                         disabled={installed}
                         title={installed ? '已安装的插件无需再次选择' : '勾选后可批量安装'}
                       />
@@ -365,7 +370,7 @@ export default function MarketPage() {
                   <div className="row" style={{ marginTop: 10 }}>
                     {installed ? (
                       <>
-                        <button className="btn sm" disabled={installing === pkg} onClick={() => update(pkg, p.name)}>
+                        <button className="btn sm" disabled={installing === pkg} onClick={() => update(pkg, p.name, p.name)}>
                           {installing === pkg ? '处理中…' : '更新'}
                         </button>
                         <button className="btn danger sm" disabled={installing === pkg} onClick={() => remove(pkg, p.name)}>
@@ -374,14 +379,14 @@ export default function MarketPage() {
                       </>
                     ) : (
                       <>
-                        <button className="btn primary sm" disabled={installing === pkg} onClick={() => install(pkg, p.name)}>
+                        <button className="btn primary sm" disabled={installing === pkg} onClick={() => install(pkg, p.name, p.name)}>
                           {installing === pkg ? '安装中…' : '安装'}
                         </button>
                         <button
                           className="btn sm"
                           disabled={installing === pkg}
                           onClick={() => {
-                            toggleSelect(pkg)
+                            toggleSelect(p.name)
                             show(isSelected ? '已取消选择' : '已加入批量安装队列')
                           }}
                         >

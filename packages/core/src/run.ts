@@ -34,15 +34,18 @@ function buildCommandLine(command: string, args: string[]): string {
 
 /** 派生子进程：Windows 通过 cmd.exe 解析 .cmd shim，POSIX 直接 execvp。 */
 function spawnProcess(command: string, args: string[], opts: RunOptions) {
+  // env 需要与当前进程环境合并（不能整体替换，否则 PATH/系统变量丢失，子进程找不到 pnpm/dsh 等）
+  const env = opts.env ? { ...process.env, ...opts.env } : undefined
+  const mergedOpts = { ...opts, env }
   if (isWindows) {
     // shell + 单条命令字符串（无 args 数组），避免 DEP0190 且参数已转义
     return spawn(buildCommandLine(command, args), [], {
       shell: true,
       windowsHide: true,
-      ...opts,
+      ...mergedOpts,
     })
   }
-  return spawn(command, args, { ...opts })
+  return spawn(command, args, { ...mergedOpts })
 }
 
 /** 派生长驻子进程（不等待结束），返回 ChildProcess 供调用方管理。 */

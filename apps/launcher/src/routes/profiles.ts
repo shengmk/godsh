@@ -2,7 +2,7 @@ import { join } from 'node:path'
 import { mkdirSync, readFileSync, writeFileSync, existsSync } from 'node:fs'
 import { readLogTail, spawnWebProfile, stopWeb, waitForPort, isPortListening, findPidByPort, findProcessName, invalidatePortProbe, ensureProfileBundles } from '@godsh/core'
 import { createProfile, removeProfile, scanProfiles, setProfileBundles } from '@godsh/profile-manager'
-import { pluginAction, PLUGIN_ACTION_TIMEOUT_MS } from '@godsh/marketplace'
+import { pluginAction, PLUGIN_ACTION_TIMEOUT_MS, resolveInstallArg } from '@godsh/marketplace'
 import type { ApiHandler, RouteContext, RuntimeProc } from './types.js'
 
 /**
@@ -296,11 +296,23 @@ export const profilesHandler: ApiHandler = async (ctx, _req, res, method, seg, b
     return true
   }
 
-  // POST /api/profiles/:name/plugins  { action, pkg }
+  // POST /api/profiles/:name/plugins  { action, pkg, marketName? }
   if (seg.length === 3 && seg[0] === 'profiles' && seg[2] === 'plugins' && method === 'POST') {
     const name = decodeURIComponent(seg[1] ?? '')
     const action = body.action as string
-    const pkg = body.pkg as string
+    let pkg = body.pkg as string
+    // marketName：市场展示名（可能 ≠ 可安装包名，如 "dsh-trail#bundle" / github: 源）。
+    // 提供时从市场索引解析真实安装参数（npm 字段 → install 字段 → name 去 #）。
+    if (typeof body.marketName === 'string' && body.marketName.trim()) {
+      try {
+        const plugins = (await ctx.getMarket()) as Array<{ name?: string; npm?: string; install?: string }>
+        const mp = plugins.find((p) => p.name === body.marketName)
+        const resolved = resolveInstallArg(mp)
+        if (resolved) pkg = resolved
+      } catch {
+        /* 市场解析失败时回退用原 pkg */
+      }
+    }
     if (!['add', 'remove', 'update'].includes(action) || !pkg) {
       ctx.sendJson(res, 400, { error: 'body 需要 { action: add|remove|update, pkg }' })
       return true
@@ -323,6 +335,37 @@ export const profilesHandler: ApiHandler = async (ctx, _req, res, method, seg, b
       if (match) {
         effective = match
         result = await pluginAction(name, 'remove', match)
+      }
+    }
+    // git-hosted 包构建容错：pnpm 要求把 git 包加入 allowBuilds（key 是 包名@URL）。
+    // 解析报错提示的 key，写入 profile 的 pnpm-workspace.yaml 后重试一次。
+    if (action === 'add' && !result.ok && /ERR_PNPM_GIT_DEP_PREPARE_NOT_ALLOWED/i.test(`${result.stdout}\n${result.stderr}`)) {
+      const all = `${result.stdout}\n${result.stderr}`
+      const keyMatch = /allowBuilds:\s*\n\s*(@?[^\s]+@https?:\/\/\S+):\s*true/.exec(all) || /The git-hosted package "([^"]+)" needs to execute build scripts/.exec(all)
+      if (keyMatch) {
+        const pkgKey = keyMatch[1]!.trim()
+        const wsPath = join(profilesDir, name, 'pnpm-workspace.yaml')
+        try {
+          if (existsSync(wsPath)) {
+            let ws = readFileSync(wsPath, 'utf8')
+            if (!ws.includes(pkgKey)) {
+              // 在 allowBuilds 块内追加（无 allowBuilds 则创建）
+              // key 含 URL(: 字符), YAML 需引号包裹
+              const quoted = /[\s:#]/.test(pkgKey) ? `"${pkgKey.replace(/"/g, '\\"')}"` : pkgKey
+              if (/allowBuilds:/.test(ws)) {
+                ws = ws.replace(/(allowBuilds:\s*\n)/, `$1  ${quoted}: true\n`)
+              } else {
+                ws += `\nallowBuilds:\n  ${quoted}: true\n`
+              }
+              writeFileSync(wsPath, ws, 'utf8')
+              // 重试一次
+              result = await pluginAction(name, 'add', pkg)
+              effective = pkg
+            }
+          }
+        } catch {
+          /* 写 allowBuilds 失败则保留原错误 */
+        }
       }
     }
     const logFile = logPluginAction(ctx.logDir, name, action, effective, result)
@@ -407,7 +450,7 @@ export const profilesHandler: ApiHandler = async (ctx, _req, res, method, seg, b
     return true
   }
 
-  // POST /api/profiles/:name/plugins/batch  { packages: string[] }
+  // POST /api/profiles/:name/plugins/batch  { packages: string[], marketNames?: string[] }
   if (seg.length === 4 && seg[0] === 'profiles' && seg[2] === 'plugins' && seg[3] === 'batch' && method === 'POST') {
     const name = decodeURIComponent(seg[1] ?? '')
     const packages = body.packages as unknown
@@ -415,11 +458,33 @@ export const profilesHandler: ApiHandler = async (ctx, _req, res, method, seg, b
       ctx.sendJson(res, 400, { error: 'body 需要 { packages: string[] }' })
       return true
     }
+    // marketNames：与 packages 对应的市场展示名（用于解析 github:/http-tgz 等真实安装参数）
+    const marketNames = Array.isArray(body.marketNames) ? (body.marketNames as unknown[]) : []
+    let marketMap: Map<string, string> | null = null
+    if (marketNames.some((m) => typeof m === 'string' && m)) {
+      try {
+        const plugins = (await ctx.getMarket()) as Array<{ name?: string; npm?: string; install?: string }>
+        marketMap = new Map()
+        for (const p of plugins) {
+          if (p && typeof p.name === 'string') {
+            const resolved = resolveInstallArg(p)
+            if (resolved) marketMap.set(p.name, resolved)
+          }
+        }
+      } catch {
+        marketMap = null
+      }
+    }
     const results: { pkg: string; ok: boolean; error?: string; errorType?: string; logFile?: string }[] = []
-    for (const pkg of packages) {
-      const p = typeof pkg === 'string' ? pkg.trim() : ''
+    for (let i = 0; i < packages.length; i++) {
+      let p = typeof packages[i] === 'string' ? (packages[i] as string).trim() : ''
+      // 用市场名解析真实安装参数（若提供了 marketNames）
+      if (marketMap && i < marketNames.length && typeof marketNames[i] === 'string') {
+        const resolved = marketMap.get(marketNames[i] as string)
+        if (resolved) p = resolved
+      }
       if (!p) {
-        results.push({ pkg: String(pkg), ok: false, error: '空包名', errorType: 'other' })
+        results.push({ pkg: String(packages[i]), ok: false, error: '空包名', errorType: 'other' })
         continue
       }
       const decision = sourcePolicy.check(p)

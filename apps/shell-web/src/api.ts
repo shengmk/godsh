@@ -64,10 +64,11 @@ export const api = {
   market: (q?: string) =>
     req<{ plugins: MarketPlugin[] }>(`/market${q ? `?q=${encodeURIComponent(q)}` : ''}`).then((r) => r.plugins),
 
-  installPlugin: (profile: string, action: 'add' | 'remove' | 'update', pkg: string) =>
+  /** 安装/更新插件。marketName 为市场展示名（可选）：后端据此解析真实安装参数（npm/github:/tgz）。 */
+  installPlugin: (profile: string, action: 'add' | 'remove' | 'update', pkg: string, marketName?: string) =>
     req<PluginActionResult>(`/profiles/${encodeURIComponent(profile)}/plugins`, {
       method: 'POST',
-      body: JSON.stringify({ action, pkg }),
+      body: JSON.stringify({ action, pkg, ...(marketName ? { marketName } : {}) }),
     }),
 
   /** 智能卸载：dependencies 里的走 pnpm remove；纯 bundle 的从 bundles 移除（不再加载）。 */
@@ -80,13 +81,13 @@ export const api = {
       },
     ),
 
-  /** 批量安装：一次安装多个插件到同一 Profile（串行队列，返回每个包的结果） */
-  installPluginsBatch: (profile: string, packages: string[]) =>
+  /** 批量安装：marketNames 与 packages 一一对应（可选，用于 github:/tgz 源解析）。 */
+  installPluginsBatch: (profile: string, packages: string[], marketNames?: string[]) =>
     req<{ profile: string; results: BatchInstallResult[]; ok: number; failed: number }>(
       `/profiles/${encodeURIComponent(profile)}/plugins/batch`,
       {
         method: 'POST',
-        body: JSON.stringify({ packages }),
+        body: JSON.stringify({ packages, ...(marketNames ? { marketNames } : {}) }),
       },
     ),
 
