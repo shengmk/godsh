@@ -128,6 +128,13 @@ export const api = {
       body: JSON.stringify({ profile }),
     }).then((r) => r.allocation),
 
+  /** 剪切并复制：跨环境转移插件，目标环境未安装时自动安装。 */
+  moveWithInstall: (pluginId: string, toProfile: string, fromProfile?: string, marketName?: string) =>
+    req<{ ok: boolean; allocation: Allocation; installed: boolean }>('/allocations/move-with-install', {
+      method: 'POST',
+      body: JSON.stringify({ pluginId, toProfile, ...(fromProfile ? { fromProfile } : {}), ...(marketName ? { marketName } : {}) }),
+    }),
+
   kernels: () =>
     req<{ templates: KernelTemplate[]; instances: KernelInstance[] }>('/kernels'),
 

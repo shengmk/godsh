@@ -120,31 +120,15 @@ export default function AllocationsPage() {
     return null
   }
 
-  /** 跨环境拖放：已分配卡片 → moveAllocation；可用插件 → 目标已安装才分配。 */
+  /** 跨环境拖放 = 剪切并复制：目标环境未安装时自动安装，再从源环境移除分配。 */
   const handleCrossProfileDrop = useCallback(
     async (src: { kind: 'alloc' | 'avail'; id: string; profile: string }, targetProfile: string) => {
-      if (src.kind === 'alloc') {
-        try {
-          const moved = await api.moveAllocation(src.id, targetProfile)
-          show(`已把 ${moved.pluginId} 从 ${src.profile} 移动到 ${targetProfile}`)
-          await load()
-        } catch (e) {
-          show(e instanceof Error ? e.message : String(e), true)
+      try {
+        const r = await api.moveWithInstall(src.id, targetProfile, src.kind === 'alloc' ? src.profile : undefined)
+        if (r.ok) {
+          show(`已把 ${src.id} 复制到 ${targetProfile}${r.installed ? '' : '（已自动安装）'}`)
           await load()
         }
-        return
-      }
-      // 可用插件跨环境：目标环境必须已安装该插件（dependencies ∪ bundles）
-      const target = profiles.find((x) => x.name === targetProfile)
-      const installed = target ? [...target.bundles, ...Object.keys(target.dependencies)] : []
-      if (!installed.includes(src.id)) {
-        show(`目标环境 ${targetProfile} 未安装 ${src.id}，请先在「插件市场」安装`, true)
-        return
-      }
-      try {
-        await api.allocate(targetProfile, src.id, src.id, true)
-        show(`已分配 ${src.id} → ${targetProfile}`)
-        await load()
       } catch (e) {
         show(e instanceof Error ? e.message : String(e), true)
         await load()
@@ -344,27 +328,16 @@ export default function AllocationsPage() {
     })
   }
 
-  function onContextAvail(profile: string, item: AvailablePlugin, e: React.MouseEvent) {
+  function onContextAvail(item: AvailablePlugin, e: React.MouseEvent) {
     e.preventDefault()
     setMenu({
       x: e.clientX,
       y: e.clientY,
       items: [
-        { label: '分配到本环境', onClick: () => void addFromInstalled(profile, item.pluginId) },
         { label: item.source === 'bundle' ? '来源：bundle' : '来源：依赖', onClick: () => {}, disabled: true },
+        { label: '拖动到其它环境可转移', onClick: () => {}, disabled: true },
       ],
     })
-  }
-
-  async function addFromInstalled(profile: string, pluginId: string) {
-    if (!pluginId) return
-    try {
-      await api.allocate(profile, pluginId, pluginId, true)
-      show(`已分配 ${pluginId} → ${profile}`)
-      await load()
-    } catch (e) {
-      show(e instanceof Error ? e.message : String(e), true)
-    }
   }
 
   async function toggle(a: Allocation) {
@@ -497,7 +470,7 @@ export default function AllocationsPage() {
                           data-key={key}
                           style={{ cursor: 'grab' }}
                           onPointerDown={(e) => onRowPointerDown(e, key)}
-                          onContextMenu={(e) => (isAlloc && a ? onContextAlloc(a, e) : av ? onContextAvail(p.name, av, e) : undefined)}
+                          onContextMenu={(e) => (isAlloc && a ? onContextAlloc(a, e) : av ? onContextAvail(av, e) : undefined)}
                         >
                           <span className="drag-grip" title="按住拖动">⠿</span>
                           {isAlloc && a ? (
@@ -533,11 +506,8 @@ export default function AllocationsPage() {
                               <span className={`badge ${av.source === 'bundle' ? 'kind' : 'stopped'}`}>
                                 {av.source === 'bundle' ? 'bundle' : '依赖'}
                               </span>
-                              <span className="badge disabled">未分配</span>
+                              <span className="badge disabled">未分配 · 拖动到环境即转移</span>
                               <span className="spacer" />
-                              <button className="btn primary sm" onClick={() => void addFromInstalled(p.name, av.pluginId)}>
-                                分配
-                              </button>
                             </>
                           ) : null}
                         </div>

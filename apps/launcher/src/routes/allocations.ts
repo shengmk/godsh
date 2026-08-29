@@ -1,4 +1,5 @@
 import { scanProfiles } from '@godsh/profile-manager'
+import { pluginAction, resolveInstallArg } from '@godsh/marketplace'
 import type { ApiHandler } from './types.js'
 
 /** /api/allocations* —— 分配 CRUD / 排序 / 移动 / 可分配清单（含 patch 写回守护与回滚） */
@@ -118,6 +119,64 @@ export const allocationsHandler: ApiHandler = async (ctx, _req, res, method, seg
       available[p.name] = items
     }
     ctx.sendJson(res, 200, { available })
+    return true
+  }
+
+  // POST /api/allocations/move-with-install  { pluginId, fromProfile?, toProfile, marketName? }
+  // 「剪切并复制」：把插件转移到目标环境 —— 目标环境未安装时自动安装（dsh plugin add），
+  // 再从源环境移除分配（若存在），在目标环境分配。保证目标环境真正能调用。
+  if (seg.length === 2 && seg[0] === 'allocations' && seg[1] === 'move-with-install' && method === 'POST') {
+    const pluginId = body.pluginId as string
+    const toProfile = body.toProfile as string
+    const fromProfile = body.fromProfile as string | undefined
+    if (!pluginId || !toProfile) {
+      ctx.sendJson(res, 400, { error: 'body 需要 { pluginId, toProfile }' })
+      return true
+    }
+    const profiles = scanProfiles(profilesDir)
+    const target = profiles.find((p) => p.name === toProfile)
+    if (!target) {
+      ctx.sendJson(res, 404, { error: `目标环境不存在: ${toProfile}` })
+      return true
+    }
+    // 1) 目标环境是否已安装（dependencies ∪ bundles）
+    const targetInstalled = [...(target.bundles ?? []), ...Object.keys(target.dependencies ?? {})]
+    let marketPlugin: { name?: string; npm?: string; install?: string } | undefined
+    if (typeof body.marketName === 'string' && body.marketName) {
+      const plugins = (await ctx.getMarket()) as Array<{ name?: string; npm?: string; install?: string }>
+      marketPlugin = plugins.find((p) => p?.name === body.marketName)
+    }
+    const installArg = resolveInstallArg(marketPlugin ?? { name: pluginId, install: undefined, npm: pluginId })
+    // 2) 未安装则自动安装到目标环境
+    if (!targetInstalled.includes(pluginId) && !targetInstalled.includes(installArg ?? '')) {
+      const r = await pluginAction(toProfile, 'add', installArg ?? pluginId)
+      if (!r.ok) {
+        ctx.sendJson(res, 400, {
+          ok: false,
+          error: `自动安装到 ${toProfile} 失败（${r.stdout || r.stderr}），请到插件市场检查该插件`,
+          stdout: r.stdout,
+          stderr: r.stderr,
+        })
+        return true
+      }
+    }
+    // 3) 从源环境移除分配（若存在）
+    if (fromProfile) {
+      const existing = allocations.list().find((x) => x.profile === fromProfile && x.pluginId === pluginId)
+      if (existing) {
+        allocations.remove(existing.id)
+        ctx.tryApplyAllocation(fromProfile, [pluginId])
+      }
+    }
+    // 4) 目标环境分配（幂等）
+    const a = allocations.allocate(toProfile, pluginId, pluginId)
+    const apply = ctx.tryApplyAllocation(toProfile)
+    if (!apply.applied) {
+      allocations.remove(a.id)
+      ctx.sendJson(res, 409, { error: apply.applyError ?? '写回 cordis.patch.yml 失败' })
+      return true
+    }
+    ctx.sendJson(res, 200, { ok: true, allocation: a, installed: targetInstalled.includes(pluginId) || targetInstalled.includes(installArg ?? '') })
     return true
   }
 

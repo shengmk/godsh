@@ -115,7 +115,10 @@ export default function MarketPage() {
   useEffect(() => {
     api
       .profilePlugins(profile)
-      .then((r) => setInstalledNames(r.installedNames ?? []))
+      .then((r) => setInstalledNames((prev) => {
+        const merged = new Set([...(prev ?? []), ...(r.installedNames ?? [])])
+        return [...merged]
+      }))
       .catch(() => {})
   }, [profile])
 
@@ -195,6 +198,7 @@ export default function MarketPage() {
       const r = await api.uninstallPlugin(profile, pkg)
       if (r.ok) {
         show(`已卸载 ${display}`)
+        dropInstalled(pkg)
         await refreshInstalled()
       } else {
         show(r.message || `卸载失败（${r.errorType ?? 'unknown'}）`, true)
@@ -224,13 +228,27 @@ export default function MarketPage() {
     }
   }
 
+  /**
+   * 刷新已安装状态：合并策略 —— 新结果与当前已装列表取并集（只增不清）。
+   * 避免因请求时序/返回空数组导致「已安装」状态闪烁为「未安装」；
+   * 卸载成功后调用 removeInstalled 明确移除对应包。
+   */
   async function refreshInstalled() {
     try {
       const r = await api.profilePlugins(profile)
-      setInstalledNames(r.installedNames ?? [])
+      const fresh = r.installedNames ?? []
+      setInstalledNames((prev) => {
+        const merged = new Set([...(prev ?? []), ...fresh])
+        return [...merged]
+      })
     } catch {
-      /* 忽略 */
+      /* 忽略（保留当前状态） */
     }
+  }
+
+  /** 明确移除某包（卸载成功后调用），避免合并策略残留已卸载插件。 */
+  function dropInstalled(pkg: string) {
+    setInstalledNames((prev) => (prev ?? []).filter((x) => x !== pkg))
   }
 
   function toggleSelect(name: string) {
