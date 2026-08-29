@@ -67,13 +67,26 @@ export function parsePatchSummary(raw: string): PatchSummary {
   return { entries: entries.length, ids, disabledIds }
 }
 
+/**
+ * 序列化 id 值：以 @ / ! / $ 开头的裸值会被新版 dsh 的 YAML schema
+ * 当作 !!js 表达式等特殊标记导致解析失败（"bad indentation of a mapping entry"），
+ * 必须加双引号包裹；纯普通字符串（字母/数字/-/_/./空格）保持裸写。
+ */
+export function quoteIdIfNeeded(id: string): string {
+  const v = id.trim()
+  if (/^[@!$&*?|>%`]/.test(v) || /[{}[\],:#]/.test(v) || /[\r\n]/.test(v)) {
+    return `"${v.replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"`
+  }
+  return v
+}
+
 /** 将 patch 条目序列化为规范 YAML 列表。 */
 export function serializePatchList(entries: PatchEntry[]): string {
   const lines: string[] = []
   for (const e of entries) {
     lines.push(`- ${e.op}:`)
     for (const id of e.ids) {
-      lines.push(`    - id: ${id}`)
+      lines.push(`    - id: ${quoteIdIfNeeded(id)}`)
       if (e.disabledIds.includes(id)) lines.push(`      disabled: true`)
     }
   }

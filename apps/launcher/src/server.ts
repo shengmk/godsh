@@ -1,7 +1,7 @@
 import http from 'node:http'
 import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from 'node:fs'
 import { extname, join } from 'node:path'
-import { MONOREPO_ROOT, DATA_DIR, findPidByPort, isPortListening, readLogTail } from '@godsh/core'
+import { MONOREPO_ROOT, DATA_DIR, findPidByPort, isPortListening, readLogTail, ensureDshBundles } from '@godsh/core'
 import { fetchMarketIndex } from '@godsh/marketplace'
 import { scanProfiles } from '@godsh/profile-manager'
 import type { CliContext } from './context.js'
@@ -97,6 +97,15 @@ export interface ApiServerOptions {
 export async function startApiServer(ctx: CliContext, opts: ApiServerOptions): Promise<http.Server> {
   const { store, env, profilesDir, pidDir, logDir, pluginsDir, templatesDir, kernels, allocations, unifiedKernel, dshEnvs, sourcePolicy } = ctx
   const config = store.readConfig()
+
+  // 启动自愈：DSH Desktop junction 断链时提取官方 bundle，保证 profile 可启动。
+  // 同步执行一次（首次约 24s，之后毫秒级；失败不阻断启动）。
+  try {
+    const heal = ensureDshBundles(env.dshHome)
+    if (heal.healed > 0) console.log(`[godsh] 已修复 ${heal.healed} 个断链 bundle: ${heal.message}`)
+  } catch (err) {
+    console.warn(`[godsh] bundle 自愈跳过: ${err instanceof Error ? err.message : String(err)}`)
+  }
 
   // 会话内运行中的 dsh web 进程（profile → 进程）
   const running = new Map<string, RuntimeProc>()

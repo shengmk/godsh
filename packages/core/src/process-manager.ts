@@ -27,19 +27,38 @@ export interface WebProcessInfo {
   running: boolean
 }
 
-/** 在端口上探测 HTTP 服务是否就绪。 */
+/** 端口就绪探测缓存：2s TTL，避免 3s 轮询时每个 profile 反复发 HTTP 请求。 */
+const portProbeCache = new Map<number, { at: number; listening: boolean }>()
+const PORT_PROBE_TTL_MS = 2000
+
+/** 在端口上探测 HTTP 服务是否就绪（带 2s 缓存）。 */
 export function isPortListening(port: number, timeoutMs = 500): Promise<boolean> {
+  const cached = portProbeCache.get(port)
+  if (cached && Date.now() - cached.at < PORT_PROBE_TTL_MS) {
+    return Promise.resolve(cached.listening)
+  }
   return new Promise((resolve) => {
     const req = http.get({ host: '127.0.0.1', port, path: '/', timeout: timeoutMs }, (res) => {
       res.resume()
-      resolve(res.statusCode !== undefined)
+      const listening = res.statusCode !== undefined
+      portProbeCache.set(port, { at: Date.now(), listening })
+      resolve(listening)
     })
     req.on('timeout', () => {
       req.destroy()
+      portProbeCache.set(port, { at: Date.now(), listening: false })
       resolve(false)
     })
-    req.on('error', () => resolve(false))
+    req.on('error', () => {
+      portProbeCache.set(port, { at: Date.now(), listening: false })
+      resolve(false)
+    })
   })
+}
+
+/** 主动失效端口缓存（启动/停止后调用，避免旧值影响判活）。 */
+export function invalidatePortProbe(port: number): void {
+  portProbeCache.delete(port)
 }
 
 /** 轮询等待端口就绪。 */

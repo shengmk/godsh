@@ -338,7 +338,8 @@ export default function AllocationsPage() {
         { label: '上移', onClick: () => void move(a, -1), disabled: idx <= 0 },
         { label: '下移', onClick: () => void move(a, 1), disabled: idx < 0 || idx >= list.length - 1 },
         { separator: true, label: '', onClick: () => {} },
-        { label: '移除', onClick: () => void remove(a), danger: true },
+        { label: '移除分配', onClick: () => void remove(a), danger: true },
+        { label: '卸载插件（含依赖）', onClick: () => void uninstall(a), danger: true },
       ],
     })
   }
@@ -379,6 +380,28 @@ export default function AllocationsPage() {
     try {
       await api.removeAllocation(a.id)
       show(`已移除 ${a.pluginId}`)
+      await load()
+    } catch (e) {
+      show(e instanceof Error ? e.message : String(e), true)
+    }
+  }
+
+  /** 卸载插件：真正从环境删除依赖（dsh plugin remove），并同步移除分配记录。 */
+  async function uninstall(a: Allocation) {
+    if (!window.confirm(`确定从环境 ${a.profile} 卸载插件 ${a.pluginId}？\n这会删除它的依赖（含其它环境引用时不受影响）。`)) return
+    try {
+      const r = await api.installPlugin(a.profile, 'remove', a.pluginId)
+      if (!r.ok) {
+        show(r.message || `卸载失败（${r.errorType ?? 'unknown'}），见日志：${r.logFile ?? ''}`, true)
+        return
+      }
+      // 卸载成功后同步移除分配记录（若仍存在）
+      try {
+        await api.removeAllocation(a.id)
+      } catch {
+        /* 分配可能已被其它操作移除 */
+      }
+      show(`已卸载 ${a.pluginId} ← ${a.profile}`)
       await load()
     } catch (e) {
       show(e instanceof Error ? e.message : String(e), true)
@@ -490,7 +513,10 @@ export default function AllocationsPage() {
                                 ↓
                               </button>
                               <button className="btn danger sm" onClick={() => remove(a)}>
-                                移除
+                                移除分配
+                              </button>
+                              <button className="btn danger sm" title="卸载插件（含依赖）" onClick={() => uninstall(a)}>
+                                卸载
                               </button>
                             </>
                           ) : av ? (

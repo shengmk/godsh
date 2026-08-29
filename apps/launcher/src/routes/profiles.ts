@@ -1,9 +1,39 @@
 import { join } from 'node:path'
 import { mkdirSync, writeFileSync } from 'node:fs'
-import { readLogTail, spawnWebProfile, stopWeb, waitForPort, isPortListening, findPidByPort, findProcessName } from '@godsh/core'
+import { readLogTail, spawnWebProfile, stopWeb, waitForPort, isPortListening, findPidByPort, findProcessName, invalidatePortProbe } from '@godsh/core'
 import { createProfile, removeProfile, scanProfiles } from '@godsh/profile-manager'
 import { pluginAction, PLUGIN_ACTION_TIMEOUT_MS } from '@godsh/marketplace'
 import type { ApiHandler, RouteContext, RuntimeProc } from './types.js'
+
+/**
+ * 启动失败诊断：读 dsh 日志，识别常见失败模式，给出可操作提示。
+ * 返回给前端展示的 error 文案。
+ */
+function diagnoseStartFailure(logFile: string, port: number): string {
+  try {
+    const log = readLogTail(logFile, 200)
+    const all = log || ''
+    if (/YAMLException|bad indentation|cannot resolve profile bundle|failed to parse overlay/i.test(all)) {
+      return '环境配置（cordis.patch.yml）损坏或 bundle 缺失，请到「插件分配」检查或重新安装插件'
+    }
+    if (/Cannot find package|ERR_MODULE_NOT_FOUND|failed to import loader entry/i.test(all)) {
+      return '环境缺少依赖包，请到「DSH 环境」检查 dsh 安装完整性'
+    }
+    if (/ModuleNotFoundError|No module named|lingshu|aeis/i.test(all)) {
+      return 'DSH 内置组件需要 Python 模块（灵枢/aeis），当前 Python 环境缺失，请联系 DSH 或安装对应模块'
+    }
+    if (/EADDRINUSE|port.*in use|already in use/i.test(all)) {
+      return `端口 ${port} 被占用，请先停止占用该端口的进程`
+    }
+    const errLine = all
+      .split(/\r?\n/)
+      .find((l) => /Error|failed|error/i.test(l) && !/at .*\(/.test(l))
+    if (errLine) return `启动失败：${errLine.trim().slice(0, 120)}`
+    return '进程提前退出（未监听端口），请查看日志诊断'
+  } catch {
+    return '进程提前退出（未监听端口），请查看日志诊断'
+  }
+}
 
 /** 安装/更新/卸载日志落盘：data/logs/plugin-<profile>-<pkg>-<ts>.log */
 function logPluginAction(logDir: string, profile: string, action: string, pkg: string, r: { ok: boolean; code: number | null; stdout: string; stderr: string }): string {
@@ -139,7 +169,8 @@ export const profilesHandler: ApiHandler = async (ctx, _req, res, method, seg, b
     ctx.ensureUnifiedKernel(name)
     const basePort = Number(body.port) || config.webKernel.defaultPort || 3080
     const port = await ctx.findFreePort(basePort)
-    const { child } = spawnWebProfile({
+    invalidatePortProbe(port)
+    const { info, child } = spawnWebProfile({
       profile: name,
       port,
       logDir,
@@ -153,7 +184,7 @@ export const profilesHandler: ApiHandler = async (ctx, _req, res, method, seg, b
       if (running.get(name) !== proc) return
       if (proc.status === 'starting') {
         proc.status = 'error'
-        proc.error = '进程提前退出（未监听端口），请查看日志诊断'
+        proc.error = diagnoseStartFailure(info.logFile, port)
       } else {
         running.delete(name)
       }
@@ -182,6 +213,7 @@ export const profilesHandler: ApiHandler = async (ctx, _req, res, method, seg, b
       return true
     }
     const r = await stopWeb(pidDir, proc.port)
+    invalidatePortProbe(proc.port)
     running.delete(name)
     ctx.persistRuntime()
     ctx.sendJson(res, 200, r)
