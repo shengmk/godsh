@@ -3,7 +3,7 @@ import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from 'no
 import { extname, join } from 'node:path'
 import { MONOREPO_ROOT, DATA_DIR, findPidByPort, isPortListening, readLogTail, ensureDshBundles } from '@godsh/core'
 import { fetchMarketIndex } from '@godsh/marketplace'
-import { scanProfiles } from '@godsh/profile-manager'
+import { scanProfiles, ensureProfileWorkspace } from '@godsh/profile-manager'
 import type { CliContext } from './context.js'
 import { routeHandlers } from './routes/index.js'
 import type { ApiHandler, RouteContext, RuntimeProc } from './routes/types.js'
@@ -105,6 +105,13 @@ export async function startApiServer(ctx: CliContext, opts: ApiServerOptions): P
     if (heal.healed > 0) console.log(`[godsh] 已修复 ${heal.healed} 个断链 bundle: ${heal.message}`)
   } catch (err) {
     console.warn(`[godsh] bundle 自愈跳过: ${err instanceof Error ? err.message : String(err)}`)
+  }
+  // 补齐 profile 缺失的 pnpm-workspace.yaml（pnpm 供应链策略在错误 workspace 运行导致 install/remove 失败的根因）
+  try {
+    const fixed = ensureProfileWorkspace(profilesDir)
+    if (fixed > 0) console.log(`[godsh] 已补齐 ${fixed} 个 profile 的 pnpm-workspace.yaml`)
+  } catch (err) {
+    console.warn(`[godsh] workspace 补齐跳过: ${err instanceof Error ? err.message : String(err)}`)
   }
 
   // 会话内运行中的 dsh web 进程（profile → 进程）

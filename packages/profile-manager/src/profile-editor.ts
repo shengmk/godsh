@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { readPatchChecked, serializePatchList } from './patch.js'
 import { findProfile, invalidateProfileCache, scanProfiles } from './scanner.js'
@@ -29,8 +29,37 @@ export function createProfile(profilesDir: string, name: string, opts: CreatePro
   writeFileSync(join(dir, 'package.json'), JSON.stringify(manifest, null, 2) + '\n', 'utf8')
   writeFileSync(join(dir, 'cordis.patch.yml'), '# 用户的启用/禁用/配置层\n[]\n', 'utf8')
   writeFileSync(join(dir, 'cordis.yml'), '[]\n', 'utf8')
+  // pnpm-workspace.yaml：隔离 pnpm 的 workspace 解析到 profile 目录本身，
+  // 避免 pnpm 向上遍历到用户主目录的 workspace（会触发 supply-chain 策略拒绝新包，
+  // 导致 install/remove 全部失败 exit 1 —— 卸载 400 的根因）。
+  writeFileSync(
+    join(dir, 'pnpm-workspace.yaml'),
+    'packages:\n  - .\n\nnodeLinker: hoisted\nautoInstallPeers: false\n',
+    'utf8',
+  )
   invalidateProfileCache(profilesDir)
   return dir
+}
+
+/** 补齐 Profile 缺失的 pnpm-workspace.yaml（dsh 标准模板）。返回补建数量。 */
+export function ensureProfileWorkspace(profilesDir: string): number {
+  let fixed = 0
+  const entries = readdirSync(profilesDir, { withFileTypes: true })
+  for (const e of entries) {
+    if (!e.isDirectory() || e.name === 'node_modules') continue
+    const dir = join(profilesDir, e.name)
+    const ws = join(dir, 'pnpm-workspace.yaml')
+    if (!existsSync(ws)) {
+      try {
+        writeFileSync(ws, 'packages:\n  - .\n\nnodeLinker: hoisted\nautoInstallPeers: false\n', 'utf8')
+        fixed++
+      } catch {
+        /* 忽略单个失败 */
+      }
+    }
+  }
+  if (fixed > 0) invalidateProfileCache(profilesDir)
+  return fixed
 }
 
 /** 删除一个 Profile（安全校验：必须存在且包含 package.json）。 */
