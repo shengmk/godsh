@@ -39,12 +39,20 @@ export async function openExternal(url: string): Promise<void> {
 }
 
 /**
- * 用系统浏览器打开 dsh web 界面（默认入口）：
- * godsh 已用（自定义）端口启动了 dsh web 服务，浏览器直接访问该端口即可，
- * 与端口自定义天然一致、零冲突；DSH Desktop 常驻运行时环境变量无效，
- * 浏览器是最可靠的打开方式。
+ * 打开 dsh web 界面（默认入口）：
+ * godsh 已用（自定义）端口启动了 dsh web 服务，直接用浏览器「网址应用化」
+ * （--app=URL 独立应用窗口，无地址栏，浏览器渲染不白屏）打开该端口，
+ * 与端口自定义天然一致、零冲突。
  */
 export async function openDshWeb(url: string): Promise<void> {
+  if (isTauri()) {
+    try {
+      await tauriInvoke('open_app_window', { url })
+      return
+    } catch (e) {
+      console.warn('open_app_window 失败，回退普通浏览器', e)
+    }
+  }
   await openExternal(url)
 }
 

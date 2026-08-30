@@ -200,8 +200,8 @@ export default function ProfilesPage() {
           ? { label: '停止', onClick: () => void stop(p.name) }
           : { label: '启动', onClick: () => void start(p.name), disabled: p.starting || !p.exists },
         p.running && p.url
-          ? { label: '打开 Web UI（浏览器）', onClick: () => void openDsh(p) }
-          : { label: '打开 Web UI（浏览器）', disabled: true, onClick: () => {} },
+          ? { label: '打开应用窗口（网址应用化）', onClick: () => void openDsh(p) }
+          : { label: '打开应用窗口（网址应用化）', disabled: true, onClick: () => {} },
         isTauri() && p.running
           ? { label: '用 DSH Desktop 打开', onClick: () => void openDshDesktopFn(p.name) }
           : { label: '用 DSH Desktop 打开', disabled: true, onClick: () => {} },
@@ -457,7 +457,7 @@ export default function ProfilesPage() {
                   {p.url && (
                     <button
                       className="btn sm"
-                      title='在系统浏览器打开（godsh 启动的 web 界面）'
+                      title='浏览器应用窗口打开（网址应用化，独立窗口）'
                       onClick={() => void openDsh(p)}
                     >
                       打开 ↗
@@ -558,7 +558,7 @@ export default function ProfilesPage() {
                 {p.running && p.url && (
                   <button
                     className="btn sm"
-                    title='在系统浏览器打开（godsh 启动的 web 界面）'
+                    title='浏览器应用窗口打开（网址应用化，独立窗口）'
                     onClick={() => void openDsh(p)}
                   >
                     打开 ↗
