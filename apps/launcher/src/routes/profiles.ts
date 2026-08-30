@@ -511,5 +511,35 @@ export const profilesHandler: ApiHandler = async (ctx, _req, res, method, seg, b
     return true
   }
 
+  // POST /api/profiles/:name/plugins/update-all —— 更新该环境全部已安装依赖
+  if (seg.length === 4 && seg[0] === 'profiles' && seg[2] === 'plugins' && seg[3] === 'update-all' && method === 'POST') {
+    const name = decodeURIComponent(seg[1] ?? '')
+    const profile = scanProfiles(profilesDir).find((p) => p.name === name)
+    const deps = Object.keys(profile?.dependencies ?? {})
+    if (deps.length === 0) {
+      ctx.sendJson(res, 200, { profile: name, results: [], ok: 0, failed: 0, message: '该环境没有可更新的插件' })
+      return true
+    }
+    const results: { pkg: string; ok: boolean; error?: string; errorType?: string; logFile?: string }[] = []
+    for (const pkg of deps) {
+      try {
+        const r = await pluginAction(name, 'update', pkg)
+        const logFile = logPluginAction(ctx.logDir, name, 'update', pkg, r)
+        const { errorType, message } = classifyPluginError(r)
+        results.push(r.ok ? { pkg, ok: true } : { pkg, ok: false, error: message, errorType, logFile })
+      } catch (err) {
+        results.push({ pkg, ok: false, error: err instanceof Error ? err.message : String(err), errorType: 'other' })
+      }
+    }
+    const okCount = results.filter((r) => r.ok).length
+    ctx.sendJson(res, okCount === results.length ? 200 : 207, {
+      profile: name,
+      results,
+      ok: okCount,
+      failed: results.length - okCount,
+    })
+    return true
+  }
+
   return false
 }

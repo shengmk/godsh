@@ -958,3 +958,94 @@ body {
   font-weight: 600;
   color: var(--text);
 }
+
+
+/* ---------- 启动加载画面（可爱风格） ---------- */
+.splash {
+  position: fixed;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: linear-gradient(135deg, var(--bg, #0f172a), var(--surface, #1e293b));
+  z-index: 9999;
+}
+.splash-inner {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 14px;
+  text-align: center;
+  animation: splash-pop 0.6s ease;
+}
+@keyframes splash-pop {
+  from { opacity: 0; transform: translateY(16px) scale(0.96); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
+}
+.splash-logo img {
+  width: 88px;
+  height: 88px;
+  border-radius: 22px;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
+  animation: splash-bounce 1.6s ease-in-out infinite;
+}
+@keyframes splash-bounce {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-6px); }
+}
+.splash-title {
+  font-size: 26px;
+  font-weight: 800;
+  letter-spacing: 1px;
+  background: linear-gradient(90deg, var(--brand-1, #60a5fa), var(--brand-2, #a78bfa));
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+.splash-sub {
+  font-size: 13px;
+  color: var(--muted, #94a3b8);
+  margin-top: -6px;
+}
+.splash-box {
+  margin-top: 18px;
+  width: 320px;
+  padding: 18px 22px;
+  border-radius: 16px;
+  background: var(--surface-2, rgba(255,255,255,0.06));
+  border: 1px solid var(--border, rgba(255,255,255,0.1));
+  box-shadow: 0 6px 24px rgba(0,0,0,0.25);
+}
+.splash-bar {
+  height: 8px;
+  border-radius: 999px;
+  background: rgba(255,255,255,0.1);
+  overflow: hidden;
+}
+.splash-fill {
+  height: 100%;
+  border-radius: 999px;
+  background: linear-gradient(90deg, var(--brand-1, #60a5fa), var(--brand-2, #a78bfa));
+  transition: width 0.35s ease;
+}
+.splash-msg {
+  margin-top: 12px;
+  font-size: 13px;
+  color: var(--text, #e2e8f0);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  justify-content: center;
+}
+.splash-spinner {
+  display: inline-block;
+  animation: splash-spin 1.2s linear infinite;
+}
+@keyframes splash-spin {
+  to { transform: rotate(360deg); }
+}
+.splash-foot {
+  margin-top: 6px;
+  font-size: 11px;
+  color: var(--muted, #64748b);
+}

@@ -1,6 +1,6 @@
 [package]
 name = "godsh"
-version = "0.2.6"
+version = "0.2.7"
 description = "dsh 环境配置启动器（Tauri 桌面壳）"
 authors = ["godsh"]
 license = ""

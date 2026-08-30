@@ -41,6 +41,50 @@ export default function App() {
     kernels: KernelInstance[]
   } | null>(null)
   const searchTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const [booting, setBooting] = useState(true)
+  const [bootStep, setBootStep] = useState(0)
+  const [bootMsg, setBootMsg] = useState('正在启动…')
+  const BOOT_STEPS = [
+    '正在连接服务…',
+    '检查程序版本…',
+    '加载环境配置…',
+    '预热插件市场…',
+    '准备就绪 ✨',
+  ]
+  useEffect(() => {
+    let cancelled = false
+    let step = 0
+    setBootMsg(BOOT_STEPS[0]!)
+    const tick = setInterval(() => {
+      if (cancelled) return
+      step = Math.min(step + 1, BOOT_STEPS.length - 1)
+      setBootStep(step)
+      setBootMsg(BOOT_STEPS[step]!)
+    }, 400)
+    // 并行预加载：health + dsh 状态 + 市场预热（缓存），并做最小等待让画面有感知
+    void (async () => {
+      const start = Date.now()
+      const [h, d] = await Promise.all([
+        api.health().catch(() => null),
+        api.dshStatus().catch(() => null),
+        api.market().catch(() => null),
+      ])
+      if (cancelled) return
+      if (h) setHealth(h)
+      if (d) setDshStatus(d)
+      // 至少展示 1.8s（可爱画面有感知），避免闪屏
+      const wait = 1800 - (Date.now() - start)
+      if (wait > 0) await new Promise((r) => setTimeout(r, wait))
+      if (cancelled) return
+      clearInterval(tick)
+      setBooting(false)
+    })()
+    return () => {
+      cancelled = true
+      clearInterval(tick)
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
 
   useEffect(() => {
     void api.health().then(setHealth).catch(() => {})
@@ -104,7 +148,26 @@ export default function App() {
     return () => window.removeEventListener('keydown', onKey)
   }, [])
 
-  return (
+  return booting ? (
+    <div className="splash">
+      <div className="splash-inner">
+        <div className="splash-logo">
+          <img src="/logo.png" alt="godsh" />
+        </div>
+        <div className="splash-title">godsh</div>
+        <div className="splash-sub">{t('app.subtitle')}</div>
+        <div className="splash-box">
+          <div className="splash-bar">
+            <div className="splash-fill" style={{ width: `${((bootStep + 1) / BOOT_STEPS.length) * 100}%` }} />
+          </div>
+          <div className="splash-msg">
+            <span className="splash-spinner">🌀</span> {bootMsg}
+          </div>
+        </div>
+        <div className="splash-foot">正在检查更新 · 加载插件 · 优化启动 ✨</div>
+      </div>
+    </div>
+  ) : (
     <div className="app">
       <aside className="sidebar">
         <div className="brand">

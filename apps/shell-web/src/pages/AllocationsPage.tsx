@@ -333,6 +333,7 @@ export default function AllocationsPage() {
         { label: a.enabled ? '禁用' : '启用', onClick: () => void toggle(a) },
         { label: '上移', onClick: () => void move(a, -1), disabled: idx <= 0 },
         { label: '下移', onClick: () => void move(a, 1), disabled: idx < 0 || idx >= list.length - 1 },
+        { label: '更新', onClick: () => void updatePlugin(a) },
         { separator: true, label: '', onClick: () => {} },
         { label: '移除分配', onClick: () => void remove(a), danger: true },
         { label: '卸载插件（含依赖）', onClick: () => void uninstall(a), danger: true },
@@ -355,6 +356,34 @@ export default function AllocationsPage() {
   async function toggle(a: Allocation) {
     try {
       await api.setEnabled(a.id, !a.enabled)
+      await load()
+    } catch (e) {
+      show(e instanceof Error ? e.message : String(e), true)
+    }
+  }
+
+  /** 更新单个插件（分配页每行）。 */
+  async function updatePlugin(a: Allocation) {
+    if (a.pluginId === '@deepseek-ai/dsh-base' || a.pluginId === '@deepseek-ai/dsh-web-app') {
+      show('官方内核 bundle 由 dsh 自动维护，无需手动更新', true)
+      return
+    }
+    try {
+      const r = await api.installPlugin(a.profile, 'update', a.pluginId)
+      if (r.ok) show(`已更新 ${a.pluginId}`)
+      else show(r.message || `更新失败（${r.errorType ?? 'unknown'}）`, true)
+      await load()
+    } catch (e) {
+      show(e instanceof Error ? e.message : String(e), true)
+    }
+  }
+
+  /** 更新某环境全部已安装插件。 */
+  async function updateAll(profile: string) {
+    if (!window.confirm(`确定更新环境 ${profile} 的全部插件？`)) return
+    try {
+      const r = await api.updateAllPlugins(profile)
+      show(r.message || `更新完成：${r.ok} 成功，${r.failed} 失败`)
       await load()
     } catch (e) {
       show(e instanceof Error ? e.message : String(e), true)
@@ -454,6 +483,16 @@ export default function AllocationsPage() {
                 <span className="badge">{allocCount} 条分配</span>
                 {availCount > 0 && <span className="badge">{availCount} 个可添加</span>}
                 <span className="spacer" />
+                <button
+                  className="btn sm"
+                  title="更新该环境全部插件"
+                  onClick={(e) => {
+                    e.stopPropagation()
+                    void updateAll(p.name)
+                  }}
+                >
+                  🔄 全部更新
+                </button>
                 <span className="muted" style={{ fontSize: 12 }}>
                   {p.exists ? `${p.bundles.length} bundle · ${Object.keys(p.dependencies).length} 依赖` : '（目录缺失）'}
                 </span>
@@ -505,6 +544,9 @@ export default function AllocationsPage() {
                                 disabled={(byProfile[p.name] ?? []).findIndex((x) => x.id === a.id) >= (byProfile[p.name] ?? []).length - 1}
                               >
                                 ↓
+                              </button>
+                              <button className="btn sm" title="更新此插件" onClick={() => updatePlugin(a)}>
+                                更新
                               </button>
                               <button className="btn danger sm" onClick={() => remove(a)}>
                                 移除分配

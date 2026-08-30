@@ -91,6 +91,13 @@ export const api = {
       },
     ),
 
+  /** 更新该环境全部已安装依赖。 */
+  updateAllPlugins: (profile: string) =>
+    req<{ profile: string; results: BatchInstallResult[]; ok: number; failed: number; message?: string }>(
+      `/profiles/${encodeURIComponent(profile)}/plugins/update-all`,
+      { method: 'POST', body: '{}' },
+    ),
+
   allocations: () => req<{ allocations: Allocation[] }>('/allocations').then((r) => r.allocations),
 
   allocate: (profile: string, pluginId: string, pluginName: string, enabled: boolean) =>
