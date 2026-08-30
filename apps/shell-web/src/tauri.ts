@@ -26,23 +26,17 @@ export async function tauriInvoke(cmd: string, args?: Record<string, unknown>): 
 }
 
 /**
- * 打开 dsh Web UI：
- * - Tauri 桌面端：新建独立原生 WebView 窗口加载 URL（体验与 DSH Desktop 一致）
- * - Web 模式：新标签页打开
+ * 在独立窗口中打开 dsh Web UI（Tauri 桌面端）。
+ * 失败时抛错，由调用方回退到系统浏览器。
  */
-export async function openDshUrl(url: string, title?: string): Promise<void> {
-  if (isTauri()) {
-    try {
-      await tauriInvoke('open_dsh_window', { url, title: title ?? 'dsh' })
-      return
-    } catch (e) {
-      console.warn('open_dsh_window 失败，回退浏览器', e)
-    }
-  }
-  window.open(url, '_blank', 'noopener,noreferrer')
+async function openWindow(url: string, title: string): Promise<void> {
+  await tauriInvoke('open_dsh_window', { url, title })
 }
 
-/** 用系统默认浏览器打开 URL（Tauri 下调用 open_external；Web 下新标签页）。 */
+/**
+ * 用系统默认浏览器打开 URL（Tauri 下调用 open_external → cmd /c start，绝对可靠；
+ * Web 下新标签页）。
+ */
 export async function openExternal(url: string): Promise<void> {
   if (isTauri()) {
     try {
@@ -53,4 +47,26 @@ export async function openExternal(url: string): Promise<void> {
     }
   }
   window.open(url, '_blank', 'noopener,noreferrer')
+}
+
+/**
+ * 打开 dsh Web UI（推荐入口）：
+ * - Tauri 桌面端：优先新建独立 WebView 窗口；失败自动回退系统浏览器
+ * - Web 模式：新标签页打开
+ * 返回实际使用的打开方式，供调用方提示。
+ */
+export async function openDshUrl(url: string, title?: string): Promise<'window' | 'browser'> {
+  const t = title || 'dsh'
+  if (isTauri()) {
+    try {
+      await openWindow(url, t)
+      return 'window'
+    } catch (e) {
+      console.warn('open_dsh_window 失败，回退系统浏览器', e)
+      await openExternal(url)
+      return 'browser'
+    }
+  }
+  window.open(url, '_blank', 'noopener,noreferrer')
+  return 'browser'
 }
