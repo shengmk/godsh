@@ -1,6 +1,6 @@
 {
     "name":  "@godsh/shell-web",
-    "version":  "0.3.1",
+    "version":  "0.3.2",
     "private":  true,
     "type":  "module",
     "description":  "godsh Web 管理界面（Vite + React + TS，玻璃拟态）",

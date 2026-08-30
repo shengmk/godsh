@@ -85,15 +85,73 @@ export function parseAsar(buf: Buffer): { dataStart: number; flat: Map<string, A
 }
 
 /**
+ * 计算 app.asar 的指纹（用于检测 DSH Desktop 升级）。
+ * 采用「文件大小 + mtime + 头部 4KB 内容 hash」组合：升级安装包必然改变
+ * 大小或内容，能可靠识别版本变化；比全量 hash 快得多（只读前 4KB）。
+ */
+export function asarFingerprint(asarPath: string): string | null {
+  try {
+    const st = statSync(asarPath)
+    const fd = readFileSync(asarPath)
+    const head = fd.subarray(0, Math.min(fd.length, 4096))
+    const size = st.size
+    const mtime = st.mtimeMs
+    // 简单 FNV-1a 32 位 hash
+    let h = 0x811c9dc5
+    for (const b of head) {
+      h ^= b
+      h = Math.imul(h, 0x01000193) >>> 0
+    }
+    return `${size}-${Math.round(mtime)}-${h.toString(16)}`
+  } catch {
+    return null
+  }
+}
+
+/** 提取缓存目录中保存的 asar 指纹文件路径（`.asar-fingerprint`）。 */
+export function asarFingerprintPath(cache: string): string {
+  return join(cache, '.asar-fingerprint')
+}
+
+/**
+ * 检查 DSH Desktop 是否升级过（当前 asar 指纹 ≠ 缓存记录的指纹）。
+ * 若升级：返回 true，调用方应清除 `.complete` 标记强制重新提取，
+ * 避免旧缓存与新版 dsh 不兼容导致环境启动失败。
+ */
+export function dshDesktopUpgraded(cache: string, asarPath: string): boolean {
+  const cur = asarFingerprint(asarPath)
+  if (!cur) return false
+  const fpPath = asarFingerprintPath(cache)
+  if (!existsSync(fpPath)) return false // 无记录（首次/旧缓存）：让正常提取流程写指纹
+  try {
+    const saved = readFileSync(fpPath, 'utf8').trim()
+    return saved !== cur
+  } catch {
+    return false
+  }
+}
+
+/**
  * 提取 asar 内 node_modules 到目标目录（全量，含 unpacked 原生二进制）。
  * 完整性用 `.complete` 标记文件判断：提取中断（无标记）时下次重新完整提取。
+ * 若检测到 DSH Desktop 升级（asar 指纹变化），会自动忽略旧标记强制重提取。
  * unpacked 文件（sharp/koffi 等原生模块的 .node/.dll）不在 asar 数据区，
  * 需从同目录 `app.asar.unpacked/node_modules` 真实目录复制。
  * @returns 是否执行了提取
  */
 export function extractAsarNodeModules(asarPath: string, dest: string): boolean {
   const marker = join(dest, '.complete')
-  if (existsSync(marker)) return false
+  const upgraded = dshDesktopUpgraded(dest, asarPath)
+  if (existsSync(marker) && !upgraded) return false
+  if (upgraded) {
+    // DSH Desktop 升级：清掉旧标记与旧指纹，强制全量重提取
+    try {
+      rmSync(marker, { force: true })
+      rmSync(asarFingerprintPath(dest), { force: true })
+    } catch {
+      /* 忽略 */
+    }
+  }
   mkdirSync(dirname(dest), { recursive: true })
   // 先写临时目录（dest 同级，避免被 dest 替换操作连带删除），成功后再原子替换
   const tmp = join(dirname(dest), '.tmp-' + Date.now())
@@ -143,7 +201,10 @@ export function extractAsarNodeModules(asarPath: string, dest: string): boolean 
       copyDir(tmp, dest)
     }
     rmSync(backup, { recursive: true, force: true })
+    // 记录当前 asar 指纹 + 完成标记
     writeFileSync(marker, new Date().toISOString())
+    const fp = asarFingerprint(asarPath)
+    if (fp) writeFileSync(asarFingerprintPath(dest), fp, 'utf8')
     return count > 0
   } catch (err) {
     rmSync(tmp, { recursive: true, force: true })
@@ -389,6 +450,18 @@ export function ensureCacheIntegrity(): { healed: number; message: string } {
   const asar = findDshDesktopAsar()
   if (!asar) return { healed: 0, message: '未找到 app.asar，跳过缓存完整性检查' }
   const cache = dshModulesCacheDir()
+  // DSH Desktop 升级检测：asar 指纹变化时缓存整体失效，直接全量重提取
+  if (existsSync(cache) && dshDesktopUpgraded(cache, asar)) {
+    try {
+      const extracted = extractAsarNodeModules(asar, cache)
+      return {
+        healed: extracted ? 1 : 0,
+        message: extracted ? `检测到 DSH Desktop 升级，已重建依赖缓存（${asarFingerprint(asar)?.slice(0, 12)}…）` : 'DSH Desktop 升级但缓存无需重建',
+      }
+    } catch (err) {
+      return { healed: 0, message: `DSH Desktop 升级后重提取失败: ${err instanceof Error ? err.message : String(err)}` }
+    }
+  }
   if (!existsSync(cache)) {
     // 缓存整体缺失：走完整提取
     try {
