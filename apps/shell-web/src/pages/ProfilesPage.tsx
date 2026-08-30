@@ -4,6 +4,7 @@ import type { DshInstance, Health, PortInfo, ProfileView } from '../types'
 import { ConfirmDialog, ContextMenu, ErrorText, Loading, Toast, type MenuState } from '../components'
 import { useToast } from '../hooks'
 import { useI18n } from '../i18n'
+import { isTauri, openDshUrl } from '../tauri'
 
 export default function ProfilesPage() {
   const [health, setHealth] = useState<Health | null>(null)
@@ -24,6 +25,8 @@ export default function ProfilesPage() {
   // 端口占用面板
   const [showPorts, setShowPorts] = useState(false)
   const [ports, setPorts] = useState<PortInfo[] | null>(null)
+  // 每环境自定义启动端口（留空 = 自动找空闲端口）
+  const [customPort, setCustomPort] = useState<Record<string, string>>({})
   const logRef = useRef<HTMLDivElement | null>(null)
   const { toast, show } = useToast()
   const { t } = useI18n()
@@ -121,9 +124,16 @@ export default function ProfilesPage() {
 
   async function start(name: string) {
     setBusy(name)
+    const portText = (customPort[name] ?? '').trim()
+    const port = portText ? Number.parseInt(portText, 10) : undefined
+    if (portText && (Number.isNaN(port) || port! <= 0 || port! > 65535)) {
+      show('端口需为 1-65535 的数字', true)
+      setBusy(null)
+      return
+    }
     try {
-      await api.startProfile(name)
-      show(`正在启动 ${name}…`)
+      await api.startProfile(name, port)
+      show(port ? `正在启动 ${name}（端口 ${port}）…` : `正在启动 ${name}（自动端口）…`)
       setTimeout(load, 1500)
     } catch (e) {
       show(e instanceof Error ? e.message : String(e), true)
@@ -176,7 +186,7 @@ export default function ProfilesPage() {
           ? { label: '停止', onClick: () => void stop(p.name) }
           : { label: '启动', onClick: () => void start(p.name), disabled: p.starting || !p.exists },
         p.running && p.url
-          ? { label: '打开 Web UI', onClick: () => window.open(p.url!, '_blank') }
+          ? { label: isTauri() ? '打开独立窗口' : '打开 Web UI', onClick: () => void openDshUrl(p.url!, p.name) }
           : { label: '打开 Web UI', disabled: true, onClick: () => {} },
         { label: '查看日志', onClick: () => viewLog(p.name) },
         { separator: true, label: '', onClick: () => {} },
@@ -425,9 +435,13 @@ export default function ProfilesPage() {
                   </span>
                   <span className="spacer" />
                   {p.url && (
-                    <a className="btn sm" href={p.url} target="_blank" rel="noreferrer">
+                    <button
+                      className="btn sm"
+                      title={isTauri() ? '在独立窗口中打开 dsh 界面' : '在新标签页打开'}
+                      onClick={() => void openDshUrl(p.url!, p.profile)}
+                    >
                       打开 ↗
-                    </a>
+                    </button>
                   )}
                 </div>
               ))}
@@ -494,27 +508,41 @@ export default function ProfilesPage() {
                   </select>
                 </div>
               )}
-              <div className="row" style={{ marginTop: 12 }}>
+              <div className="row" style={{ marginTop: 12, flexWrap: 'wrap', gap: 8 }}>
                 {p.running ? (
                   <button className="btn danger sm" disabled={busy === p.name} onClick={() => stop(p.name)}>
                     停止
                   </button>
                 ) : (
-                  <button
-                    className="btn primary sm"
-                    disabled={busy === p.name || p.starting || !p.exists}
-                    onClick={() => start(p.name)}
-                  >
-                    {p.starting ? '启动中…' : '启动'}
-                  </button>
+                  <>
+                    <button
+                      className="btn primary sm"
+                      disabled={busy === p.name || p.starting || !p.exists}
+                      onClick={() => start(p.name)}
+                    >
+                      {p.starting ? '启动中…' : '启动'}
+                    </button>
+                    <input
+                      className="input"
+                      style={{ width: 110, padding: '5px 8px', fontSize: 12 }}
+                      placeholder="端口(留空自动)"
+                      title="自定义启动端口(1-65535)，留空自动找空闲端口"
+                      value={customPort[p.name] ?? ''}
+                      onChange={(e) => setCustomPort((prev) => ({ ...prev, [p.name]: e.target.value.replace(/[^\d]/g, '') }))}
+                    />
+                  </>
                 )}
                 <button className="btn sm" onClick={() => viewLog(p.name)}>
                   {logFor === p.name ? '收起日志' : '日志'}
                 </button>
                 {p.running && p.url && (
-                  <a className="btn sm" href={p.url} target="_blank" rel="noreferrer">
+                  <button
+                    className="btn sm"
+                    title={isTauri() ? '在独立窗口中打开 dsh 界面' : '在新标签页打开'}
+                    onClick={() => void openDshUrl(p.url!, p.name)}
+                  >
                     打开 ↗
-                  </a>
+                  </button>
                 )}
                 <span className="spacer" />
                 <button
