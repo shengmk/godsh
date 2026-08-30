@@ -1,18 +1,21 @@
-# godsh v0.3.2
+# godsh v0.3.3
 
 godsh — DeepSeek Harness 图形化环境配置启动器（Anaconda Navigator 类比）。
 
 ## 下载
 
-- godsh-0.3.2-x64-setup.exe — Windows 安装器
-- godsh-0.3.2-x64.zip — 便携版（解压即用）
+- godsh-0.3.3-x64-setup.exe — Windows 安装器
+- godsh-0.3.3-x64.zip — 便携版（解压即用）
 
-## v0.3.2 更新
+## v0.3.3 更新
 
-- **DSH Desktop 更新防范**：自动检测 DSH Desktop 升级（app.asar 指纹比对），升级后自动重建官方依赖缓存，避免旧缓存与新版本不兼容导致环境启动失败
-- **项目借鉴说明**：README 新增致谢章节，说明本项目借鉴了 [DSH Desktop](https://github.com/dataelement/dsh-desktop)（打开环境 / 官方 bundle 提取）与 [awesome-dsh-plugin（dshmarket）](https://github.com/hackerFish/awesome-dsh-plugin)（插件市场索引）
-- **用 DSH Desktop 打开环境**：「打开」按钮优先启动独立的 DSH Desktop 打开对应环境；未安装时自动改用系统浏览器
-- 保留 v0.3.1 全部功能：自定义启动端口、分类自动分配、悬停简介、可视化进度、拖动转移、启动自愈
+- **修复「插件下载失败」**：市场里能搜到的插件某些环境装不上（如 web 装 dsh-agy-link 报依赖错误）
+  - **根因**：pnpm 11 内置供应链安全策略 `minimumReleaseAge`（默认 1440 分钟 = 1 天），新发布/刚更新的插件会被拒绝安装
+  - **修复**：所有环境自动写入 `minimumReleaseAge: 0` 关闭该限制，新插件立即可装；已有环境启动时自动补齐
+  - 新增 3 个单元测试防回归
+- **用 DSH Desktop 打开环境**：「打开」按钮优先启动独立的 DSH Desktop；未安装时自动用系统浏览器
+- **DSH Desktop 更新防范**：自动检测升级并重建依赖缓存
+- 保留全部既有功能：自定义启动端口、分类自动分配、悬停简介、可视化进度、拖动转移、启动自愈
 
 ## 环境要求
 
