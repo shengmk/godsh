@@ -1,6 +1,6 @@
 {
     "name":  "@godsh/profile-manager",
-    "version":  "0.2.10",
+    "version":  "0.3.1",
     "private":  true,
     "type":  "module",
     "description":  "godsh Profile（环境）扫描与编辑",
