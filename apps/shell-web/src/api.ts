@@ -64,6 +64,10 @@ export const api = {
   market: (q?: string) =>
     req<{ plugins: MarketPlugin[] }>(`/market${q ? `?q=${encodeURIComponent(q)}` : ''}`).then((r) => r.plugins),
 
+  /** 市场分类概览（dshmarket 官方分类 → 插件数 + 中文名） */
+  marketCategories: () =>
+    req<{ categories: MarketCategory[] }>('/market/categories').then((r) => r.categories),
+
   /** 安装/更新插件。marketName 为市场展示名（可选）：后端据此解析真实安装参数（npm/github:/tgz）。 */
   installPlugin: (profile: string, action: 'add' | 'remove' | 'update', pkg: string, marketName?: string) =>
     req<PluginActionResult>(`/profiles/${encodeURIComponent(profile)}/plugins`, {
@@ -134,6 +138,16 @@ export const api = {
 
   allocationsAvailable: () =>
     req<{ available: Record<string, AvailablePlugin[]> }>('/allocations/available').then((r) => r.available),
+
+  /** 按市场分类一键分配：把该环境已安装的该分类插件全部分配。 */
+  assignCategory: (profile: string, category: string) =>
+    req<{ assigned: number; skipped: number; matched: number; allocated: number }>(
+      '/allocations/assign-category',
+      {
+        method: 'POST',
+        body: JSON.stringify({ profile, category }),
+      },
+    ),
 
   moveAllocation: (id: string, profile: string) =>
     req<{ allocation: Allocation }>(`/allocations/${encodeURIComponent(id)}/move`, {

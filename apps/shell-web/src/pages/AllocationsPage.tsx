@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { api } from '../api'
-import type { Allocation, AvailablePlugin, ProfileView } from '../types'
+import type { Allocation, AvailablePlugin, MarketCategory, ProfileView } from '../types'
 import { ContextMenu, Toast, type MenuState } from '../components'
 import { useToast } from '../hooks'
 import { useI18n } from '../i18n'
@@ -39,6 +39,7 @@ export default function AllocationsPage() {
   const [profiles, setProfiles] = useState<ProfileView[]>([])
   const [allocations, setAllocations] = useState<Allocation[]>([])
   const [available, setAvailable] = useState<Record<string, AvailablePlugin[]>>({})
+  const [categories, setCategories] = useState<MarketCategory[]>([])
   const [expanded, setExpanded] = useState<Set<string>>(new Set())
   const [drag, setDrag] = useState<DragState | null>(null)
   const [menu, setMenu] = useState<MenuState | null>(null)
@@ -48,10 +49,16 @@ export default function AllocationsPage() {
 
   async function load() {
     try {
-      const [p, a, av] = await Promise.all([api.profiles(), api.allocations(), api.allocationsAvailable()])
+      const [p, a, av, cats] = await Promise.all([
+        api.profiles(),
+        api.allocations(),
+        api.allocationsAvailable(),
+        api.marketCategories().catch(() => []),
+      ])
       setProfiles(p)
       setAllocations(a)
       setAvailable(av)
+      setCategories(cats)
       setExpanded((prev) => (prev.size ? prev : new Set(p.length ? [p[0]!.name] : [])))
     } catch (e) {
       show(e instanceof Error ? e.message : String(e), true)
@@ -80,6 +87,46 @@ export default function AllocationsPage() {
     }
     return m
   }, [available])
+
+  // 分类中文名（市场分类表；未知分类回退英文名）
+  const categoryZh = useCallback(
+    (c: string | undefined) => {
+      if (!c) return '未分类'
+      return categories.find((x) => x.category === c)?.zh ?? c
+    },
+    [categories],
+  )
+
+  // profile → 未分配插件按市场分类分组（无分类归入 "未分类"）
+  const addableByCategory = useMemo(() => {
+    const m: Record<string, { category: string; zh: string; items: AvailablePlugin[] }[]> = {}
+    for (const [profile, items] of Object.entries(addable)) {
+      const groups = new Map<string, AvailablePlugin[]>()
+      for (const it of items) {
+        const c = it.category || '未分类'
+        if (!groups.has(c)) groups.set(c, [])
+        groups.get(c)!.push(it)
+      }
+      m[profile] = [...groups.entries()]
+        .map(([category, groupItems]) => ({ category, zh: categoryZh(category), items: groupItems }))
+        .sort((a, b) => b.items.length - a.items.length)
+    }
+    return m
+  }, [addable, categoryZh])
+
+  /** 一键分配某环境某分类的全部未分配插件。 */
+  async function assignCategory(profile: string, category: string, zh: string) {
+    const count = (addableByCategory[profile] ?? []).find((g) => g.category === category)?.items.length ?? 0
+    if (count === 0) return
+    if (!window.confirm(`确定把 ${zh}（${count} 个）全部分配到环境 ${profile}？`)) return
+    try {
+      const r = await api.assignCategory(profile, category)
+      show(`已分配 ${r.assigned} 个 ${zh} 插件到 ${profile}${r.skipped ? `（${r.skipped} 个已分配过）` : ''}`)
+      await load()
+    } catch (e) {
+      show(e instanceof Error ? e.message : String(e), true)
+    }
+  }
 
   // 每个环境的统一列表：已分配在前，可用插件在后
   function unifiedList(profile: string): ListItem[] {
@@ -502,17 +549,17 @@ export default function AllocationsPage() {
       <div className="page-head">
         <h1 className="page-title">{t('page.allocations.title')}</h1>
         <p className="page-desc">
-          {t('page.allocations.desc')} · 变更自动写回 cordis.patch.yml · 按住插件行可拖动排序 / 移动到其它环境
+          {t('page.allocations.desc')} · 变更自动写回 cordis.patch.yml · 可添加插件按 dshmarket 市场分类分组，⚡ 一键全部分配
         </p>
       </div>
 
       <div className="toolbar">
         <span className="muted">
-          共 {profiles.length} 个环境 · {totalAllocated} 条分配
+          共 {profiles.length} 个环境 · {totalAllocated} 条分配 · {categories.length} 个市场分类
         </span>
         <span className="spacer" />
         <span className="muted" style={{ fontSize: 12 }}>
-          💡 拖动插件到其它环境 = 剪切并复制（自动安装到目标环境）；本环境内拖动 = 排序
+          💡 拖动插件到其它环境 = 剪切并复制（自动安装到目标环境）；本环境内拖动 = 排序；⚡ 全部分配 = 按市场分类批量分配
         </span>
         <button className="btn sm" onClick={() => load()}>
           刷新
@@ -571,13 +618,13 @@ export default function AllocationsPage() {
                     </p>
                   )}
 
-                  {/* 统一插件列表：已分配卡片 + 可用插件，全部可拖动 */}
+                  {/* 已分配卡片（可拖动排序/转移） */}
                   <div className="alloc-list">
-                    {list.map((item) => {
+                    {list
+                      .filter((i) => i.kind === 'alloc')
+                      .map((item) => {
                       const key = itemKey(item)
-                      const isAlloc = item.kind === 'alloc'
-                      const a = isAlloc ? item.alloc : null
-                      const av = !isAlloc ? item.avail : null
+                      const a = item.kind === 'alloc' ? item.alloc : null
                       const isDragging = drag?.active && drag.key === key
                       const isDropLine = drag?.active && drag.overKey === key
                       return (
@@ -585,30 +632,22 @@ export default function AllocationsPage() {
                           className={`alloc-row${isDragging ? ' dragging' : ''}${isDropLine ? ' drop-line' : ''}`}
                           key={key}
                           data-key={key}
-                          style={{ cursor: isAlloc ? 'grab' : 'pointer' }}
+                          style={{ cursor: 'grab' }}
                           onPointerDown={(e) => onRowPointerDown(e, key)}
                           onMouseEnter={(e) => {
-                            const title = isAlloc && a ? a.pluginId : av ? av.pluginId : ''
-                            // 描述：可用插件直接有；已分配卡片从同环境 available 列表按 pluginId 匹配
-                            const descInfo = av
-                              ? { desc: av.description, version: av.version, source: av.source === 'bundle' ? 'bundle' : '依赖' }
-                              : (() => {
-                                  const match = (available[p.name] ?? []).find((x) => x.pluginId === title)
-                                  return match ? { desc: match.description, version: match.version, source: match.source === 'bundle' ? 'bundle' : '依赖' } : {}
-                                })()
+                            const title = a ? a.pluginId : ''
+                            // 描述：已分配卡片从同环境 available 列表按 pluginId 匹配
+                            const descInfo = (() => {
+                              const match = (available[p.name] ?? []).find((x) => x.pluginId === title)
+                              return match ? { desc: match.description, version: match.version, source: match.source === 'bundle' ? 'bundle' : '依赖' } : {}
+                            })()
                             if (title) showTooltip(e, title, descInfo)
                           }}
                           onMouseLeave={hideTooltip}
-                          onClick={(e) => {
-                            // 可用插件：单击 = 立即分配到本环境（拖动过则不触发）
-                            if (av && !drag?.active && !e.defaultPrevented) {
-                              void assignAvail(p.name, av.pluginId)
-                            }
-                          }}
-                          onContextMenu={(e) => (isAlloc && a ? onContextAlloc(a, e) : av ? onContextAvail(av, e) : undefined)}
+                          onContextMenu={(e) => (a ? onContextAlloc(a, e) : undefined)}
                         >
                           <span className="drag-grip" title="按住拖动">⠿</span>
-                          {isAlloc && a ? (
+                          {a && (
                             <>
                               <span style={{ fontFamily: 'Consolas, monospace' }}>{a.pluginId}</span>
                               <span className={`badge ${a.enabled ? 'enabled' : 'disabled'}`}>
@@ -638,19 +677,62 @@ export default function AllocationsPage() {
                                 卸载
                               </button>
                             </>
-                          ) : av ? (
-                            <>
+                          )}
+                        </div>
+                      )
+                    })}
+
+                    {/* 可添加插件：按市场分类分组 */}
+                    {(addableByCategory[p.name] ?? []).map((group) => (
+                      <div key={group.category} className="alloc-group">
+                        <div className="alloc-group-head">
+                          <span className="alloc-group-title">📂 {group.zh}</span>
+                          <span className="badge">{group.items.length} 个可添加</span>
+                          <span className="spacer" />
+                          <button
+                            className="btn sm"
+                            title={`把 ${group.zh} 分类全部 ${group.items.length} 个插件分配到 ${p.name}`}
+                            onClick={() => void assignCategory(p.name, group.category, group.zh)}
+                          >
+                            ⚡ 全部分配
+                          </button>
+                        </div>
+                        {group.items.map((av) => {
+                          const key = itemKey({ kind: 'avail', avail: av })
+                          const isDragging = drag?.active && drag.key === key
+                          const isDropLine = drag?.active && drag.overKey === key
+                          return (
+                            <div
+                              className={`alloc-row${isDragging ? ' dragging' : ''}${isDropLine ? ' drop-line' : ''}`}
+                              key={key}
+                              data-key={key}
+                              style={{ cursor: 'pointer' }}
+                              onPointerDown={(e) => onRowPointerDown(e, key)}
+                              onMouseEnter={(e) => {
+                                showTooltip(e, av.pluginId, {
+                                  desc: av.description,
+                                  version: av.version,
+                                  source: av.source === 'bundle' ? 'bundle' : '依赖',
+                                })
+                              }}
+                              onMouseLeave={hideTooltip}
+                              onClick={(e) => {
+                                if (!drag?.active && !e.defaultPrevented) void assignAvail(p.name, av.pluginId)
+                              }}
+                              onContextMenu={(e) => onContextAvail(av, e)}
+                            >
+                              <span className="drag-grip" title="按住拖动">⠿</span>
                               <span style={{ fontFamily: 'Consolas, monospace' }}>{av.pluginId}</span>
                               <span className={`badge ${av.source === 'bundle' ? 'kind' : 'stopped'}`}>
                                 {av.source === 'bundle' ? 'bundle' : '依赖'}
                               </span>
-                              <span className="badge disabled">未分配 · 拖动到环境即转移</span>
+                              <span className="badge disabled">未分配 · 单击分配 / 拖动转移</span>
                               <span className="spacer" />
-                            </>
-                          ) : null}
-                        </div>
-                      )
-                    })}
+                            </div>
+                          )
+                        })}
+                      </div>
+                    ))}
                   </div>
                 </div>
               )}

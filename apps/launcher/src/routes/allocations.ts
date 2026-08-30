@@ -103,16 +103,16 @@ export const allocationsHandler: ApiHandler = async (ctx, _req, res, method, seg
   }
 
   // GET /api/allocations/available —— 每个 Profile 的「可分配插件」清单（含描述）
-  if (seg.length === 2 && seg[0] === 'allocations' && seg[1] === 'available' && method === 'GET') {
-    const all = allocations.list()
-    // 插件描述：优先市场索引（name/npm 匹配），回退读 profile node_modules 的 package.json
-    let marketMap = new Map<string, { desc?: string; version?: string }>()
+  if (seg.length === 2 && seg[0] === 'allocations' && seg[1] === 'available' && method === 'GET') {    const all = allocations.list()
+    // 插件描述/分类：优先市场索引（name/npm 匹配），回退读 profile node_modules 的 package.json
+    let marketMap = new Map<string, { desc?: string; version?: string; category?: string }>()
     try {
-      const plugins = (await ctx.getMarket()) as Array<{ name?: string; npm?: string; description?: unknown; version?: string }>
+      const plugins = (await ctx.getMarket()) as Array<{ name?: string; npm?: string; description?: unknown; version?: string; category?: string }>
       for (const p of plugins) {
         if (!p) continue
         const desc = typeof p.description === 'string' ? p.description : (p.description as { zh?: string; en?: string } | undefined)?.zh ?? (p.description as { en?: string } | undefined)?.en
-        const info = { desc: desc || undefined, version: p.version }
+        const category = typeof p.category === 'string' && p.category ? p.category : undefined
+        const info = { desc: desc || undefined, version: p.version, category }
         if (p.npm) marketMap.set(p.npm, info)
         if (p.name) marketMap.set(p.name, info)
       }
@@ -128,11 +128,11 @@ export const allocationsHandler: ApiHandler = async (ctx, _req, res, method, seg
         return {}
       }
     }
-    const available: Record<string, { pluginId: string; source: 'dependency' | 'bundle'; allocated: boolean; enabled: boolean; description?: string; version?: string }[]> = {}
+    const available: Record<string, { pluginId: string; source: 'dependency' | 'bundle'; allocated: boolean; enabled: boolean; description?: string; version?: string; category?: string }[]> = {}
     for (const p of scanProfiles(profilesDir)) {
       const byId = new Map(all.filter((a) => a.profile === p.name).map((a) => [a.pluginId, a]))
       const seen = new Set<string>()
-      const items: { pluginId: string; source: 'dependency' | 'bundle'; allocated: boolean; enabled: boolean; description?: string; version?: string }[] = []
+      const items: { pluginId: string; source: 'dependency' | 'bundle'; allocated: boolean; enabled: boolean; description?: string; version?: string; category?: string }[] = []
       const add = (pluginId: string, source: 'dependency' | 'bundle') => {
         if (!pluginId || seen.has(pluginId)) return
         seen.add(pluginId)
@@ -146,6 +146,7 @@ export const allocationsHandler: ApiHandler = async (ctx, _req, res, method, seg
           enabled: a ? a.enabled : false,
           description: m?.desc || local.desc || undefined,
           version: m?.version || local.version || undefined,
+          category: m?.category,
         })
       }
       for (const dep of Object.keys(p.dependencies ?? {})) add(dep, 'dependency')
@@ -153,6 +154,70 @@ export const allocationsHandler: ApiHandler = async (ctx, _req, res, method, seg
       available[p.name] = items
     }
     ctx.sendJson(res, 200, { available })
+    return true
+  }
+
+  // POST /api/allocations/assign-category  { profile, category }
+  // 「按分类自动分配」：把该环境已安装（dependencies ∪ bundles）且属于该市场分类的插件全部分配（写回 patch）。
+  // 只做分配，不做安装 —— 插件须已在该环境安装。返回新增分配数 / 已分配跳过数。
+  if (seg.length === 2 && seg[0] === 'allocations' && seg[1] === 'assign-category' && method === 'POST') {
+    const profile = body.profile as string
+    const category = body.category as string
+    if (!profile || !category) {
+      ctx.sendJson(res, 400, { error: 'body 需要 { profile, category }' })
+      return true
+    }
+    // 市场 name/npm → category 映射（含带 # 后缀的展示名去后缀匹配）
+    const catByName = new Map<string, string>()
+    try {
+      const plugins = (await ctx.getMarket()) as Array<{ name?: string; npm?: string; category?: string }>
+      for (const p of plugins) {
+        if (!p || typeof p.category !== 'string' || !p.category) continue
+        if (typeof p.name === 'string' && p.name) catByName.set(p.name, p.category)
+        if (typeof p.npm === 'string' && p.npm) catByName.set(p.npm, p.category)
+      }
+    } catch {
+      /* 市场不可用时按插件名直接匹配（分类映射缺失则无法归类，返回空结果） */
+    }
+    const profileData = scanProfiles(profilesDir).find((x) => x.name === profile)
+    if (!profileData) {
+      ctx.sendJson(res, 404, { error: `环境不存在: ${profile}` })
+      return true
+    }
+    // 该环境已安装的插件 id 列表（bundle + dependency），去重保序
+    const installedIds = [...new Set([...(profileData.bundles ?? []), ...Object.keys(profileData.dependencies ?? {})])]
+    // 分类匹配：优先精确 name/npm；name 含 # 时去掉 # 后缀再试
+    const belongs = (id: string): boolean => {
+      const c = catByName.get(id) ?? catByName.get(id.split('#')[0]!)
+      return c === category
+    }
+    const matched = installedIds.filter(belongs)
+    const existing = new Set(allocations.list().filter((a) => a.profile === profile).map((a) => a.pluginId))
+    const toAssign = matched.filter((id) => !existing.has(id))
+    let assigned = 0
+    for (const id of toAssign) {
+      allocations.allocate(profile, id, id)
+      assigned++
+    }
+    const apply = ctx.tryApplyAllocation(profile)
+    if (!apply.applied) {
+      // 写回失败：回滚本次新增
+      for (const id of toAssign) {
+        const rec = allocations.list().find((a) => a.profile === profile && a.pluginId === id)
+        if (rec) allocations.remove(rec.id)
+      }
+      ctx.sendJson(res, 409, { error: apply.applyError ?? '写回 cordis.patch.yml 失败' })
+      return true
+    }
+    ctx.sendJson(res, 200, {
+      profile,
+      category,
+      matched: matched.length,
+      assigned,
+      skipped: matched.length - assigned,
+      allocated: matched.filter((id) => existing.has(id) || toAssign.includes(id)).length,
+      ...apply,
+    })
     return true
   }
 

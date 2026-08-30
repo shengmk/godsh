@@ -78,6 +78,13 @@ export interface MarketPlugin {
   [key: string]: unknown
 }
 
+/** 市场分类概览（GET /api/market/categories） */
+export interface MarketCategory {
+  category: string
+  count: number
+  zh: string
+}
+
 export interface Allocation {
   id: string
   profile: string
@@ -96,6 +103,8 @@ export interface AvailablePlugin {
   description?: string
   /** 插件版本 */
   version?: string
+  /** 市场分类（dshmarket category；未归类为 undefined） */
+  category?: string
 }
 
 /** 批量安装的单个包结果（POST /profiles/:name/plugins/batch） */

@@ -905,6 +905,33 @@ body {
   gap: 6px;
 }
 
+/* 可添加插件按市场分类分组 */
+.alloc-group {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 10px;
+  padding: 8px 10px;
+  border-radius: var(--radius-sm);
+  background: rgba(56, 189, 248, 0.05);
+  border: 1px dashed var(--surface-border);
+}
+
+.alloc-group-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 2px 2px 6px;
+  border-bottom: 1px solid var(--surface-border);
+  margin-bottom: 4px;
+}
+
+.alloc-group-title {
+  font-weight: 600;
+  font-size: 13px;
+  color: var(--brand-2, #38bdf8);
+}
+
 .alloc-row {
   display: flex;
   align-items: center;
