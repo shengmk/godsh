@@ -511,33 +511,45 @@ export const profilesHandler: ApiHandler = async (ctx, _req, res, method, seg, b
     return true
   }
 
-  // POST /api/profiles/:name/plugins/update-all —— 更新该环境全部已安装依赖
+  // POST /api/profiles/:name/plugins/update-all —— 更新该环境全部已安装依赖（后台任务 + 进度）
   if (seg.length === 4 && seg[0] === 'profiles' && seg[2] === 'plugins' && seg[3] === 'update-all' && method === 'POST') {
     const name = decodeURIComponent(seg[1] ?? '')
     const profile = scanProfiles(profilesDir).find((p) => p.name === name)
     const deps = Object.keys(profile?.dependencies ?? {})
     if (deps.length === 0) {
-      ctx.sendJson(res, 200, { profile: name, results: [], ok: 0, failed: 0, message: '该环境没有可更新的插件' })
+      ctx.sendJson(res, 200, { profile: name, task: null, ok: 0, failed: 0, message: '该环境没有可更新的插件' })
       return true
     }
-    const results: { pkg: string; ok: boolean; error?: string; errorType?: string; logFile?: string }[] = []
-    for (const pkg of deps) {
-      try {
-        const r = await pluginAction(name, 'update', pkg)
-        const logFile = logPluginAction(ctx.logDir, name, 'update', pkg, r)
-        const { errorType, message } = classifyPluginError(r)
-        results.push(r.ok ? { pkg, ok: true } : { pkg, ok: false, error: message, errorType, logFile })
-      } catch (err) {
-        results.push({ pkg, ok: false, error: err instanceof Error ? err.message : String(err), errorType: 'other' })
+    // 后台任务：串行更新每个插件，进度写入日志，前端轮询 GET /api/profiles/:name/plugins/update-all/progress
+    const taskKey = `update-all-${name}-${Date.now()}`
+    ctx.startInstallTask(taskKey, `update-all-${name}-${Date.now()}.log`, async (log) => {
+      log(`开始更新环境 ${name}（共 ${deps.length} 个插件）\n`)
+      let i = 0
+      for (const pkg of deps) {
+        i++
+        log(`\n[${i}/${deps.length}] 更新 ${pkg} ...\n`)
+        try {
+          const r = await pluginAction(name, 'update', pkg)
+          log(r.ok ? `✓ ${pkg} 更新成功\n` : `✗ ${pkg} 更新失败：${r.stdout || r.stderr}\n`)
+        } catch (err) {
+          log(`✗ ${pkg} 更新失败：${err instanceof Error ? err.message : String(err)}\n`)
+        }
       }
-    }
-    const okCount = results.filter((r) => r.ok).length
-    ctx.sendJson(res, okCount === results.length ? 200 : 207, {
-      profile: name,
-      results,
-      ok: okCount,
-      failed: results.length - okCount,
+      log(`\n全部完成 ✅\n`)
     })
+    ctx.sendJson(res, 202, { profile: name, task: taskKey, ok: 0, failed: 0, message: '开始更新' })
+    return true
+  }
+
+  // GET /api/profiles/:name/plugins/update-all/progress —— 轮询后台更新进度
+  if (seg.length === 5 && seg[0] === 'profiles' && seg[2] === 'plugins' && seg[3] === 'update-all' && seg[4] === 'progress' && method === 'GET') {
+    const task = String(url.searchParams.get('task') ?? '')
+    const view = task ? ctx.installTaskView(task) : null
+    if (!view) {
+      ctx.sendJson(res, 404, { error: '任务不存在' })
+      return true
+    }
+    ctx.sendJson(res, 200, view)
     return true
   }
 

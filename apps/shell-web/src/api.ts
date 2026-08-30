@@ -91,11 +91,17 @@ export const api = {
       },
     ),
 
-  /** 更新该环境全部已安装依赖。 */
+  /** 更新该环境全部已安装依赖（后台任务，返回 task key）。 */
   updateAllPlugins: (profile: string) =>
-    req<{ profile: string; results: BatchInstallResult[]; ok: number; failed: number; message?: string }>(
+    req<{ profile: string; task: string | null; ok: number; failed: number; message?: string }>(
       `/profiles/${encodeURIComponent(profile)}/plugins/update-all`,
       { method: 'POST', body: '{}' },
+    ),
+
+  /** 轮询后台更新任务进度。 */
+  updateAllProgress: (profile: string, task: string) =>
+    req<{ status: string; log: string; message?: string }>(
+      `/profiles/${encodeURIComponent(profile)}/plugins/update-all/progress?task=${encodeURIComponent(task)}`,
     ),
 
   allocations: () => req<{ allocations: Allocation[] }>('/allocations').then((r) => r.allocations),

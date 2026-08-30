@@ -362,6 +362,18 @@ export default function AllocationsPage() {
     }
   }
 
+  /** 可用插件单击分配：立即把该插件分配到本环境（写回 patch）。 */
+  async function assignAvail(profile: string, pluginId: string) {
+    try {
+      const r = await api.allocate(profile, pluginId, pluginId, true)
+      show(`已分配 ${pluginId} → ${profile}`)
+      await load()
+    } catch (e) {
+      show(e instanceof Error ? e.message : String(e), true)
+      await load()
+    }
+  }
+
   /** 更新单个插件（分配页每行）。 */
   async function updatePlugin(a: Allocation) {
     if (a.pluginId === '@deepseek-ai/dsh-base' || a.pluginId === '@deepseek-ai/dsh-web-app') {
@@ -378,16 +390,55 @@ export default function AllocationsPage() {
     }
   }
 
-  /** 更新某环境全部已安装插件。 */
+  /** 更新某环境全部已安装插件（后台任务 + 进度面板）。 */
+  const [updatingProfile, setUpdatingProfile] = useState<string | null>(null)
+  const [updateLog, setUpdateLog] = useState('')
+  const [updateStatus, setUpdateStatus] = useState<'running' | 'done' | 'error'>('running')
+  const updatePoll = useRef<ReturnType<typeof setInterval> | null>(null)
+  const updateTask = useRef<string | null>(null)
+
   async function updateAll(profile: string) {
+    if (updatingProfile) return show(`正在更新 ${updatingProfile}，请稍候`, true)
     if (!window.confirm(`确定更新环境 ${profile} 的全部插件？`)) return
     try {
       const r = await api.updateAllPlugins(profile)
-      show(r.message || `更新完成：${r.ok} 成功，${r.failed} 失败`)
-      await load()
+      if (!r.task) {
+        show(r.message || '没有可更新的插件')
+        return
+      }
+      updateTask.current = r.task
+      setUpdatingProfile(profile)
+      setUpdateLog('')
+      setUpdateStatus('running')
+      if (updatePoll.current) clearInterval(updatePoll.current)
+      updatePoll.current = setInterval(async () => {
+        if (!updateTask.current) return
+        try {
+          const p = await api.updateAllProgress(profile, updateTask.current)
+          setUpdateLog(p.log)
+          if (p.status !== 'running') {
+            setUpdateStatus(p.status as 'done' | 'error')
+            if (updatePoll.current) clearInterval(updatePoll.current)
+            updatePoll.current = null
+            updateTask.current = null
+            show(p.status === 'done' ? `环境 ${profile} 插件更新完成` : `更新出错：${p.message || ''}`)
+            await load()
+          }
+        } catch {
+          /* 轮询失败继续 */
+        }
+      }, 1500)
     } catch (e) {
       show(e instanceof Error ? e.message : String(e), true)
     }
+  }
+
+  /** 关闭进度面板。 */
+  function closeUpdatePanel() {
+    if (updatePoll.current) clearInterval(updatePoll.current)
+    updatePoll.current = null
+    updateTask.current = null
+    setUpdatingProfile(null)
   }
 
   async function remove(a: Allocation) {
@@ -520,8 +571,14 @@ export default function AllocationsPage() {
                           className={`alloc-row${isDragging ? ' dragging' : ''}${isDropLine ? ' drop-line' : ''}`}
                           key={key}
                           data-key={key}
-                          style={{ cursor: 'grab' }}
+                          style={{ cursor: isAlloc ? 'grab' : 'pointer' }}
                           onPointerDown={(e) => onRowPointerDown(e, key)}
+                          onClick={(e) => {
+                            // 可用插件：单击 = 立即分配到本环境（拖动过则不触发）
+                            if (av && !drag?.active && !e.defaultPrevented) {
+                              void assignAvail(p.name, av.pluginId)
+                            }
+                          }}
                           onContextMenu={(e) => (isAlloc && a ? onContextAlloc(a, e) : av ? onContextAvail(av, e) : undefined)}
                         >
                           <span className="drag-grip" title="按住拖动">⠿</span>
@@ -574,6 +631,36 @@ export default function AllocationsPage() {
             </div>
           )
         })
+      )}
+
+      {/* 全部更新进度面板 */}
+      {updatingProfile && (
+        <div className="progress-panel">
+          <div className="progress-head">
+            <span>🔄 正在更新环境 {updatingProfile}</span>
+            <button className="btn sm" onClick={closeUpdatePanel} title="关闭">
+              ✕
+            </button>
+          </div>
+          <div className="progress-bar">
+            <div
+              className={`progress-fill ${updateStatus}`}
+              style={{ width: updateStatus === 'running' ? '45%' : updateStatus === 'done' ? '100%' : '100%' }}
+            />
+          </div>
+          <div className="progress-status">
+            {updateStatus === 'running' ? (
+              <>
+                <span className="splash-spinner">🌀</span> 更新中…
+              </>
+            ) : updateStatus === 'done' ? (
+              '✅ 全部完成'
+            ) : (
+              '❌ 更新出错'
+            )}
+          </div>
+          <pre className="progress-log">{updateLog || '准备中…'}</pre>
+        </div>
       )}
 
       {/* 跟手拖拽提示（偏移 +16/+22，避免遮挡鼠标指针） */}

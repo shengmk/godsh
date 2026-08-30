@@ -1049,3 +1049,70 @@ body {
   font-size: 11px;
   color: var(--muted, #64748b);
 }
+
+
+/* ---------- 后台任务进度面板 ---------- */
+.progress-panel {
+  position: fixed;
+  right: 20px;
+  bottom: 20px;
+  width: 380px;
+  max-height: 320px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 14px 16px;
+  border-radius: 14px;
+  background: var(--surface-menu, #1e293b);
+  border: 1px solid var(--border, rgba(255,255,255,0.12));
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.35);
+  z-index: 800;
+  animation: splash-pop 0.3s ease;
+}
+.progress-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-weight: 700;
+  font-size: 13px;
+}
+.progress-bar {
+  height: 10px;
+  border-radius: 999px;
+  background: rgba(255,255,255,0.1);
+  overflow: hidden;
+}
+.progress-fill {
+  height: 100%;
+  border-radius: 999px;
+  background: linear-gradient(90deg, var(--brand-1, #60a5fa), var(--brand-2, #a78bfa));
+  transition: width 0.4s ease;
+}
+.progress-fill.done {
+  background: linear-gradient(90deg, #34d399, #a7f3d0);
+}
+.progress-fill.error {
+  background: linear-gradient(90deg, #f87171, #fca5a5);
+}
+.progress-status {
+  font-size: 12px;
+  color: var(--muted, #94a3b8);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.progress-log {
+  flex: 1;
+  max-height: 180px;
+  overflow: auto;
+  font-family: Consolas, monospace;
+  font-size: 11px;
+  line-height: 1.5;
+  color: #a5b4fc;
+  background: rgba(0,0,0,0.25);
+  border-radius: 8px;
+  padding: 8px 10px;
+  margin: 0;
+  white-space: pre-wrap;
+  word-break: break-all;
+}
