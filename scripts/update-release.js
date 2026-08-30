@@ -1,9 +1,9 @@
 // godsh GitHub Release 更新脚本（Node，UTF-8 安全）
 // 用法: node scripts/update-release.js <version> [--body <body文件>] [--upload <目录>]
 // 功能: 更新指定 tag 的 Release body；若 --upload 指定目录，则删除该 Release 上旧的同名资产并重新上传目录中所有文件
-const fs = require('fs');
-const path = require('path');
-const { execFileSync } = require('child_process');
+import fs from 'fs';
+import path from 'path';
+import { execFileSync } from 'child_process';
 
 const args = process.argv.slice(2);
 const version = args[0];
@@ -53,9 +53,12 @@ async function main() {
     console.log('Release body 已更新');
   }
 
-  // 3) 上传资产（先删旧的同名）
+  // 3) 上传资产（先删旧的同名；只处理当前版本相关文件 + SHA256SUMS.txt）
   if (uploadDir) {
-    const files = fs.readdirSync(uploadDir).filter(f => fs.statSync(path.join(uploadDir, f)).isFile());
+    const prefix = `godsh-${version}-`;
+    const files = fs.readdirSync(uploadDir)
+      .filter(f => fs.statSync(path.join(uploadDir, f)).isFile())
+      .filter(f => f === 'SHA256SUMS.txt' || f.startsWith(prefix));
     for (const asset of rel.assets) {
       const same = files.some(f => f === asset.name);
       if (same) {
