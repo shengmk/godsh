@@ -155,13 +155,13 @@ export default function ProfilesPage() {
     }
   }
 
-  /** 打开环境：独立窗口优先，失败回退系统浏览器；按实际方式提示。 */
+  /** 打开环境：优先 DSH Desktop 软件，无则浏览器打开；按实际方式提示。 */
   async function openDsh(p: { name?: string; profile?: string; url: string | null }) {
     const label = p.name ?? p.profile ?? 'dsh'
     if (!p.url) return show('环境未运行或地址不可用', true)
     try {
-      const mode = await openDshUrl(p.url, label)
-      show(mode === 'window' ? `已在独立窗口打开 ${label}` : `已在浏览器打开 ${label}`)
+      const mode = await openDshUrl(label, p.url)
+      show(mode === 'desktop' ? `已用 DSH Desktop 打开 ${label}` : `已在浏览器打开 ${label}`)
     } catch (e) {
       show(`打开失败：${e instanceof Error ? e.message : String(e)}`, true)
     }
@@ -198,7 +198,7 @@ export default function ProfilesPage() {
           ? { label: '停止', onClick: () => void stop(p.name) }
           : { label: '启动', onClick: () => void start(p.name), disabled: p.starting || !p.exists },
         p.running && p.url
-          ? { label: isTauri() ? '打开独立窗口' : '打开 Web UI', onClick: () => void openDsh(p) }
+          ? { label: isTauri() ? '用 DSH Desktop 打开' : '打开 Web UI', onClick: () => void openDsh(p) }
           : { label: '打开 Web UI', disabled: true, onClick: () => {} },
         p.running && p.url
           ? { label: '在系统浏览器打开', onClick: () => void openExternal(p.url!) }
@@ -452,7 +452,7 @@ export default function ProfilesPage() {
                   {p.url && (
                     <button
                       className="btn sm"
-                      title={isTauri() ? '在独立窗口中打开 dsh 界面（失败自动用浏览器）' : '在新标签页打开'}
+                      title={isTauri() ? '用 DSH Desktop 打开（无则用浏览器）' : '在新标签页打开'}
                       onClick={() => void openDsh(p)}
                     >
                       打开 ↗
@@ -553,7 +553,7 @@ export default function ProfilesPage() {
                 {p.running && p.url && (
                   <button
                     className="btn sm"
-                    title={isTauri() ? '在独立窗口中打开 dsh 界面（失败自动用浏览器）' : '在新标签页打开'}
+                    title={isTauri() ? '用 DSH Desktop 打开（无则用浏览器）' : '在新标签页打开'}
                     onClick={() => void openDsh(p)}
                   >
                     打开 ↗

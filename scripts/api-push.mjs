@@ -7,6 +7,8 @@ import { dirname, join } from 'path';
 const REPO = 'shengmk/godsh';
 const BRANCH = process.argv[2] ?? 'main';
 const TAG = process.argv.find((a) => a.startsWith('--tag='))?.slice(6);
+// 本地与远程内容对应的提交(远程 head 是 API push 重建的、不在本地对象库时传此参数作为比较基准)
+const BASE = process.argv.find((a) => a.startsWith('--base='))?.slice(7) ?? null;
 // git 命令在项目根运行
 const PROJECT_ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 
@@ -36,7 +38,10 @@ console.log(`远程 ${BRANCH}: ${remoteHead ?? '(不存在)'}`);
 
 // 需要推送的提交(本地有、远程没有)
 let commits;
-if (remoteHead) {
+if (BASE) {
+  // 指定本地基准:推送 BASE..localHead 之间的提交(远程 head 是 API push 重建、无法直接比较时用)
+  commits = git(['rev-list', `${BASE}..${localHead}`]).split('\n').filter(Boolean).reverse();
+} else if (remoteHead) {
   try {
     commits = git(['rev-list', `${remoteHead}..${localHead}`]).split('\n').filter(Boolean).reverse();
   } catch {
