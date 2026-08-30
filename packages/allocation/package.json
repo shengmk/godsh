@@ -1,6 +1,6 @@
 {
     "name":  "@godsh/allocation",
-    "version":  "0.3.2",
+    "version":  "0.3.3",
     "private":  true,
     "type":  "module",
     "description":  "godsh 插件分配管理（Profile 级启用/禁用/顺序）",
