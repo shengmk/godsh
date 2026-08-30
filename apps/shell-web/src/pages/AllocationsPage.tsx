@@ -365,7 +365,7 @@ export default function AllocationsPage() {
   /** 可用插件单击分配：立即把该插件分配到本环境（写回 patch）。 */
   async function assignAvail(profile: string, pluginId: string) {
     try {
-      const r = await api.allocate(profile, pluginId, pluginId, true)
+      await api.allocate(profile, pluginId, pluginId, true)
       show(`已分配 ${pluginId} → ${profile}`)
       await load()
     } catch (e) {
