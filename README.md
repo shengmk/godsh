@@ -2,7 +2,7 @@
 
 一个面向 **DeepSeek Harness（dsh）** 的图形化环境配置启动器，整体类比 **Anaconda Navigator**。
 
-> 当前版本：**v0.2.5** ｜ Windows 10 / 11 ｜ 桌面（Tauri 2）+ Web
+> 当前版本：**v0.3.2** ｜ Windows 10 / 11 ｜ 桌面（Tauri 2）+ Web
 
 | Anaconda | DSH | godsh |
 | --- | --- | --- |
@@ -12,6 +12,20 @@
 | conda env | DSH Profile | 环境管理 |
 | pip/conda 包 | dsh plugin / bundle | 插件分配与安装 |
 | conda channel | dshmarket / awesome-dsh-plugin | 插件市场 |
+
+## 🙏 借鉴与致谢
+
+本项目的实现深度借鉴了以下开源项目，特此说明：
+
+### [DSH Desktop](https://github.com/dataelement/dsh-desktop)（DeepSeek Harness Desktop）
+- **官方桌面客户端**（Electron，双击即用）。godsh 的「打开环境」功能优先调用本机安装的 DSH Desktop 打开对应 Profile（通过 `DSH_DESKTOP_DEFAULT_PROFILE` 环境变量），未安装时回退系统浏览器。
+- godsh 还从其 **app.asar 提取官方 bundle 依赖**（`@deepseek-ai/*`）用于环境启动自愈，并实现了 **DSH Desktop 升级检测**（asar 指纹比对 → 自动重建依赖缓存），保证 DSH Desktop 更新后 godsh 仍能正常启动环境。
+
+### [awesome-dsh-plugin](https://github.com/hackerFish/awesome-dsh-plugin)（dshmarket 插件市场）
+- 即 **dshmarket**：dsh 插件精选列表。godsh 的「插件市场」功能读取其索引（`https://awesome-dsh-plugin.com/plugins.json`），提供搜索 / 安装 / 更新 / 卸载 / 批量安装 / **按官方分类一键分配**（UI / 工具 / 主题 / 记忆等 22 类）。
+- 市场索引字段（name / npm / category / description / install）由该社区项目维护，godsh 仅消费展示。
+
+> 致谢这些项目及其维护者，让 dsh 生态更加完善。godsh 定位为 dsh 生态的**图形化管理入口**，不做重复实现。
 
 ## ✨ 核心能力
 
@@ -28,7 +42,7 @@
 
 ### 方式一：桌面版（推荐）
 
-1. 从 [Releases](https://github.com/shengmk/godsh/releases) 下载 `godsh-0.2.5-x64-setup.exe`（安装版）或 `-x64.zip`（便携版）。
+1. 从 [Releases](https://github.com/shengmk/godsh/releases) 下载 `godsh-0.3.2-x64-setup.exe`（安装版）或 `-x64.zip`（便携版）。
 2. 运行并启动：应用会自动拉起内置 Node API 后端（端口 4780）。
 3. 首次使用建议点击「控制台」→「快速启动默认模板」（无 dsh 会自动安装 base + 初始化官方模板）。
 
@@ -94,10 +108,10 @@ pnpm launcher help    # CLI 命令
 
 ```powershell
 # 1) 升级版本号（自动同步全部 package.json / Cargo.toml / tauri.conf / config）
-pwsh -File scripts/bump-version.ps1 -Version 0.2.5
+pwsh -File scripts/bump-version.ps1 -Version 0.3.2
 
 # 2) 打包发布版（tauri build 内嵌前端 + NSIS 安装器 + ZIP + 校验和）
-pwsh -File scripts/make-release.ps1 -Version 0.2.5
+pwsh -File scripts/make-release.ps1 -Version 0.3.2
 ```
 
 > GNU 工具链限制：构建要求项目路径不含空格。
