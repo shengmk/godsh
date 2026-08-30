@@ -1,7 +1,7 @@
 use std::path::PathBuf;
 use std::process::{Child, Command};
 use std::sync::Mutex;
-use tauri::{Manager, WebviewUrl, WebviewWindowBuilder};
+use tauri::Manager;
 
 struct ServerProc(Mutex<Option<Child>>);
 
@@ -37,26 +37,58 @@ fn data_dir() -> String {
   })
 }
 
-/// 在独立窗口中打开一个 URL（如 dsh Web UI）。
-/// 用于「打开环境」：不依赖 target=_blank（WebView2 下不可靠），
-/// 而是新建一个原生 WebView 窗口加载 dsh 页面，体验与 DSH Desktop 一致。
+/// 定位 DSH Desktop 可执行文件（官方桌面应用，专门用于打开 dsh 环境界面）。
+/// 查找顺序：标准安装路径 → DSH Desktop shim（dsh.cmd）里引用的 exe 路径。
+fn find_dsh_desktop() -> Option<PathBuf> {
+  let local = std::env::var("LOCALAPPDATA").unwrap_or_default();
+  let standard = PathBuf::from(&local).join("Programs").join("DSH Desktop").join("DSH Desktop.exe");
+  if standard.exists() {
+    return Some(standard);
+  }
+  // 从 shim 解析：%APPDATA%\DSH Desktop\host-commands\desktop\bin\dsh.cmd
+  let appdata = std::env::var("APPDATA").unwrap_or_default();
+  let shim = PathBuf::from(&appdata).join("DSH Desktop").join("host-commands").join("desktop").join("bin").join("dsh.cmd");
+  if let Ok(text) = std::fs::read_to_string(&shim) {
+    // shim 内形如 "C:\...\DSH Desktop\DSH Desktop.exe" 的引用
+    if let Some(start) = text.find("DSH Desktop.exe") {
+      let before = &text[..start];
+      if let Some(quote) = before.rfind('"') {
+        let exe = &before[quote + 1..start + "DSH Desktop.exe".len()];
+        let p = PathBuf::from(exe.replace("\\\\", "\\"));
+        if p.exists() {
+          return Some(p);
+        }
+      }
+    }
+  }
+  None
+}
+
+/// 「打开环境」：优先用独立的 DSH Desktop 桌面软件打开指定 profile；
+/// 未安装 DSH Desktop 时回退系统浏览器打开 web URL。
+/// 返回实际使用的打开方式：desktop | browser。
 #[tauri::command]
-fn open_dsh_window(app: tauri::AppHandle, url: String, title: String) -> Result<(), String> {
+fn open_dsh_profile(profile: String, url: String) -> Result<String, String> {
+  if let Some(exe) = find_dsh_desktop() {
+    let mut cmd = Command::new(&exe);
+    // DSH Desktop 通过该环境变量决定启动哪个 profile（与官方 shim 一致）
+    cmd.env("DSH_DESKTOP_DEFAULT_PROFILE", &profile);
+    // 沿用当前 DSH_HOME（若已设置）
+    if let Ok(home) = std::env::var("DSH_HOME") {
+      if !home.is_empty() {
+        cmd.env("DSH_HOME", home);
+      }
+    }
+    cmd.spawn().map_err(|e| format!("启动 DSH Desktop 失败: {e}"))?;
+    return Ok("desktop".into());
+  }
+  // 无 DSH Desktop → 系统浏览器打开 web
   let parsed: url::Url = url.parse().map_err(|e| format!("无效 URL: {e}"))?;
-  let label = format!(
-    "dsh-{}",
-    std::time::SystemTime::now()
-      .duration_since(std::time::UNIX_EPOCH)
-      .map(|d| d.as_millis())
-      .unwrap_or(0)
-  );
-  WebviewWindowBuilder::new(&app, &label, WebviewUrl::External(parsed))
-    .title(if title.is_empty() { "dsh" } else { &title })
-    .inner_size(1200.0, 800.0)
-    .min_inner_size(800.0, 600.0)
-    .build()
-    .map_err(|e| format!("创建窗口失败: {e}"))?;
-  Ok(())
+  Command::new("cmd")
+    .args(["/c", "start", "", parsed.as_str()])
+    .spawn()
+    .map_err(|e| format!("打开失败: {e}"))?;
+  Ok("browser".into())
 }
 
 /// 用系统默认浏览器打开 URL（桌面端「复制地址」之外的备选入口）。
@@ -75,7 +107,7 @@ fn open_external(url: String) -> Result<(), String> {
 pub fn run() {
   tauri::Builder::default()
     .manage(ServerProc(Mutex::new(None)))
-    .invoke_handler(tauri::generate_handler![open_dsh_window, open_external])
+    .invoke_handler(tauri::generate_handler![open_dsh_profile, open_external])
     .setup(|app| {
       if cfg!(debug_assertions) {
         app.handle().plugin(

@@ -25,18 +25,7 @@ export async function tauriInvoke(cmd: string, args?: Record<string, unknown>): 
   return window.__TAURI_INTERNALS__.invoke(cmd, args ?? {})
 }
 
-/**
- * 在独立窗口中打开 dsh Web UI（Tauri 桌面端）。
- * 失败时抛错，由调用方回退到系统浏览器。
- */
-async function openWindow(url: string, title: string): Promise<void> {
-  await tauriInvoke('open_dsh_window', { url, title })
-}
-
-/**
- * 用系统默认浏览器打开 URL（Tauri 下调用 open_external → cmd /c start，绝对可靠；
- * Web 下新标签页）。
- */
+/** 用系统默认浏览器打开 URL（Tauri 下调用 open_external → cmd /c start，绝对可靠；Web 下新标签页）。 */
 export async function openExternal(url: string): Promise<void> {
   if (isTauri()) {
     try {
@@ -50,21 +39,19 @@ export async function openExternal(url: string): Promise<void> {
 }
 
 /**
- * 打开 dsh Web UI（推荐入口）：
- * - Tauri 桌面端：优先新建独立 WebView 窗口；失败自动回退系统浏览器
- * - Web 模式：新标签页打开
- * 返回实际使用的打开方式，供调用方提示。
+ * 打开 dsh 环境（推荐入口）：
+ * - Tauri 桌面端：优先启动独立的 DSH Desktop 软件打开该 profile；
+ *   未安装 DSH Desktop 时自动改用系统浏览器打开 web URL。
+ * - Web 模式：新标签页打开。
+ * 返回实际使用的打开方式：desktop | browser。
  */
-export async function openDshUrl(url: string, title?: string): Promise<'window' | 'browser'> {
-  const t = title || 'dsh'
+export async function openDshUrl(profile: string, url: string): Promise<'desktop' | 'browser'> {
   if (isTauri()) {
     try {
-      await openWindow(url, t)
-      return 'window'
+      const mode = (await tauriInvoke('open_dsh_profile', { profile, url })) as string
+      return mode === 'desktop' ? 'desktop' : 'browser'
     } catch (e) {
-      console.warn('open_dsh_window 失败，回退系统浏览器', e)
-      await openExternal(url)
-      return 'browser'
+      console.warn('open_dsh_profile 失败，回退浏览器', e)
     }
   }
   window.open(url, '_blank', 'noopener,noreferrer')
