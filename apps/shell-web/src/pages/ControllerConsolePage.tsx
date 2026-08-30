@@ -4,6 +4,7 @@ import type { Allocation, DshStatus, KernelInstance, KernelTemplate, LocalPlugin
 import { Toast } from '../components'
 import { useToast } from '../hooks'
 import { useI18n } from '../i18n'
+import { openDshUrl } from '../tauri'
 
 type PageKey = 'console' | 'profiles' | 'market' | 'allocations' | 'kernels' | 'dsh-envs' | 'settings'
 
@@ -144,9 +145,9 @@ export default function ControllerConsolePage({ onNavigate }: { onNavigate: (p: 
             {busy ? '…' : t('console.quickStartBtn')}
           </button>
           {startedUrl && (
-            <a className="btn" href={startedUrl} target="_blank" rel="noreferrer">
+            <button className="btn" onClick={() => void openDshUrl(startedUrl, 'dsh')}>
               {t('console.open')} ↗
-            </a>
+            </button>
           )}
         </div>
       </div>

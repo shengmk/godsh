@@ -1,7 +1,7 @@
 use std::path::PathBuf;
 use std::process::{Child, Command};
 use std::sync::Mutex;
-use tauri::Manager;
+use tauri::{Manager, WebviewUrl, WebviewWindowBuilder};
 
 struct ServerProc(Mutex<Option<Child>>);
 
@@ -37,10 +37,45 @@ fn data_dir() -> String {
   })
 }
 
+/// 在独立窗口中打开一个 URL（如 dsh Web UI）。
+/// 用于「打开环境」：不依赖 target=_blank（WebView2 下不可靠），
+/// 而是新建一个原生 WebView 窗口加载 dsh 页面，体验与 DSH Desktop 一致。
+#[tauri::command]
+fn open_dsh_window(app: tauri::AppHandle, url: String, title: String) -> Result<(), String> {
+  let parsed: url::Url = url.parse().map_err(|e| format!("无效 URL: {e}"))?;
+  let label = format!(
+    "dsh-{}",
+    std::time::SystemTime::now()
+      .duration_since(std::time::UNIX_EPOCH)
+      .map(|d| d.as_millis())
+      .unwrap_or(0)
+  );
+  WebviewWindowBuilder::new(&app, &label, WebviewUrl::External(parsed))
+    .title(if title.is_empty() { "dsh" } else { &title })
+    .inner_size(1200.0, 800.0)
+    .min_inner_size(800.0, 600.0)
+    .build()
+    .map_err(|e| format!("创建窗口失败: {e}"))?;
+  Ok(())
+}
+
+/// 用系统默认浏览器打开 URL（桌面端「复制地址」之外的备选入口）。
+#[tauri::command]
+fn open_external(url: String) -> Result<(), String> {
+  let parsed: url::Url = url.parse().map_err(|e| format!("无效 URL: {e}"))?;
+  // Windows: cmd /c start "" <url>（无需额外依赖；open crate 离线不可用）
+  Command::new("cmd")
+    .args(["/c", "start", "", parsed.as_str()])
+    .spawn()
+    .map_err(|e| format!("打开失败: {e}"))?;
+  Ok(())
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
   tauri::Builder::default()
     .manage(ServerProc(Mutex::new(None)))
+    .invoke_handler(tauri::generate_handler![open_dsh_window, open_external])
     .setup(|app| {
       if cfg!(debug_assertions) {
         app.handle().plugin(
