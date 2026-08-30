@@ -1,6 +1,6 @@
 {
     "name":  "@godsh/launcher",
-    "version":  "0.3.4",
+    "version":  "0.3.5",
     "private":  true,
     "type":  "module",
     "description":  "godsh 主启动器 CLI（后端逻辑编排）",

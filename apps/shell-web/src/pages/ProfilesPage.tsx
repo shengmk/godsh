@@ -4,7 +4,7 @@ import type { DshInstance, Health, PortInfo, ProfileView } from '../types'
 import { ConfirmDialog, ContextMenu, ErrorText, Loading, Toast, type MenuState } from '../components'
 import { useToast } from '../hooks'
 import { useI18n } from '../i18n'
-import { isTauri, openDshUrl, openExternal } from '../tauri'
+import { isTauri, openDshWeb, openDshDesktop as openDshDesktopFn, openExternal } from '../tauri'
 
 export default function ProfilesPage() {
   const [health, setHealth] = useState<Health | null>(null)
@@ -155,17 +155,19 @@ export default function ProfilesPage() {
     }
   }
 
-  /** 打开环境：优先 DSH Desktop 软件，无则浏览器打开；按实际方式提示。 */
+  /** 打开环境（默认入口）：用系统浏览器打开 godsh 启动的 web 界面（端口即自定义端口，零冲突）。 */
   async function openDsh(p: { name?: string; profile?: string; url: string | null }) {
     const label = p.name ?? p.profile ?? 'dsh'
     if (!p.url) return show('环境未运行或地址不可用', true)
     try {
-      const mode = await openDshUrl(label, p.url)
-      show(mode === 'desktop' ? `已用 DSH Desktop 打开 ${label}` : `已在浏览器打开 ${label}`)
+      await openDshWeb(p.url)
+      show(`已在浏览器打开 ${label}（${p.url}）`)
     } catch (e) {
       show(`打开失败：${e instanceof Error ? e.message : String(e)}`, true)
     }
   }
+
+
 
   function viewLog(name: string) {
     if (logFor === name) {
@@ -198,8 +200,11 @@ export default function ProfilesPage() {
           ? { label: '停止', onClick: () => void stop(p.name) }
           : { label: '启动', onClick: () => void start(p.name), disabled: p.starting || !p.exists },
         p.running && p.url
-          ? { label: isTauri() ? '用 DSH Desktop 打开' : '打开 Web UI', onClick: () => void openDsh(p) }
-          : { label: '打开 Web UI', disabled: true, onClick: () => {} },
+          ? { label: '打开 Web UI（浏览器）', onClick: () => void openDsh(p) }
+          : { label: '打开 Web UI（浏览器）', disabled: true, onClick: () => {} },
+        isTauri() && p.running
+          ? { label: '用 DSH Desktop 打开', onClick: () => void openDshDesktopFn(p.name) }
+          : { label: '用 DSH Desktop 打开', disabled: true, onClick: () => {} },
         p.running && p.url
           ? { label: '在系统浏览器打开', onClick: () => void openExternal(p.url!) }
           : { label: '在系统浏览器打开', disabled: true, onClick: () => {} },
@@ -452,7 +457,7 @@ export default function ProfilesPage() {
                   {p.url && (
                     <button
                       className="btn sm"
-                      title={isTauri() ? '用 DSH Desktop 打开（无则用浏览器）' : '在新标签页打开'}
+                      title='在系统浏览器打开（godsh 启动的 web 界面）'
                       onClick={() => void openDsh(p)}
                     >
                       打开 ↗
@@ -553,7 +558,7 @@ export default function ProfilesPage() {
                 {p.running && p.url && (
                   <button
                     className="btn sm"
-                    title={isTauri() ? '用 DSH Desktop 打开（无则用浏览器）' : '在新标签页打开'}
+                    title='在系统浏览器打开（godsh 启动的 web 界面）'
                     onClick={() => void openDsh(p)}
                   >
                     打开 ↗

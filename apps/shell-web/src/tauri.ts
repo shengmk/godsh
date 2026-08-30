@@ -39,21 +39,30 @@ export async function openExternal(url: string): Promise<void> {
 }
 
 /**
- * 打开 dsh 环境（推荐入口）：
- * - Tauri 桌面端：优先启动独立的 DSH Desktop 软件打开该 profile；
- *   未安装 DSH Desktop 时自动改用系统浏览器打开 web URL。
- * - Web 模式：新标签页打开。
- * 返回实际使用的打开方式：desktop | browser。
+ * 用系统浏览器打开 dsh web 界面（默认入口）：
+ * godsh 已用（自定义）端口启动了 dsh web 服务，浏览器直接访问该端口即可，
+ * 与端口自定义天然一致、零冲突；DSH Desktop 常驻运行时环境变量无效，
+ * 浏览器是最可靠的打开方式。
  */
-export async function openDshUrl(profile: string, url: string): Promise<'desktop' | 'browser'> {
+export async function openDshWeb(url: string): Promise<void> {
+  await openExternal(url)
+}
+
+/**
+ * 用独立的 DSH Desktop 软件打开指定 profile（备选入口，右键菜单）。
+ * 注意：DSH Desktop 常驻运行时（单实例锁）新进程的环境变量不生效，
+ * 此方式适合 DSH Desktop 未运行（冷启动）的场景。
+ * 返回 true 表示已尝试启动。
+ */
+export async function openDshDesktop(profile: string): Promise<boolean> {
   if (isTauri()) {
     try {
-      const mode = (await tauriInvoke('open_dsh_profile', { profile, url })) as string
-      return mode === 'desktop' ? 'desktop' : 'browser'
+      await tauriInvoke('open_dsh_profile', { profile, url: '' })
+      return true
     } catch (e) {
-      console.warn('open_dsh_profile 失败，回退浏览器', e)
+      console.warn('open_dsh_profile 失败', e)
+      return false
     }
   }
-  window.open(url, '_blank', 'noopener,noreferrer')
-  return 'browser'
+  return false
 }
