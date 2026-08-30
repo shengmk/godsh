@@ -1,6 +1,6 @@
 {
     "name":  "@godsh/plugin-registry",
-    "version":  "0.3.4",
+    "version":  "0.3.5",
     "private":  true,
     "type":  "module",
     "description":  "godsh 插件识别：bundle / client 插件",
