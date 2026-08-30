@@ -1,6 +1,6 @@
 {
     "name":  "@godsh/security",
-    "version":  "0.2.8",
+    "version":  "0.2.9",
     "private":  true,
     "type":  "module",
     "description":  "godsh 安全：来源校验、构建授权",
