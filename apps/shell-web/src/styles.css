@@ -1116,3 +1116,37 @@ body {
   white-space: pre-wrap;
   word-break: break-all;
 }
+
+
+/* ---------- 插件悬停简介 tooltip ---------- */
+.plugin-tip {
+  position: fixed;
+  z-index: 900;
+  max-width: 320px;
+  padding: 10px 14px;
+  border-radius: 12px;
+  background: var(--surface-menu, #1e293b);
+  border: 1px solid var(--brand-2, rgba(167,139,250,0.4));
+  box-shadow: 0 8px 24px rgba(0,0,0,0.35);
+  font-size: 12px;
+  animation: splash-pop 0.2s ease;
+  pointer-events: none;
+}
+.plugin-tip-title {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-weight: 700;
+  font-family: Consolas, monospace;
+  color: var(--text, #e2e8f0);
+  margin-bottom: 6px;
+}
+.plugin-tip-desc {
+  line-height: 1.5;
+  color: var(--text, #cbd5e1);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+.plugin-tip-desc.muted {
+  color: var(--muted, #64748b);
+}

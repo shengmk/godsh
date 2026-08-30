@@ -1,3 +1,5 @@
+import { readFileSync } from 'node:fs'
+import { join } from 'node:path'
 import { scanProfiles } from '@godsh/profile-manager'
 import { pluginAction, resolveInstallArg } from '@godsh/marketplace'
 import type { ApiHandler } from './types.js'
@@ -100,19 +102,51 @@ export const allocationsHandler: ApiHandler = async (ctx, _req, res, method, seg
     return true
   }
 
-  // GET /api/allocations/available —— 每个 Profile 的「可分配插件」清单
+  // GET /api/allocations/available —— 每个 Profile 的「可分配插件」清单（含描述）
   if (seg.length === 2 && seg[0] === 'allocations' && seg[1] === 'available' && method === 'GET') {
     const all = allocations.list()
-    const available: Record<string, { pluginId: string; source: 'dependency' | 'bundle'; allocated: boolean; enabled: boolean }[]> = {}
+    // 插件描述：优先市场索引（name/npm 匹配），回退读 profile node_modules 的 package.json
+    let marketMap = new Map<string, { desc?: string; version?: string }>()
+    try {
+      const plugins = (await ctx.getMarket()) as Array<{ name?: string; npm?: string; description?: unknown; version?: string }>
+      for (const p of plugins) {
+        if (!p) continue
+        const desc = typeof p.description === 'string' ? p.description : (p.description as { zh?: string; en?: string } | undefined)?.zh ?? (p.description as { en?: string } | undefined)?.en
+        const info = { desc: desc || undefined, version: p.version }
+        if (p.npm) marketMap.set(p.npm, info)
+        if (p.name) marketMap.set(p.name, info)
+      }
+    } catch {
+      /* 市场不可用则只用本地描述 */
+    }
+    const readPkgDesc = (profileDir: string, pluginId: string): { desc?: string; version?: string } => {
+      try {
+        const pkgPath = join(profileDir, 'node_modules', ...pluginId.split('/'), 'package.json')
+        const pj = JSON.parse(readFileSync(pkgPath, 'utf8')) as { description?: string; version?: string }
+        return { desc: pj.description, version: pj.version }
+      } catch {
+        return {}
+      }
+    }
+    const available: Record<string, { pluginId: string; source: 'dependency' | 'bundle'; allocated: boolean; enabled: boolean; description?: string; version?: string }[]> = {}
     for (const p of scanProfiles(profilesDir)) {
       const byId = new Map(all.filter((a) => a.profile === p.name).map((a) => [a.pluginId, a]))
       const seen = new Set<string>()
-      const items: { pluginId: string; source: 'dependency' | 'bundle'; allocated: boolean; enabled: boolean }[] = []
+      const items: { pluginId: string; source: 'dependency' | 'bundle'; allocated: boolean; enabled: boolean; description?: string; version?: string }[] = []
       const add = (pluginId: string, source: 'dependency' | 'bundle') => {
         if (!pluginId || seen.has(pluginId)) return
         seen.add(pluginId)
         const a = byId.get(pluginId)
-        items.push({ pluginId, source, allocated: Boolean(a), enabled: a ? a.enabled : false })
+        const m = marketMap.get(pluginId)
+        const local = readPkgDesc(p.dir, pluginId)
+        items.push({
+          pluginId,
+          source,
+          allocated: Boolean(a),
+          enabled: a ? a.enabled : false,
+          description: m?.desc || local.desc || undefined,
+          version: m?.version || local.version || undefined,
+        })
       }
       for (const dep of Object.keys(p.dependencies ?? {})) add(dep, 'dependency')
       for (const b of p.bundles ?? []) add(b, 'bundle')

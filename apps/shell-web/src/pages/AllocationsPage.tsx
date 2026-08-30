@@ -374,6 +374,20 @@ export default function AllocationsPage() {
     }
   }
 
+  // ---------- 插件悬停简介 tooltip ----------
+  const [tooltip, setTooltip] = useState<{ x: number; y: number; title: string; desc?: string; version?: string; source?: string } | null>(null)
+  const tooltipRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const showTooltip = (e: React.MouseEvent, title: string, info: { desc?: string; version?: string; source?: string }) => {
+    if (tooltipRef.current) clearTimeout(tooltipRef.current)
+    tooltipRef.current = setTimeout(() => {
+      setTooltip({ x: e.clientX + 14, y: e.clientY + 18, title, ...info })
+    }, 350)
+  }
+  const hideTooltip = () => {
+    if (tooltipRef.current) clearTimeout(tooltipRef.current)
+    setTooltip(null)
+  }
+
   /** 更新单个插件（分配页每行）。 */
   async function updatePlugin(a: Allocation) {
     if (a.pluginId === '@deepseek-ai/dsh-base' || a.pluginId === '@deepseek-ai/dsh-web-app') {
@@ -573,6 +587,18 @@ export default function AllocationsPage() {
                           data-key={key}
                           style={{ cursor: isAlloc ? 'grab' : 'pointer' }}
                           onPointerDown={(e) => onRowPointerDown(e, key)}
+                          onMouseEnter={(e) => {
+                            const title = isAlloc && a ? a.pluginId : av ? av.pluginId : ''
+                            // 描述：可用插件直接有；已分配卡片从同环境 available 列表按 pluginId 匹配
+                            const descInfo = av
+                              ? { desc: av.description, version: av.version, source: av.source === 'bundle' ? 'bundle' : '依赖' }
+                              : (() => {
+                                  const match = (available[p.name] ?? []).find((x) => x.pluginId === title)
+                                  return match ? { desc: match.description, version: match.version, source: match.source === 'bundle' ? 'bundle' : '依赖' } : {}
+                                })()
+                            if (title) showTooltip(e, title, descInfo)
+                          }}
+                          onMouseLeave={hideTooltip}
                           onClick={(e) => {
                             // 可用插件：单击 = 立即分配到本环境（拖动过则不触发）
                             if (av && !drag?.active && !e.defaultPrevented) {
@@ -660,6 +686,18 @@ export default function AllocationsPage() {
             )}
           </div>
           <pre className="progress-log">{updateLog || '准备中…'}</pre>
+        </div>
+      )}
+
+      {/* 插件悬停简介 tooltip */}
+      {tooltip && (
+        <div className="plugin-tip" style={{ left: tooltip.x, top: tooltip.y }}>
+          <div className="plugin-tip-title">
+            {tooltip.title}
+            {tooltip.version ? <span className="badge kind">v{tooltip.version}</span> : null}
+            {tooltip.source ? <span className={`badge ${tooltip.source === 'bundle' ? 'kind' : 'stopped'}`}>{tooltip.source}</span> : null}
+          </div>
+          {tooltip.desc ? <div className="plugin-tip-desc">{tooltip.desc}</div> : <div className="plugin-tip-desc muted">（暂无简介）</div>}
         </div>
       )}
 

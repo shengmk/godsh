@@ -92,6 +92,10 @@ export interface AvailablePlugin {
   source: 'dependency' | 'bundle'
   allocated: boolean
   enabled: boolean
+  /** 插件简介（市场索引 / 本地 package.json） */
+  description?: string
+  /** 插件版本 */
+  version?: string
 }
 
 /** 批量安装的单个包结果（POST /profiles/:name/plugins/batch） */
