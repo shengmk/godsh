@@ -87,6 +87,35 @@ export function ensureProfileWorkspace(profilesDir: string): number {
   return fixed
 }
 
+/**
+ * 修复被写空的 cordis.patch.yml（0 字节/纯空白）。返回修复数量。
+ *
+ * 背景：分配关系被清空时，若旧代码 `serializePatchList([])` 返回空字符串，
+ * `applyProfile` 会把 patch 文件写成 0 字节 —— 这不是合法 YAML，
+ * dsh 启动解析失败导致环境打不开。此处把空文件恢复为合法空数组 `[]`。
+ */
+export function ensureProfilePatches(profilesDir: string): number {
+  let fixed = 0
+  const entries = readdirSync(profilesDir, { withFileTypes: true })
+  for (const e of entries) {
+    if (!e.isDirectory() || e.name === 'node_modules') continue
+    const patchPath = join(profilesDir, e.name, 'cordis.patch.yml')
+    try {
+      if (!existsSync(patchPath)) continue
+      const raw = readFileSync(patchPath, 'utf8')
+      // 0 字节 / 纯空白 = 写坏的空 patch → 恢复为合法空数组
+      if (!raw.trim()) {
+        writeFileSync(patchPath, '[]\n', 'utf8')
+        fixed++
+      }
+    } catch {
+      /* 忽略单个失败 */
+    }
+  }
+  if (fixed > 0) invalidateProfileCache(profilesDir)
+  return fixed
+}
+
 /** 删除一个 Profile（安全校验：必须存在且包含 package.json）。 */
 export function removeProfile(profilesDir: string, name: string): void {
   const profile = findProfile(profilesDir, name)

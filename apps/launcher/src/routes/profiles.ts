@@ -1,6 +1,6 @@
 import { join } from 'node:path'
 import { mkdirSync, readFileSync, writeFileSync, existsSync } from 'node:fs'
-import { readLogTail, spawnWebProfile, stopWeb, waitForPort, isPortListening, findPidByPort, findProcessName, invalidatePortProbe, ensureProfileBundles } from '@godsh/core'
+import { readLogTail, spawnWebProfile, stopWeb, waitForPort, isPortListening, findPidByPort, findProcessName, invalidatePortProbe, ensureProfileBundles, ensureCacheIntegrity } from '@godsh/core'
 import { createProfile, removeProfile, scanProfiles, setProfileBundles } from '@godsh/profile-manager'
 import { pluginAction, PLUGIN_ACTION_TIMEOUT_MS, resolveInstallArg } from '@godsh/marketplace'
 import type { ApiHandler, RouteContext, RuntimeProc } from './types.js'
@@ -28,8 +28,11 @@ function diagnoseStartFailure(logFile: string, port: number): string {
   try {
     const log = readLogTail(logFile, 200)
     const all = log || ''
-    if (/YAMLException|bad indentation|cannot resolve profile bundle|failed to parse overlay/i.test(all)) {
-      return '环境配置（cordis.patch.yml）损坏或 bundle 缺失，请到「插件分配」检查或重新安装插件'
+    if (/YAMLException|bad indentation|cannot resolve profile bundle|failed to parse overlay|did not activate|pending \(waiting for service\)/i.test(all)) {
+      return '环境配置（cordis.patch.yml）损坏、插件缺少 peer 依赖或 bundle 缺失。已自动修复 patch，若仍失败请检查该环境最近安装的插件是否缺少依赖（如 dsh-web-search-pro 需要 dsh-browser）'
+    }
+    if (/Cannot find package|ERR_MODULE_NOT_FOUND|failed to import loader entry/i.test(all)) {
+      return 'DSH 官方依赖缓存被损坏（常见于安装插件时 pnpm 清空了 junction 目标）。已自动修复缓存，请重新启动环境'
     }
     if (/Cannot find package|ERR_MODULE_NOT_FOUND|failed to import loader entry/i.test(all)) {
       return '环境缺少依赖包，请到「DSH 环境」检查 dsh 安装完整性'
@@ -190,6 +193,13 @@ export const profilesHandler: ApiHandler = async (ctx, _req, res, method, seg, b
         ensureProfileBundles(ctx.env.dshHome, name)
       } catch {
         /* 自愈失败不阻断，dsh 会尽力启动 */
+      }
+      // 启动前修复被 pnpm 清空的缓存包（junction 目标），防 Cannot find package
+      try {
+        const integrity = ensureCacheIntegrity()
+        if (integrity.healed > 0) console.log(`[godsh] 启动前缓存自愈: ${integrity.message}`)
+      } catch {
+        /* 缓存修复失败不阻断，dsh 会给出具体报错 */
       }
       ctx.ensureUnifiedKernel(name)
       const basePort = Number(body.port) || config.webKernel.defaultPort || 3080

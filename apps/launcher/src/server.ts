@@ -1,9 +1,9 @@
 import http from 'node:http'
 import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from 'node:fs'
 import { extname, join } from 'node:path'
-import { MONOREPO_ROOT, DATA_DIR, findPidByPort, isPortListening, readLogTail, ensureDshBundles } from '@godsh/core'
+import { MONOREPO_ROOT, DATA_DIR, findPidByPort, isPortListening, readLogTail, ensureDshBundles, ensureCacheIntegrity } from '@godsh/core'
 import { fetchMarketIndex } from '@godsh/marketplace'
-import { scanProfiles, ensureProfileWorkspace } from '@godsh/profile-manager'
+import { scanProfiles, ensureProfileWorkspace, ensureProfilePatches } from '@godsh/profile-manager'
 import type { CliContext } from './context.js'
 import { routeHandlers } from './routes/index.js'
 import type { ApiHandler, RouteContext, RuntimeProc } from './routes/types.js'
@@ -106,12 +106,27 @@ export async function startApiServer(ctx: CliContext, opts: ApiServerOptions): P
   } catch (err) {
     console.warn(`[godsh] bundle 自愈跳过: ${err instanceof Error ? err.message : String(err)}`)
   }
+  // 缓存完整性：pnpm 安装插件可能清空 junction 目标的缓存包（commander/ws 等），
+  // 导致 dsh 启动时 Cannot find package。启动前扫描空目录包并从 asar 补回。
+  try {
+    const integrity = ensureCacheIntegrity()
+    if (integrity.healed > 0) console.log(`[godsh] 缓存自愈: ${integrity.message}`)
+  } catch (err) {
+    console.warn(`[godsh] 缓存自愈跳过: ${err instanceof Error ? err.message : String(err)}`)
+  }
   // 补齐 profile 缺失的 pnpm-workspace.yaml（pnpm 供应链策略在错误 workspace 运行导致 install/remove 失败的根因）
   try {
     const fixed = ensureProfileWorkspace(profilesDir)
     if (fixed > 0) console.log(`[godsh] 已补齐 ${fixed} 个 profile 的 pnpm-workspace.yaml`)
   } catch (err) {
     console.warn(`[godsh] workspace 补齐跳过: ${err instanceof Error ? err.message : String(err)}`)
+  }
+  // 修复被写空的 cordis.patch.yml（0 字节 → 恢复为合法空数组 []，否则 dsh 启动解析失败）
+  try {
+    const fixed = ensureProfilePatches(profilesDir)
+    if (fixed > 0) console.log(`[godsh] 已修复 ${fixed} 个被写空的 cordis.patch.yml（恢复为合法空数组）`)
+  } catch (err) {
+    console.warn(`[godsh] patch 修复跳过: ${err instanceof Error ? err.message : String(err)}`)
   }
 
   // 会话内运行中的 dsh web 进程（profile → 进程）

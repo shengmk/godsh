@@ -80,7 +80,7 @@ export function quoteIdIfNeeded(id: string): string {
   return v
 }
 
-/** 将 patch 条目序列化为规范 YAML 列表。 */
+/** 将 patch 条目序列化为规范 YAML 列表。空列表返回合法空数组 `[]`（0 字节/空串会让 dsh 解析失败无法启动）。 */
 export function serializePatchList(entries: PatchEntry[]): string {
   const lines: string[] = []
   for (const e of entries) {
@@ -90,7 +90,8 @@ export function serializePatchList(entries: PatchEntry[]): string {
       if (e.disabledIds.includes(id)) lines.push(`      disabled: true`)
     }
   }
-  return lines.join('\n') + (lines.length ? '\n' : '')
+  if (lines.length === 0) return '[]\n'
+  return lines.join('\n') + '\n'
 }
 
 /**

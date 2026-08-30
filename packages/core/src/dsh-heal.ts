@@ -374,3 +374,86 @@ export function ensureProfileBundles(dshHome: string, profile: string): { healed
   }
   return ensureDshBundles(dshHome)
 }
+
+/**
+ * 修复提取缓存中被 pnpm 清空的包目录（返回修复数）。
+ *
+ * 背景：profile 的 node_modules 顶层依赖（commander/ws/node-pty 等官方依赖）
+ * 是指向提取缓存的 junction。pnpm 在该 profile 安装/更新/卸载插件时，会把
+ * junction 当作真实目录追踪并清空其内容（视为不在 lockfile 的孤儿依赖），
+ * 导致 dsh 下次启动时 `Cannot find package '...\godsh\node_modules\commander\index.js'`
+ * 而失败。本函数检查缓存里每个包目录是否完整（package.json 存在且非空），
+ * 缺失/空目录从 app.asar 全量补回（只补损坏的包，不做全量重提取）。
+ */
+export function ensureCacheIntegrity(): { healed: number; message: string } {
+  const asar = findDshDesktopAsar()
+  if (!asar) return { healed: 0, message: '未找到 app.asar，跳过缓存完整性检查' }
+  const cache = dshModulesCacheDir()
+  if (!existsSync(cache)) {
+    // 缓存整体缺失：走完整提取
+    try {
+      const extracted = extractAsarNodeModules(asar, cache)
+      return { healed: extracted ? 1 : 0, message: extracted ? '缓存已重建' : '缓存已存在' }
+    } catch (err) {
+      return { healed: 0, message: `提取失败: ${err instanceof Error ? err.message : String(err)}` }
+    }
+  }
+  try {
+    const buf = readFileSync(asar)
+    const { dataStart, flat } = parseAsar(buf)
+    const unpackedRoot = join(dirname(asar), 'app.asar.unpacked', 'node_modules')
+    // 收集 asar 中所有包目录（顶层 + @scope 包）
+    const pkgDirs = new Set<string>()
+    for (const k of flat.keys()) {
+      if (!k.startsWith('node_modules/')) continue
+      const rel = k.slice('node_modules/'.length)
+      const parts = rel.split('/')
+      pkgDirs.add(parts.length >= 3 && rel.startsWith('@') ? parts.slice(0, 2).join('/') : parts[0]!)
+    }
+    let healed = 0
+    for (const pkg of pkgDirs) {
+      const dir = join(cache, pkg)
+      if (!existsSync(dir)) continue
+      let fileCount = 0
+      try {
+        fileCount = readdirSync(dir).length
+      } catch {
+        /* 不可读则重建 */
+      }
+      const hasPkgJson = existsSync(join(dir, 'package.json'))
+      // 完整目录：跳过（package.json 存在且非空）
+      if (hasPkgJson && fileCount > 0) continue
+      // 空/损坏目录：清空并从 asar 补回该包
+      try {
+        rmSync(dir, { recursive: true, force: true })
+      } catch {
+        /* 忽略 */
+      }
+      mkdirSync(dir, { recursive: true })
+      let wrote = 0
+      for (const [k, f] of flat) {
+        if (!k.startsWith(`node_modules/${pkg}/`)) continue
+        const rel = k.slice('node_modules/'.length)
+        const target = join(cache, rel)
+        const d = dirname(target)
+        if (!existsSync(d)) mkdirSync(d, { recursive: true })
+        if (f.unpacked) {
+          try {
+            copyFileSync(join(unpackedRoot, rel), target)
+            wrote++
+            continue
+          } catch {
+            /* 降级 */
+          }
+        }
+        const off = Number(f.offset) + dataStart
+        writeFileSync(target, buf.slice(off, off + f.size))
+        wrote++
+      }
+      if (wrote > 0) healed++
+    }
+    return { healed, message: healed > 0 ? `已修复 ${healed} 个被清空的缓存包` : '缓存完整' }
+  } catch (err) {
+    return { healed: 0, message: `缓存完整性检查失败: ${err instanceof Error ? err.message : String(err)}` }
+  }
+}
