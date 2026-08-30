@@ -81,9 +81,44 @@ function classifyPluginError(r: { ok: boolean; code: number | null; stdout: stri
   if (/ERR_PNPM_CANNOT_REMOVE_MISSING_DEPS|Cannot remove.*no such dependency/i.test(all)) {
     return { errorType: 'not-installed', message: '该插件不是独立依赖（可能是官方内核 bundle），无法直接卸载' }
   }
+  if (/ERR_PNPM_MINIMUM_RELEASE_AGE_VIOLATION/i.test(all)) {
+    return { errorType: 'release-age', message: '该插件（或其依赖）刚发布不足 1 天，被 pnpm 11 的供应链安全策略拒绝。godsh 已自动关闭该限制并重试，若仍失败请重试' }
+  }
   if (/resolve|ERR_PNPM|conflict|peer|ERESOLVE/i.test(all)) return { errorType: 'deps', message: '依赖解析/冲突，详见日志' }
   if (/timeout/i.test(all)) return { errorType: 'timeout', message: `安装超时（${PLUGIN_ACTION_TIMEOUT_MS / 1000}s），见日志` }
   return { errorType: 'other', message: r.stderr.trim() || r.stdout.trim() || '安装失败（无输出），见日志' }
+}
+
+/**
+ * 自动修复「最小发布年龄」策略拒绝安装的问题：
+ * pnpm 11 默认要求包发布满 1 天（minimumReleaseAge: 1440 分钟）才能安装，
+ * 新发布/刚更新的插件会报 ERR_PNPM_MINIMUM_RELEASE_AGE_VIOLATION。
+ * 该限制对 godsh 场景（用户装市场插件）没有价值，直接在该 profile 的
+ * pnpm-workspace.yaml 写入 `minimumReleaseAge: 0` 关闭它。
+ * @returns 是否写入了修复
+ */
+function disableReleaseAgeLimit(profilesDir: string, profile: string): boolean {
+  const wsPath = join(profilesDir, profile, 'pnpm-workspace.yaml')
+  try {
+    if (!existsSync(wsPath)) return false
+    let ws = readFileSync(wsPath, 'utf8')
+    if (/^\s*minimumReleaseAge\s*:/m.test(ws)) return false // 已有，无需改
+    const insertAt = ws.indexOf('allowBuilds:')
+    if (insertAt >= 0) {
+      ws = ws.slice(0, insertAt) + 'minimumReleaseAge: 0\n' + ws.slice(insertAt)
+    } else {
+      ws += '\nminimumReleaseAge: 0\n'
+    }
+    writeFileSync(wsPath, ws, 'utf8')
+    return true
+  } catch {
+    return false
+  }
+}
+
+/** 判断 pnpm 输出是否命中「最小发布年龄」策略拒绝。 */
+function isReleaseAgeError(r: { stdout: string; stderr: string }): boolean {
+  return /ERR_PNPM_MINIMUM_RELEASE_AGE_VIOLATION/i.test(`${r.stdout}\n${r.stderr}`)
 }
 
 /** /api/profiles* —— 环境列表 / 新建 / 删除 / 启停 / 日志 / 状态 / 插件（含批量安装）/ 端口占用 */
@@ -378,6 +413,15 @@ export const profilesHandler: ApiHandler = async (ctx, _req, res, method, seg, b
         }
       }
     }
+    // 最小发布年龄策略容错：pnpm 11 默认拒绝安装「发布不足 1 天」的包
+    // （ERR_PNPM_MINIMUM_RELEASE_AGE_VIOLATION）。godsh 场景下用户装市场插件
+    // 期望立即可装，自动在该 profile 的 workspace 关闭限制并重试一次。
+    if (action === 'add' && !result.ok && isReleaseAgeError(result)) {
+      if (disableReleaseAgeLimit(profilesDir, name)) {
+        result = await pluginAction(name, 'add', pkg)
+        effective = pkg
+      }
+    }
     const logFile = logPluginAction(ctx.logDir, name, action, effective, result)
     const { errorType, message } = classifyPluginError(result)
     ctx.sendJson(res, result.ok ? 200 : 400, {
@@ -486,6 +530,8 @@ export const profilesHandler: ApiHandler = async (ctx, _req, res, method, seg, b
       }
     }
     const results: { pkg: string; ok: boolean; error?: string; errorType?: string; logFile?: string }[] = []
+    // 最小发布年龄策略：首次命中后自动关闭限制，后续包不再失败
+    let releaseAgeFixed = false
     for (let i = 0; i < packages.length; i++) {
       let p = typeof packages[i] === 'string' ? (packages[i] as string).trim() : ''
       // 用市场名解析真实安装参数（若提供了 marketNames）
@@ -503,7 +549,14 @@ export const profilesHandler: ApiHandler = async (ctx, _req, res, method, seg, b
         continue
       }
       try {
-        const r = await pluginAction(name, 'add', p)
+        let r = await pluginAction(name, 'add', p)
+        // 命中「发布不足 1 天」策略：自动关闭限制并重试一次（全局一次性）
+        if (!r.ok && isReleaseAgeError(r) && !releaseAgeFixed) {
+          if (disableReleaseAgeLimit(profilesDir, name)) {
+            releaseAgeFixed = true
+            r = await pluginAction(name, 'add', p)
+          }
+        }
         const logFile = logPluginAction(ctx.logDir, name, 'add', p, r)
         const { errorType, message } = classifyPluginError(r)
         results.push(r.ok ? { pkg: p, ok: true } : { pkg: p, ok: false, error: message, errorType, logFile })

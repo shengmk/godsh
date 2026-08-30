@@ -66,6 +66,7 @@ const ERROR_TYPE_LABEL: Record<string, string> = {
   policy: '来源策略拒绝',
   'not-installed': '非独立依赖',
   protected: '受保护的内核',
+  'release-age': '发布年龄限制',
   other: '安装失败',
 }
 

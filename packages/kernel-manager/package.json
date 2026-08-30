@@ -1,6 +1,6 @@
 {
     "name":  "@godsh/kernel-manager",
-    "version":  "0.3.3",
+    "version":  "0.3.4",
     "private":  true,
     "type":  "module",
     "description":  "godsh 内核模板与实例管理",
