@@ -4,7 +4,7 @@ import type { DshInstance, Health, PortInfo, ProfileView } from '../types'
 import { ConfirmDialog, ContextMenu, ErrorText, Loading, Toast, type MenuState } from '../components'
 import { useToast } from '../hooks'
 import { useI18n } from '../i18n'
-import { isTauri, openDshUrl } from '../tauri'
+import { isTauri, openDshUrl, openExternal } from '../tauri'
 
 export default function ProfilesPage() {
   const [health, setHealth] = useState<Health | null>(null)
@@ -155,6 +155,18 @@ export default function ProfilesPage() {
     }
   }
 
+  /** 打开环境：独立窗口优先，失败回退系统浏览器；按实际方式提示。 */
+  async function openDsh(p: { name?: string; profile?: string; url: string | null }) {
+    const label = p.name ?? p.profile ?? 'dsh'
+    if (!p.url) return show('环境未运行或地址不可用', true)
+    try {
+      const mode = await openDshUrl(p.url, label)
+      show(mode === 'window' ? `已在独立窗口打开 ${label}` : `已在浏览器打开 ${label}`)
+    } catch (e) {
+      show(`打开失败：${e instanceof Error ? e.message : String(e)}`, true)
+    }
+  }
+
   function viewLog(name: string) {
     if (logFor === name) {
       setLogFor(null)
@@ -186,8 +198,11 @@ export default function ProfilesPage() {
           ? { label: '停止', onClick: () => void stop(p.name) }
           : { label: '启动', onClick: () => void start(p.name), disabled: p.starting || !p.exists },
         p.running && p.url
-          ? { label: isTauri() ? '打开独立窗口' : '打开 Web UI', onClick: () => void openDshUrl(p.url!, p.name) }
+          ? { label: isTauri() ? '打开独立窗口' : '打开 Web UI', onClick: () => void openDsh(p) }
           : { label: '打开 Web UI', disabled: true, onClick: () => {} },
+        p.running && p.url
+          ? { label: '在系统浏览器打开', onClick: () => void openExternal(p.url!) }
+          : { label: '在系统浏览器打开', disabled: true, onClick: () => {} },
         { label: '查看日志', onClick: () => viewLog(p.name) },
         { separator: true, label: '', onClick: () => {} },
         p.port ? { label: `复制端口 ${p.port}`, onClick: () => void copy(String(p.port), '端口') } : { label: '复制端口', disabled: true, onClick: () => {} },
@@ -437,8 +452,8 @@ export default function ProfilesPage() {
                   {p.url && (
                     <button
                       className="btn sm"
-                      title={isTauri() ? '在独立窗口中打开 dsh 界面' : '在新标签页打开'}
-                      onClick={() => void openDshUrl(p.url!, p.profile)}
+                      title={isTauri() ? '在独立窗口中打开 dsh 界面（失败自动用浏览器）' : '在新标签页打开'}
+                      onClick={() => void openDsh(p)}
                     >
                       打开 ↗
                     </button>
@@ -538,8 +553,8 @@ export default function ProfilesPage() {
                 {p.running && p.url && (
                   <button
                     className="btn sm"
-                    title={isTauri() ? '在独立窗口中打开 dsh 界面' : '在新标签页打开'}
-                    onClick={() => void openDshUrl(p.url!, p.name)}
+                    title={isTauri() ? '在独立窗口中打开 dsh 界面（失败自动用浏览器）' : '在新标签页打开'}
+                    onClick={() => void openDsh(p)}
                   >
                     打开 ↗
                   </button>
