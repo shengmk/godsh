@@ -10,6 +10,9 @@ import type { PatchEntry, ProfileManifest } from './types.js'
  *    （触发 supply-chain 策略拒绝新包，导致 install/remove 全部失败 exit 1）
  * 2. `allowBuilds: true` 允许原生模块 build script —— pnpm 11 默认拒绝构建
  *    （node-pty/ssh2/cpu-features 等），不放开则安装这类插件报 ERR_PNPM_IGNORED_BUILDS
+ * 3. `minimumReleaseAge: 0` 关闭「最小发布年龄」策略 —— pnpm 11 默认 1440 分钟（1 天），
+ *    新发布/刚更新的插件会被拒绝安装（ERR_PNPM_MINIMUM_RELEASE_AGE_VIOLATION，表现为「下载失败」）。
+ *    godsh 场景下用户期望市场里能搜到的插件马上能装，故设为 0 关闭该限制。
  */
 const PROFILE_PNPM_WORKSPACE = [
   'packages:',
@@ -17,6 +20,7 @@ const PROFILE_PNPM_WORKSPACE = [
   '',
   'nodeLinker: hoisted',
   'autoInstallPeers: false',
+  'minimumReleaseAge: 0',
   'allowBuilds:',
   '  cpu-features: true',
   '  node-pty: true',
@@ -74,9 +78,25 @@ export function ensureProfileWorkspace(profilesDir: string): number {
       }
       // 已有文件：把 pnpm 11 自动写入的 allowBuilds 占位符（"set this to true or false"）修正为 true
       const raw = readFileSync(ws, 'utf8')
+      let next = raw
+      let changed = false
       if (raw.includes('set this to true or false')) {
-        const fixedRaw = raw.replace(/:\s*set this to true or false/g, ': true')
-        writeFileSync(ws, fixedRaw, 'utf8')
+        next = raw.replace(/:\s*set this to true or false/g, ': true')
+        changed = true
+      }
+      // 补齐 minimumReleaseAge: 0 —— pnpm 11 默认 1 天发布年龄限制会拒绝新插件（下载失败）。
+      // 兼容旧 workspace 文件：没有该键则补到 nodeLinker/autoInstallPeers 之后、allowBuilds 之前。
+      if (!/^\s*minimumReleaseAge\s*:/m.test(next)) {
+        const insertAt = next.indexOf('allowBuilds:')
+        if (insertAt >= 0) {
+          next = next.slice(0, insertAt) + 'minimumReleaseAge: 0\n' + next.slice(insertAt)
+        } else {
+          next = next.replace(/(\n)?\s*$/, '\nminimumReleaseAge: 0\n')
+        }
+        changed = true
+      }
+      if (changed) {
+        writeFileSync(ws, next, 'utf8')
         fixed++
       }
     } catch {
