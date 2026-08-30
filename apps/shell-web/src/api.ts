@@ -11,6 +11,7 @@ import type {
   KernelTemplate,
   LauncherConfig,
   LocalPlugin,
+  MarketCategory,
   MarketPlugin,
   PluginActionResult,
   PortInfo,
