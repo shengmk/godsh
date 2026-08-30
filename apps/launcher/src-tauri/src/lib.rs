@@ -91,6 +91,50 @@ fn open_dsh_profile(profile: String, url: String) -> Result<String, String> {
   Ok("browser".into())
 }
 
+/// 定位浏览器可执行文件（用于「网址应用化」模式：--app=URL 打开独立窗口）。
+/// 优先 Edge（Windows 自带，默认浏览器），其次 Chrome。
+fn find_browser_exe() -> Option<PathBuf> {
+  let pf86 = std::env::var("ProgramFiles(x86)").unwrap_or_default();
+  let pf = std::env::var("ProgramFiles").unwrap_or_default();
+  let local = std::env::var("LOCALAPPDATA").unwrap_or_default();
+  let candidates = [
+    // Edge
+    PathBuf::from(&pf86).join("Microsoft").join("Edge").join("Application").join("msedge.exe"),
+    PathBuf::from(&pf).join("Microsoft").join("Edge").join("Application").join("msedge.exe"),
+    // Chrome
+    PathBuf::from(&pf).join("Google").join("Chrome").join("Application").join("chrome.exe"),
+    PathBuf::from(&pf86).join("Google").join("Chrome").join("Application").join("chrome.exe"),
+    PathBuf::from(&local).join("Google").join("Chrome").join("Application").join("chrome.exe"),
+  ];
+  for c in candidates {
+    if c.exists() {
+      return Some(c);
+    }
+  }
+  None
+}
+
+/// 「网址应用化」打开 dsh web 界面：
+/// 用系统浏览器（Edge/Chrome）的 `--app=URL` 模式启动一个独立应用窗口
+/// （无地址栏、独立任务栏图标，体验接近桌面应用；浏览器渲染，不会白屏）。
+/// 找不到浏览器时回退普通系统浏览器打开。
+#[tauri::command]
+fn open_app_window(url: String) -> Result<(), String> {
+  let parsed: url::Url = url.parse().map_err(|e| format!("无效 URL: {e}"))?;
+  if let Some(exe) = find_browser_exe() {
+    let mut cmd = Command::new(&exe);
+    cmd.arg(format!("--app={}", parsed.as_str()));
+    cmd.spawn().map_err(|e| format!("启动应用窗口失败: {e}"))?;
+    return Ok(());
+  }
+  // 回退：系统默认浏览器普通打开
+  Command::new("cmd")
+    .args(["/c", "start", "", parsed.as_str()])
+    .spawn()
+    .map_err(|e| format!("打开失败: {e}"))?;
+  Ok(())
+}
+
 /// 用系统默认浏览器打开 URL（桌面端「复制地址」之外的备选入口）。
 #[tauri::command]
 fn open_external(url: String) -> Result<(), String> {
@@ -107,7 +151,7 @@ fn open_external(url: String) -> Result<(), String> {
 pub fn run() {
   tauri::Builder::default()
     .manage(ServerProc(Mutex::new(None)))
-    .invoke_handler(tauri::generate_handler![open_dsh_profile, open_external])
+    .invoke_handler(tauri::generate_handler![open_dsh_profile, open_app_window, open_external])
     .setup(|app| {
       if cfg!(debug_assertions) {
         app.handle().plugin(
