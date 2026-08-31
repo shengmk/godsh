@@ -142,6 +142,21 @@ export default function ProfilesPage() {
     }
   }
 
+  async function restart(name: string) {
+    setBusy(name)
+    const portText = (customPort[name] ?? '').trim()
+    const port = portText ? Number.parseInt(portText, 10) : undefined
+    try {
+      await api.restartProfile(name, port)
+      show(`正在重启 ${name}…`)
+      setTimeout(load, 1500)
+    } catch (e) {
+      show(e instanceof Error ? e.message : String(e), true)
+    } finally {
+      setBusy(null)
+    }
+  }
+
   async function stop(name: string) {
     setBusy(name)
     try {
@@ -199,6 +214,9 @@ export default function ProfilesPage() {
         p.running
           ? { label: '停止', onClick: () => void stop(p.name) }
           : { label: '启动', onClick: () => void start(p.name), disabled: p.starting || !p.exists },
+        p.running
+          ? { label: '重启', onClick: () => void restart(p.name) }
+          : { label: '重启', disabled: true, onClick: () => {} },
         p.running && p.url
           ? { label: '打开应用窗口（网址应用化）', onClick: () => void openDsh(p) }
           : { label: '打开应用窗口（网址应用化）', disabled: true, onClick: () => {} },
@@ -530,9 +548,19 @@ export default function ProfilesPage() {
               )}
               <div className="row" style={{ marginTop: 12, flexWrap: 'wrap', gap: 8 }}>
                 {p.running ? (
-                  <button className="btn danger sm" disabled={busy === p.name} onClick={() => stop(p.name)}>
-                    停止
-                  </button>
+                  <>
+                    <button className="btn danger sm" disabled={busy === p.name} onClick={() => stop(p.name)}>
+                      停止
+                    </button>
+                    <button
+                      className="btn sm"
+                      disabled={busy === p.name}
+                      title="重启该环境（释放并重新监听端口）"
+                      onClick={() => void restart(p.name)}
+                    >
+                      🔄 重启
+                    </button>
+                  </>
                 ) : (
                   <>
                     <button

@@ -51,6 +51,12 @@ export const api = {
       body: port ? JSON.stringify({ port }) : undefined,
     }),
 
+  restartProfile: (name: string, port?: number) =>
+    req<{ status: string; port: number; pid: number | null }>(`/profiles/${encodeURIComponent(name)}/restart`, {
+      method: 'POST',
+      body: port ? JSON.stringify({ port }) : undefined,
+    }),
+
   stopProfile: (name: string) =>
     req<{ ok: boolean; message: string }>(`/profiles/${encodeURIComponent(name)}/stop`, { method: 'POST' }),
 

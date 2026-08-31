@@ -24,6 +24,7 @@ export default function SettingsPage({ locale, changeLocale, theme, changeTheme,
   const [marketEnabled, setMarketEnabled] = useState(true)
   const [marketUrl, setMarketUrl] = useState('')
   const [extraDirs, setExtraDirs] = useState('')
+  const [allowMultiPort, setAllowMultiPort] = useState(false)
   const [resetScope, setResetScope] = useState<'data' | 'all' | 'dsh-all'>('data')
   const [saving, setSaving] = useState(false)
 
@@ -35,6 +36,7 @@ export default function SettingsPage({ locale, changeLocale, theme, changeTheme,
       setMarketEnabled(s.config.pluginMarket.enabled)
       setMarketUrl(s.config.pluginMarket.indexUrl)
       setExtraDirs((s.config.dsh.dirs ?? []).join('\n'))
+      setAllowMultiPort(s.config.webKernel?.allowMultiPort ?? false)
     } catch (e) {
       show(e instanceof Error ? e.message : String(e), true)
     }
@@ -54,6 +56,7 @@ export default function SettingsPage({ locale, changeLocale, theme, changeTheme,
       await api.updateSettings({
         dsh: { home: dshHome.trim(), dirs },
         pluginMarket: { enabled: marketEnabled, indexUrl: marketUrl.trim() },
+        webKernel: { ...(info?.config.webKernel ?? { defaultTemplateId: 'web-default', defaultPort: 3080 }), allowMultiPort },
       } as Partial<LauncherConfig>)
       show(t('settings.saved'))
       await load()
@@ -215,6 +218,27 @@ export default function SettingsPage({ locale, changeLocale, theme, changeTheme,
         </div>
         <p className="muted" style={{ marginTop: 10 }}>
           {t('common.restartNote')}
+        </p>
+      </div>
+
+      {/* 端口与运行模式 */}
+      <div className="card" style={{ marginBottom: 16 }}>
+        <div className="card-title">端口与运行模式</div>
+        <p className="card-sub">
+          管理各环境运行时的端口分配策略与多实例行为。
+        </p>
+        <div className="row" style={{ marginTop: 10 }}>
+          <label className="row" style={{ alignItems: 'center', gap: 8, cursor: 'pointer' }}>
+            <input
+              type="checkbox"
+              checked={allowMultiPort}
+              onChange={(e) => setAllowMultiPort(e.target.checked)}
+            />
+            <span>允许自定义多端口并发（同一环境在不同端口同时运行）</span>
+          </label>
+        </div>
+        <p className="muted" style={{ marginTop: 6, fontSize: 12 }}>
+          💡 默认关闭（推荐）：严格单环境单端口互斥。当启动新端口或重启环境时，自动终止并释放该环境的所有旧端口与旧进程，彻底避免端口污染与多进程写冲突。
         </p>
       </div>
 

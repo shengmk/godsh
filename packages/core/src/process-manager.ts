@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync, createWriteStream } from 'node:fs'
+import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync, createWriteStream, readdirSync } from 'node:fs'
 import type { ChildProcess } from 'node:child_process'
 import http from 'node:http'
 import { join } from 'node:path'
@@ -242,3 +242,75 @@ export function readLogTail(logFile: string, maxLines = 200): string {
     return ''
   }
 }
+
+/**
+ * 反查某个 Profile 当前在系统中运行的所有 dsh / node 进程 PID。
+ * 通过匹配命令行参数 `--profile <profileName>` 实现全系统精准反查。
+ */
+export function findProcessesByProfile(profile: string): number[] {
+  const pids: number[] = []
+  const safeProfile = profile.replace(/[^a-zA-Z0-9_-]/g, '')
+  if (!safeProfile) return pids
+
+  if (process.platform === 'win32') {
+    // 匹配命令行中包含 --profile <profile> 或 --profile "<profile>" 或 --profile '<profile>'
+    const psCmd = `Get-CimInstance Win32_Process | Where-Object { $_.CommandLine -and ($_.CommandLine -match '--profile\\s+[\"\'']?${safeProfile}[\"\'']?(\\s|$)') } | Select-Object -ExpandProperty ProcessId`
+    const r = runSync('powershell', ['-NoProfile', '-NonInteractive', '-Command', psCmd])
+    if (r.ok && r.stdout) {
+      for (const line of r.stdout.split(/\r?\n/)) {
+        const pid = Number.parseInt(line.trim(), 10)
+        if (Number.isFinite(pid) && pid > 0) {
+          pids.push(pid)
+        }
+      }
+    }
+    return pids
+  }
+
+  // POSIX 平台：pgrep -f
+  const r = runSync('pgrep', ['-f', `--profile ${safeProfile}`])
+  if (r.ok && r.stdout) {
+    for (const line of r.stdout.split(/\r?\n/)) {
+      const pid = Number.parseInt(line.trim(), 10)
+      if (Number.isFinite(pid) && pid > 0) {
+        pids.push(pid)
+      }
+    }
+  }
+  return pids
+}
+
+/**
+ * 彻底终止属于某 Profile 的所有运行中与孤儿进程，并清理其关联的 PID 文件与端口探测缓存。
+ */
+export async function killAllProfileProcesses(
+  pidDir: string,
+  profile: string,
+): Promise<{ killed: number; pids: number[] }> {
+  const pids = findProcessesByProfile(profile)
+  for (const pid of pids) {
+    await killProcess(pid)
+  }
+
+  // 扫描 pidDir 下的 service-pid-*.txt，清理已死亡进程或属于该 profile 的 pid 文件
+  if (existsSync(pidDir)) {
+    try {
+      const files = readdirSync(pidDir)
+      for (const file of files) {
+        const match = /^service-pid-(\d+)\.txt$/.exec(file)
+        if (match) {
+          const port = Number.parseInt(match[1]!, 10)
+          const recordedPid = readPidFile(pidDir, port)
+          if (recordedPid && (pids.includes(recordedPid) || !isProcessAlive(recordedPid))) {
+            rmSync(join(pidDir, file), { force: true })
+            invalidatePortProbe(port)
+          }
+        }
+      }
+    } catch {
+      /* 清理忽略异常 */
+    }
+  }
+  return { killed: pids.length, pids }
+}
+

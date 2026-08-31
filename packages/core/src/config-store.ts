@@ -3,10 +3,10 @@ import { dirname, join } from 'node:path'
 import type { LauncherConfig } from './types.js'
 
 const DEFAULT_CONFIG: LauncherConfig = {
-  launcher: { name: 'godsh', version: '0.3.6' },
+  launcher: { name: 'godsh', version: '0.3.7' },
   dsh: { home: '', bin: 'dsh', profilesDir: 'profiles', instances: {}, activeVersion: '', byProfile: {}, dirs: [] },
   runtime: { node: 'node', pnpm: 'pnpm' },
-  webKernel: { defaultTemplateId: 'web-default', defaultPort: 3080 },
+  webKernel: { defaultTemplateId: 'web-default', defaultPort: 3080, allowMultiPort: false },
   pluginMarket: { enabled: true, indexUrl: 'https://awesome-dsh-plugin.com/plugins.json' },
   // 默认白名单必须包含 Tauri 桌面端来源（前端在 tauri.localhost，API 在 127.0.0.1:4780，属跨域）。
   // 同源 Web 场景不受影响（同源请求不校验 Origin）。用户可在设置中追加其它来源。

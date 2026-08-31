@@ -33,7 +33,12 @@ export interface LauncherConfig {
     dirs?: string[]
   }
   runtime: { node: string; pnpm: string }
-  webKernel: { defaultTemplateId: string; defaultPort: number }
+  webKernel: {
+    defaultTemplateId: string
+    defaultPort: number
+    /** 是否允许同一 Profile 在自定义多端口下并发运行（默认 false，严格单环境单端口互斥） */
+    allowMultiPort?: boolean
+  }
   pluginMarket: { enabled: boolean; indexUrl: string }
   /** 允许跨域访问 API 的来源（默认空 = 仅同源；例如 ["http://localhost:5173"]） */
   allowedOrigins?: string[]

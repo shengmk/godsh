@@ -180,7 +180,7 @@ export interface LauncherConfig {
     dirs?: string[]
   }
   runtime: { node: string; pnpm: string }
-  webKernel: { defaultTemplateId: string; defaultPort: number }
+  webKernel: { defaultTemplateId: string; defaultPort: number; allowMultiPort?: boolean }
   pluginMarket: { enabled: boolean; indexUrl: string }
   /** 允许跨域访问 API 的来源（默认空 = 仅同源） */
   allowedOrigins?: string[]

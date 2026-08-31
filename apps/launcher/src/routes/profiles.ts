@@ -1,6 +1,6 @@
 import { join } from 'node:path'
 import { mkdirSync, readFileSync, writeFileSync, existsSync } from 'node:fs'
-import { readLogTail, spawnWebProfile, stopWeb, waitForPort, isPortListening, findPidByPort, findProcessName, invalidatePortProbe, ensureProfileBundles, ensureCacheIntegrity } from '@godsh/core'
+import { readLogTail, spawnWebProfile, stopWeb, waitForPort, isPortListening, findPidByPort, findProcessName, invalidatePortProbe, ensureProfileBundles, ensureCacheIntegrity, killAllProfileProcesses } from '@godsh/core'
 import { createProfile, removeProfile, scanProfiles, setProfileBundles } from '@godsh/profile-manager'
 import { pluginAction, PLUGIN_ACTION_TIMEOUT_MS, resolveInstallArg } from '@godsh/marketplace'
 import type { ApiHandler, RouteContext, RuntimeProc } from './types.js'
@@ -201,9 +201,12 @@ export const profilesHandler: ApiHandler = async (ctx, _req, res, method, seg, b
       return true
     }
     if (proc) {
+      await stopWeb(pidDir, proc.port)
+      invalidatePortProbe(proc.port)
       running.delete(name)
       ctx.persistRuntime()
     }
+    await killAllProfileProcesses(pidDir, name)
     try {
       removeProfile(profilesDir, name)
       ctx.sendJson(res, 200, { ok: true })
@@ -218,10 +221,21 @@ export const profilesHandler: ApiHandler = async (ctx, _req, res, method, seg, b
     const name = decodeURIComponent(seg[1] ?? '')
     await enqueueStart(async () => {
       const existing = running.get(name)
-      if (existing && existing.status !== 'error') {
+      const allowMulti = config.webKernel.allowMultiPort === true
+
+      // 默认严格单环境单端口模式：若已在运行或有残留旧进程，强制先终止旧进程并释放旧端口
+      if (!allowMulti) {
+        if (existing) {
+          await stopWeb(pidDir, existing.port)
+          invalidatePortProbe(existing.port)
+          running.delete(name)
+        }
+        await killAllProfileProcesses(pidDir, name)
+      } else if (existing && existing.status !== 'error') {
         ctx.sendJson(res, 409, { error: `Profile "${name}" 已在运行` })
         return
       }
+
       if (existing) running.delete(name)
       // 启动前确保该 profile 的官方 bundle 就绪（自愈 + fallback 预建，防并发冲突）
       try {
@@ -275,19 +289,81 @@ export const profilesHandler: ApiHandler = async (ctx, _req, res, method, seg, b
     return true
   }
 
+  // POST /api/profiles/:name/restart
+  if (seg.length === 3 && seg[0] === 'profiles' && seg[2] === 'restart' && method === 'POST') {
+    const name = decodeURIComponent(seg[1] ?? '')
+    await enqueueStart(async () => {
+      const existing = running.get(name)
+      if (existing) {
+        await stopWeb(pidDir, existing.port)
+        invalidatePortProbe(existing.port)
+        running.delete(name)
+      }
+      await killAllProfileProcesses(pidDir, name)
+      ctx.persistRuntime()
+
+      // 短暂等待 OS 释放 socket 端口
+      await new Promise((r) => setTimeout(r, 400))
+
+      try {
+        ensureProfileBundles(ctx.env.dshHome, name)
+      } catch {}
+      try {
+        ensureCacheIntegrity()
+      } catch {}
+      ctx.ensureUnifiedKernel(name)
+
+      const basePort = Number(body.port) || existing?.port || config.webKernel.defaultPort || 3080
+      const port = await ctx.findFreePort(basePort)
+      invalidatePortProbe(port)
+      const { info, child } = spawnWebProfile({
+        profile: name,
+        port,
+        logDir,
+        pidDir,
+        dshBin: ctx.resolveDshBin(name),
+      })
+      const proc: RuntimeProc = { port, child, startedAt: Date.now(), status: 'starting' }
+      running.set(name, proc)
+      ctx.persistRuntime()
+      child.on('close', () => {
+        if (running.get(name) !== proc) return
+        if (proc.status === 'starting') {
+          proc.status = 'error'
+          proc.error = diagnoseStartFailure(info.logFile, port)
+        } else {
+          running.delete(name)
+        }
+        ctx.persistRuntime()
+      })
+      void (async () => {
+        const ready = await waitForPort(port, 60_000)
+        if (running.get(name) === proc) {
+          if (ready) proc.status = 'running'
+          else {
+            proc.status = 'error'
+            proc.error = `启动超时：端口 ${port} 在 60 秒内未就绪，请查看日志诊断`
+          }
+        }
+      })()
+      ctx.sendJson(res, 202, { status: 'starting', profile: name, port, pid: child.pid ?? null })
+    })
+    return true
+  }
+
   // POST /api/profiles/:name/stop
   if (seg.length === 3 && seg[0] === 'profiles' && seg[2] === 'stop' && method === 'POST') {
     const name = decodeURIComponent(seg[1] ?? '')
     const proc = running.get(name)
-    if (!proc) {
-      ctx.sendJson(res, 404, { error: `Profile "${name}" 未在运行` })
-      return true
+    if (proc) {
+      await stopWeb(pidDir, proc.port)
+      invalidatePortProbe(proc.port)
+      running.delete(name)
     }
-    const r = await stopWeb(pidDir, proc.port)
-    invalidatePortProbe(proc.port)
-    running.delete(name)
+    // 强制彻底清理该 profile 的所有孤儿进程
+    await killAllProfileProcesses(pidDir, name)
     ctx.persistRuntime()
-    ctx.sendJson(res, 200, r)
+    ctx.sendJson(res, 200, { ok: true, message: `已停止 ${name} 及释放所有关联端口` })
     return true
   }
 

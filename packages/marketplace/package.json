@@ -1,6 +1,6 @@
 {
     "name":  "@godsh/marketplace",
-    "version":  "0.3.6",
+    "version":  "0.3.7",
     "private":  true,
     "type":  "module",
     "description":  "godsh 插件市场与安装封装",
