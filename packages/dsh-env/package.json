@@ -1,6 +1,6 @@
 {
     "name":  "@godsh/dsh-env",
-    "version":  "0.3.7",
+    "version":  "0.4.0",
     "private":  true,
     "type":  "module",
     "description":  "godsh DSH 环境（base + 并列环境）管理",
