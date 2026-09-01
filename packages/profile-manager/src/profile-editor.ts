@@ -2,7 +2,7 @@ import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync
 import { join } from 'node:path'
 import { readPatchChecked, serializePatchList } from './patch.js'
 import { findProfile, invalidateProfileCache, scanProfiles } from './scanner.js'
-import type { PatchEntry, ProfileManifest } from './types.js'
+import type { PatchEntry, ProfileManifest, ProfilePackage } from './types.js'
 
 /**
  * Profile 的 pnpm-workspace.yaml 模板：
@@ -194,4 +194,73 @@ export function setPluginDisabled(
   invalidateProfileCache(profilesDir)
 }
 
+/** 导出 Profile 为完整环境配置包（JSON 格式，包含 bundles/deps/patch 等全部状态）。 */
+export function exportProfilePackage(profilesDir: string, name: string): ProfilePackage {
+  const profile = findProfile(profilesDir, name)
+  if (!profile) throw new Error(`Profile 不存在: ${name}`)
+
+  let patchYaml = '[]\n'
+  if (profile.patchPath && existsSync(profile.patchPath)) {
+    try {
+      patchYaml = readFileSync(profile.patchPath, 'utf8')
+    } catch {}
+  }
+
+  let workspaceYaml: string | undefined
+  const wsPath = join(profile.dir, 'pnpm-workspace.yaml')
+  if (existsSync(wsPath)) {
+    try {
+      workspaceYaml = readFileSync(wsPath, 'utf8')
+    } catch {}
+  }
+
+  return {
+    format: 'godsh-profile-package',
+    version: '1.0',
+    name,
+    exportedAt: Date.now(),
+    bundles: profile.bundles,
+    dependencies: profile.dependencies,
+    patchYaml,
+    workspaceYaml,
+  }
+}
+
+/** 从环境配置包导入新建或覆盖 Profile。 */
+export function importProfilePackage(
+  profilesDir: string,
+  targetName: string,
+  pkg: ProfilePackage,
+  override = false,
+): { dir: string; profile: string; dependenciesCount: number } {
+  const dir = join(profilesDir, targetName)
+  if (existsSync(dir)) {
+    if (!override) throw new Error(`目标环境已存在: ${targetName}`)
+    removeProfile(profilesDir, targetName)
+  }
+
+  createProfile(profilesDir, targetName, {
+    bundles: Array.isArray(pkg.bundles) ? pkg.bundles : ['@deepseek-ai/dsh-base', '@deepseek-ai/dsh-web-app'],
+    dependencies: pkg.dependencies && typeof pkg.dependencies === 'object' ? pkg.dependencies : {},
+  })
+
+  // 写入 patchYaml
+  if (typeof pkg.patchYaml === 'string' && pkg.patchYaml.trim()) {
+    writeFileSync(join(dir, 'cordis.patch.yml'), pkg.patchYaml, 'utf8')
+  }
+
+  // 写入 workspaceYaml
+  if (typeof pkg.workspaceYaml === 'string' && pkg.workspaceYaml.trim()) {
+    writeFileSync(join(dir, 'pnpm-workspace.yaml'), pkg.workspaceYaml, 'utf8')
+  }
+
+  invalidateProfileCache(profilesDir)
+  return {
+    dir,
+    profile: targetName,
+    dependenciesCount: Object.keys(pkg.dependencies || {}).length,
+  }
+}
+
 export { scanProfiles, findProfile }
+

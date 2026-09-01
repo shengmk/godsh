@@ -4,6 +4,7 @@ import type { Allocation, AvailablePlugin, MarketCategory, ProfileView } from '.
 import { ContextMenu, Toast, type MenuState } from '../components'
 import { useToast } from '../hooks'
 import { useI18n } from '../i18n'
+import { taskManager } from '../tasks'
 
 /** 统一列表条目：已分配卡片 或 可用插件 */
 type ListItem =
@@ -470,50 +471,39 @@ export default function AllocationsPage() {
   const [updatingProfile, setUpdatingProfile] = useState<string | null>(null)
   const [updateLog, setUpdateLog] = useState('')
   const [updateStatus, setUpdateStatus] = useState<'running' | 'done' | 'error'>('running')
-  const updatePoll = useRef<ReturnType<typeof setInterval> | null>(null)
-  const updateTask = useRef<string | null>(null)
+
+  // 监听全局任务中心，若当前环境有更新任务在跑，自动同步进度与日志到本页面板
+  useEffect(() => {
+    return taskManager.subscribe((tasks) => {
+      if (!updatingProfile) return
+      const t = tasks.find((x) => x.profile === updatingProfile && x.type === 'update-all')
+      if (t) {
+        setUpdateLog(t.log)
+        setUpdateStatus(t.status)
+      }
+    })
+  }, [updatingProfile])
 
   async function updateAll(profile: string) {
     if (updatingProfile) return show(`正在更新 ${updatingProfile}，请稍候`, true)
     if (!window.confirm(`确定更新环境 ${profile} 的全部插件？`)) return
-    try {
-      const r = await api.updateAllPlugins(profile)
-      if (!r.task) {
-        show(r.message || '没有可更新的插件')
-        return
-      }
-      updateTask.current = r.task
-      setUpdatingProfile(profile)
-      setUpdateLog('')
-      setUpdateStatus('running')
-      if (updatePoll.current) clearInterval(updatePoll.current)
-      updatePoll.current = setInterval(async () => {
-        if (!updateTask.current) return
-        try {
-          const p = await api.updateAllProgress(profile, updateTask.current)
-          setUpdateLog(p.log)
-          if (p.status !== 'running') {
-            setUpdateStatus(p.status as 'done' | 'error')
-            if (updatePoll.current) clearInterval(updatePoll.current)
-            updatePoll.current = null
-            updateTask.current = null
-            show(p.status === 'done' ? `环境 ${profile} 插件更新完成` : `更新出错：${p.message || ''}`)
-            await refresh()
-          }
-        } catch {
-          /* 轮询失败继续 */
-        }
-      }, 1500)
-    } catch (e) {
-      show(e instanceof Error ? e.message : String(e), true)
+    setUpdatingProfile(profile)
+    setUpdateLog('准备中…\n')
+    setUpdateStatus('running')
+
+    const res = await taskManager.startUpdateAllTask(profile, async (ok) => {
+      show(ok ? `环境 ${profile} 插件更新完成` : `更新出错`)
+      await refresh()
+    })
+
+    if (!res.ok) {
+      setUpdatingProfile(null)
+      show(res.message || '启动更新失败', true)
     }
   }
 
-  /** 关闭进度面板。 */
+  /** 关闭本地进度面板（后台任务仍继续在全局任务中心运行）。 */
   function closeUpdatePanel() {
-    if (updatePoll.current) clearInterval(updatePoll.current)
-    updatePoll.current = null
-    updateTask.current = null
     setUpdatingProfile(null)
   }
 

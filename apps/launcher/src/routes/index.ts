@@ -5,6 +5,7 @@ import { marketHandler } from './market.js'
 import { unifiedKernelHandler, kernelsHandler } from './kernels.js'
 import { dshHandler } from './dsh.js'
 import { settingsHandler } from './settings.js'
+import { workflowsHandler } from './workflows.js'
 
 /** 所有 API 路由处理器（按声明顺序逐个尝试；第一个返回 true 即视为已处理）。 */
 export const routeHandlers: ApiHandler[] = [
@@ -15,4 +16,5 @@ export const routeHandlers: ApiHandler[] = [
   kernelsHandler,
   dshHandler,
   settingsHandler,
+  workflowsHandler,
 ]

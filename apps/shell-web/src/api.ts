@@ -19,6 +19,8 @@ import type {
   ProfileView,
   SettingsInfo,
   UnifiedKernelConfig,
+  ProfilePackage,
+  WorkflowTemplate,
 } from './types'
 
 // 默认同源 /api（Web 模式）；Tauri 模式可设 VITE_API_BASE=http://127.0.0.1:4780/api
@@ -269,4 +271,36 @@ export const api = {
     req<{ ok: boolean; scope: string }>('/reset', { method: 'POST', body: JSON.stringify({ scope }) }),
 
   appUninstall: () => req<{ ok: boolean; path: string }>('/app/uninstall', { method: 'POST' }),
+
+  /** 导出环境完整配置包（Profile Package） */
+  exportProfile: (name: string) =>
+    req<{ package: ProfilePackage }>(`/profiles/${encodeURIComponent(name)}/export`).then((r) => r.package),
+
+  /** 导入环境完整配置包 */
+  importProfile: (body: { targetName?: string; package: ProfilePackage; override?: boolean; installDeps?: boolean }) =>
+    req<{ ok: boolean; profile: string; dependenciesCount: number }>('/profiles/import', {
+      method: 'POST',
+      body: JSON.stringify(body),
+    }),
+
+  /** 获取可用工作流模板列表 */
+  workflows: () => req<{ workflows: WorkflowTemplate[] }>('/workflows').then((r) => r.workflows),
+
+  /** 执行工作流（启动后台任务） */
+  runWorkflow: (body: { workflowId?: string; profile?: string; steps?: unknown[] }) =>
+    req<{ ok: boolean; task: string; title: string }>('/workflows/run', {
+      method: 'POST',
+      body: JSON.stringify(body),
+    }),
+
+  /** 批量规则：环境间一键克隆同步（复制 bundles 与插件分配） */
+  syncProfileAllocations: (fromProfile: string, toProfile: string) =>
+    req<{ ok: boolean; fromProfile: string; toProfile: string; copiedAllocations: number; bundles: number }>(
+      '/allocations/batch-sync',
+      {
+        method: 'POST',
+        body: JSON.stringify({ fromProfile, toProfile }),
+      },
+    ),
 }
+

@@ -3,6 +3,8 @@ import { api } from './api'
 import type { Health, DshStatus, KernelInstance, LocalPlugin, ProfileView } from './types'
 import { useI18n } from './i18n'
 import { useTheme } from './theme'
+import { KeepAlive } from './components'
+import { TaskCenter } from './TaskCenter'
 
 // 按页代码分割：首屏只加载当前页面，其它页面按需加载
 const ControllerConsolePage = lazy(() => import('./pages/ControllerConsolePage'))
@@ -278,17 +280,28 @@ export default function App() {
         </div>
 
         <Suspense fallback={<div className="empty">页面加载中…</div>}>
-          {page === 'console' && <ControllerConsolePage onNavigate={setPage} />}
-          {page === 'profiles' && <ProfilesPage />}
-          {page === 'market' && <MarketPage />}
-          {page === 'allocations' && <AllocationsPage />}
-          {page === 'kernels' && <KernelsPage />}
-          {page === 'dsh-envs' && <DshEnvsPage />}
-          {page === 'settings' && (
-            <SettingsPage locale={locale} changeLocale={changeLocale} theme={theme} changeTheme={changeTheme} onNavigate={setPage} />
-          )}
+          <KeepAlive activeKey={page}>
+            {{
+              console: <ControllerConsolePage onNavigate={setPage} />,
+              profiles: <ProfilesPage />,
+              market: <MarketPage />,
+              allocations: <AllocationsPage />,
+              kernels: <KernelsPage />,
+              'dsh-envs': <DshEnvsPage />,
+              settings: (
+                <SettingsPage
+                  locale={locale}
+                  changeLocale={changeLocale}
+                  theme={theme}
+                  changeTheme={changeTheme}
+                  onNavigate={setPage}
+                />
+              ),
+            }}
+          </KeepAlive>
         </Suspense>
       </main>
+      <TaskCenter />
     </div>
   )
 }

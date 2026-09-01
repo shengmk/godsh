@@ -28,3 +28,17 @@ export interface PatchEntry {
   ids: string[]
   disabledIds: string[]
 }
+
+/** 一键环境配置包格式定义（用于环境备份、分享、导入与快速复现） */
+export interface ProfilePackage {
+  format: 'godsh-profile-package'
+  version: string
+  name: string
+  exportedAt: number
+  description?: string
+  bundles: string[]
+  dependencies: Record<string, string>
+  patchYaml: string
+  workspaceYaml?: string
+}
+

@@ -1,10 +1,11 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { api } from '../api'
-import type { DshInstance, Health, PortInfo, ProfileView } from '../types'
+import type { DshInstance, Health, PortInfo, ProfileView, WorkflowTemplate, ProfilePackage } from '../types'
 import { ConfirmDialog, ContextMenu, ErrorText, Loading, Toast, type MenuState } from '../components'
 import { useToast } from '../hooks'
 import { useI18n } from '../i18n'
 import { isTauri, openDshWeb, openDshDesktop as openDshDesktopFn, openExternal } from '../tauri'
+import { taskManager } from '../tasks'
 
 export default function ProfilesPage() {
   const [health, setHealth] = useState<Health | null>(null)
@@ -27,6 +28,16 @@ export default function ProfilesPage() {
   const [ports, setPorts] = useState<PortInfo[] | null>(null)
   // 每环境自定义启动端口（留空 = 自动找空闲端口）
   const [customPort, setCustomPort] = useState<Record<string, string>>({})
+  // 高级能力：配置化工作流与批量规则
+  const [workflowsModalOpen, setWorkflowsModalOpen] = useState(false)
+  const [wfList, setWfList] = useState<WorkflowTemplate[]>([])
+  const [selectedWfId, setSelectedWfId] = useState<string>('developer-suite')
+  const [wfTargetProfile, setWfTargetProfile] = useState<string>('')
+  const [wfTab, setWfTab] = useState<'workflow' | 'sync'>('workflow')
+  const [syncFromProfile, setSyncFromProfile] = useState<string>('')
+  const [syncToProfile, setSyncToProfile] = useState<string>('')
+  const [wfSubmitting, setWfSubmitting] = useState(false)
+  const importInputRef = useRef<HTMLInputElement | null>(null)
   const logRef = useRef<HTMLDivElement | null>(null)
   const { toast, show } = useToast()
   const { t } = useI18n()
@@ -184,6 +195,103 @@ export default function ProfilesPage() {
 
 
 
+  /** 导出环境完整配置包（JSON） */
+  async function exportEnv(name: string) {
+    try {
+      const pkg = await api.exportProfile(name)
+      const blob = new Blob([JSON.stringify(pkg, null, 2)], { type: 'application/json' })
+      const url = URL.createObjectURL(blob)
+      const a = document.createElement('a')
+      a.href = url
+      a.download = `godsh-env-${name}-${new Date().toISOString().slice(0, 10)}.json`
+      a.click()
+      URL.revokeObjectURL(url)
+      show(`已导出环境包：${name}`)
+    } catch (e) {
+      show(e instanceof Error ? e.message : String(e), true)
+    }
+  }
+
+  /** 从本地 JSON 文件导入环境包 */
+  async function handleImportFile(file: File) {
+    try {
+      const text = await file.text()
+      const pkg = JSON.parse(text) as ProfilePackage
+      if (!pkg || typeof pkg !== 'object' || !pkg.name) {
+        show('非法环境包文件：缺少必要字段', true)
+        return
+      }
+      const targetName = window.prompt(`请输入导入后的环境名（原环境名：${pkg.name}）：`, pkg.name)
+      if (!targetName) return
+      const res = await api.importProfile({ targetName: targetName.trim(), package: pkg })
+      show(`已成功导入环境 ${res.profile}${res.dependenciesCount ? `（正在准备 ${res.dependenciesCount} 个依赖）` : ''}`)
+      await load()
+    } catch (e) {
+      show(e instanceof Error ? e.message : String(e), true)
+    }
+  }
+
+  /** 加载预设工作流列表 */
+  async function openWorkflowsModal() {
+    setWorkflowsModalOpen(true)
+    try {
+      const list = await api.workflows()
+      setWfList(list)
+      if (list.length > 0 && !selectedWfId) {
+        setSelectedWfId(list[0]!.id)
+        setWfTargetProfile(list[0]!.recommendedProfile)
+      }
+      if (profiles && profiles.length > 0) {
+        if (!syncFromProfile) setSyncFromProfile(profiles[0]!.name)
+        if (!syncToProfile && profiles.length > 1) setSyncToProfile(profiles[1]!.name)
+      }
+    } catch {
+      /* ignore */
+    }
+  }
+
+  /** 触发工作流执行（并在全局任务中心追踪实时日志） */
+  async function handleRunWorkflow() {
+    if (!selectedWfId) return
+    const target = wfTargetProfile.trim() || undefined
+    setWfSubmitting(true)
+    try {
+      const res = await api.runWorkflow({ workflowId: selectedWfId, profile: target })
+      taskManager.addTask({
+        id: res.task,
+        type: 'workflow',
+        title: res.title,
+        status: 'running',
+        log: '工作流开始执行…\n',
+      })
+      show(`已触发工作流：${res.title}，可在全局任务中心查看进度`)
+      setWorkflowsModalOpen(false)
+      setTimeout(load, 2000)
+    } catch (e) {
+      show(e instanceof Error ? e.message : String(e), true)
+    } finally {
+      setWfSubmitting(false)
+    }
+  }
+
+  /** 批量规则：环境间克隆同步 */
+  async function handleBatchSync() {
+    if (!syncFromProfile || !syncToProfile) return show('请选择源环境与目标环境', true)
+    if (syncFromProfile === syncToProfile) return show('源环境与目标环境不能相同', true)
+    if (!window.confirm(`确定将环境 ${syncFromProfile} 的全部 bundles 与插件分配规则同步到 ${syncToProfile}？`)) return
+    setWfSubmitting(true)
+    try {
+      const r = await api.syncProfileAllocations(syncFromProfile, syncToProfile)
+      show(`成功克隆！已同步 ${r.copiedAllocations} 项分配到 ${r.toProfile}`)
+      setWorkflowsModalOpen(false)
+      await load()
+    } catch (e) {
+      show(e instanceof Error ? e.message : String(e), true)
+    } finally {
+      setWfSubmitting(false)
+    }
+  }
+
   function viewLog(name: string) {
     if (logFor === name) {
       setLogFor(null)
@@ -230,6 +338,8 @@ export default function ProfilesPage() {
         { separator: true, label: '', onClick: () => {} },
         p.port ? { label: `复制端口 ${p.port}`, onClick: () => void copy(String(p.port), '端口') } : { label: '复制端口', disabled: true, onClick: () => {} },
         p.url ? { label: '复制地址', onClick: () => void copy(p.url!, '地址') } : { label: '复制地址', disabled: true, onClick: () => {} },
+        { separator: true, label: '', onClick: () => {} },
+        { label: '📤 导出环境包 (JSON)', onClick: () => void exportEnv(p.name) },
         { separator: true, label: '', onClick: () => {} },
         { label: '删除环境', onClick: () => setDeleteTarget({ name: p.name }), danger: true, disabled: p.running },
       ],
@@ -443,9 +553,34 @@ export default function ProfilesPage() {
         <button className="btn sm" onClick={() => void load()}>
           {t('btn.refresh')}
         </button>
+        <button
+          className="btn sm"
+          onClick={() => importInputRef.current?.click()}
+          title="从 JSON 环境配置包一键导入新环境"
+        >
+          📥 导入环境包
+        </button>
+        <button
+          className="btn sm"
+          onClick={() => void openWorkflowsModal()}
+          title="打开配置化工作流与批量规则面板"
+        >
+          ⚡ 工作流 / 规则
+        </button>
         <button className="btn sm" onClick={() => void togglePorts()} title="查看当前运行端口与占用进程">
           🖧 端口
         </button>
+        <input
+          type="file"
+          ref={importInputRef}
+          style={{ display: 'none' }}
+          accept=".json"
+          onChange={(e) => {
+            const f = e.target.files?.[0]
+            if (f) void handleImportFile(f)
+            e.target.value = ''
+          }}
+        />
       </div>
 
       {showPorts && (
@@ -647,6 +782,119 @@ export default function ProfilesPage() {
           onConfirm={() => void confirmDeleteBatch(deleteTarget.names!)}
           onCancel={() => setDeleteTarget(null)}
         />
+      )}
+
+      {/* 工作流与批量规则模态框 */}
+      {workflowsModalOpen && (
+        <div className="modal-overlay" onClick={() => setWorkflowsModalOpen(false)}>
+          <div className="modal glass" style={{ maxWidth: 520 }} onClick={(e) => e.stopPropagation()}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 14 }}>
+              <h3 className="modal-title" style={{ margin: 0 }}>⚡ 工作流与批量规则</h3>
+              <button className="btn sm" onClick={() => setWorkflowsModalOpen(false)}>✕</button>
+            </div>
+
+            <div style={{ display: 'flex', gap: 8, marginBottom: 16 }}>
+              <button
+                className={`btn sm ${wfTab === 'workflow' ? 'primary' : ''}`}
+                onClick={() => setWfTab('workflow')}
+              >
+                内置工作流
+              </button>
+              <button
+                className={`btn sm ${wfTab === 'sync' ? 'primary' : ''}`}
+                onClick={() => setWfTab('sync')}
+              >
+                环境克隆与规则同步
+              </button>
+            </div>
+
+            {wfTab === 'workflow' ? (
+              <div>
+                <label className="field-label">选择工作流模板：</label>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginTop: 6, marginBottom: 14 }}>
+                  {wfList.map((w) => (
+                    <div
+                      key={w.id}
+                      className={`card ${selectedWfId === w.id ? 'selected' : ''}`}
+                      style={{
+                        padding: 10,
+                        cursor: 'pointer',
+                        borderColor: selectedWfId === w.id ? 'var(--brand-1)' : undefined,
+                      }}
+                      onClick={() => {
+                        setSelectedWfId(w.id)
+                        if (!wfTargetProfile) setWfTargetProfile(w.recommendedProfile)
+                      }}
+                    >
+                      <div style={{ fontWeight: 600, fontSize: 13 }}>{w.name}</div>
+                      <div className="muted" style={{ fontSize: 12, marginTop: 2 }}>{w.desc}</div>
+                    </div>
+                  ))}
+                </div>
+
+                <label className="field-label">目标环境名（留空使用默认）：</label>
+                <input
+                  className="input"
+                  style={{ width: '100%', marginTop: 4, marginBottom: 16 }}
+                  placeholder="目标环境名（如 dev-workspace）"
+                  value={wfTargetProfile}
+                  onChange={(e) => setWfTargetProfile(e.target.value)}
+                />
+
+                <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
+                  <button className="btn" onClick={() => setWorkflowsModalOpen(false)}>取消</button>
+                  <button
+                    className="btn primary"
+                    disabled={wfSubmitting}
+                    onClick={() => void handleRunWorkflow()}
+                  >
+                    {wfSubmitting ? '启动中…' : '▶ 执行工作流'}
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <div>
+                <p className="muted" style={{ fontSize: 13, marginBottom: 14 }}>
+                  将源环境的所有 bundles 列表与插件分配规则 1:1 克隆并应用到目标环境。
+                </p>
+                <label className="field-label">源环境（被复制）：</label>
+                <select
+                  className="input"
+                  style={{ width: '100%', marginTop: 4, marginBottom: 12 }}
+                  value={syncFromProfile}
+                  onChange={(e) => setSyncFromProfile(e.target.value)}
+                >
+                  {(profiles ?? []).map((p) => (
+                    <option key={p.name} value={p.name}>{p.name}</option>
+                  ))}
+                </select>
+
+                <label className="field-label">目标环境（接受同步）：</label>
+                <select
+                  className="input"
+                  style={{ width: '100%', marginTop: 4, marginBottom: 16 }}
+                  value={syncToProfile}
+                  onChange={(e) => setSyncToProfile(e.target.value)}
+                >
+                  {(profiles ?? []).map((p) => (
+                    <option key={p.name} value={p.name}>{p.name}</option>
+                  ))}
+                </select>
+
+                <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
+                  <button className="btn" onClick={() => setWorkflowsModalOpen(false)}>取消</button>
+                  <button
+                    className="btn primary"
+                    disabled={wfSubmitting || !syncFromProfile || !syncToProfile || syncFromProfile === syncToProfile}
+                    onClick={() => void handleBatchSync()}
+                  >
+                    {wfSubmitting ? '同步中…' : '⚡ 开始同步克隆'}
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
       )}
 
       {toast && <Toast text={toast.text} error={toast.error} />}

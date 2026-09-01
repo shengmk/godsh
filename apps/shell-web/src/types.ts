@@ -236,3 +236,23 @@ export interface DshEnvsInfo {
   byProfile: Record<string, string>
   tasks: InstallTask[]
 }
+
+export interface ProfilePackage {
+  format: 'godsh-profile-package'
+  version: string
+  name: string
+  exportedAt: number
+  description?: string
+  bundles: string[]
+  dependencies: Record<string, string>
+  patchYaml: string
+  workspaceYaml?: string
+}
+
+export interface WorkflowTemplate {
+  id: string
+  name: string
+  desc: string
+  recommendedProfile: string
+}
+

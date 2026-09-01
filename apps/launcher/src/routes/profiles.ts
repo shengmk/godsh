@@ -1,7 +1,8 @@
 import { join } from 'node:path'
 import { mkdirSync, readFileSync, writeFileSync, existsSync } from 'node:fs'
 import { readLogTail, spawnWebProfile, stopWeb, waitForPort, isPortListening, findPidByPort, findProcessName, invalidatePortProbe, ensureProfileBundles, ensureCacheIntegrity, killAllProfileProcesses } from '@godsh/core'
-import { createProfile, removeProfile, scanProfiles, setProfileBundles } from '@godsh/profile-manager'
+import { createProfile, removeProfile, scanProfiles, setProfileBundles, exportProfilePackage, importProfilePackage, type ProfilePackage } from '@godsh/profile-manager'
+import { run } from '@godsh/core'
 import { pluginAction, PLUGIN_ACTION_TIMEOUT_MS, resolveInstallArg } from '@godsh/marketplace'
 import type { ApiHandler, RouteContext, RuntimeProc } from './types.js'
 
@@ -186,6 +187,44 @@ export const profilesHandler: ApiHandler = async (ctx, _req, res, method, seg, b
     try {
       const dir = createProfile(profilesDir, name)
       ctx.sendJson(res, 201, { profile: name, dir })
+    } catch (err) {
+      ctx.sendJson(res, 409, { error: err instanceof Error ? err.message : String(err) })
+    }
+    return true
+  }
+
+  // GET /api/profiles/:name/export —— 导出环境为独立完整配置包（JSON）
+  if (seg.length === 3 && seg[0] === 'profiles' && seg[2] === 'export' && method === 'GET') {
+    const name = decodeURIComponent(seg[1] ?? '')
+    try {
+      const pkg = exportProfilePackage(profilesDir, name)
+      ctx.sendJson(res, 200, { package: pkg })
+    } catch (err) {
+      ctx.sendJson(res, 404, { error: err instanceof Error ? err.message : String(err) })
+    }
+    return true
+  }
+
+  // POST /api/profiles/import  { targetName?, package, override?, installDeps? } —— 导入环境配置包
+  if (seg.length === 2 && seg[0] === 'profiles' && seg[1] === 'import' && method === 'POST') {
+    const pkg = body.package as ProfilePackage | undefined
+    if (!pkg || typeof pkg !== 'object' || !pkg.name) {
+      ctx.sendJson(res, 400, { error: 'body 需要包含合法的 { package } 环境包对象' })
+      return true
+    }
+    const targetName = (typeof body.targetName === 'string' && body.targetName.trim()) ? body.targetName.trim() : pkg.name
+    if (!/^[a-zA-Z0-9_-]{1,64}$/.test(targetName)) {
+      ctx.sendJson(res, 400, { error: '目标环境名只能含字母/数字/-/_（≤64）' })
+      return true
+    }
+    try {
+      const resImport = importProfilePackage(profilesDir, targetName, pkg, Boolean(body.override))
+      // 若包含依赖且未禁止自动安装，后台执行 pnpm install
+      if (resImport.dependenciesCount > 0 && body.installDeps !== false) {
+        const profileDir = resImport.dir
+        void run('pnpm', ['install'], { cwd: profileDir })
+      }
+      ctx.sendJson(res, 201, { ok: true, profile: targetName, dependenciesCount: resImport.dependenciesCount })
     } catch (err) {
       ctx.sendJson(res, 409, { error: err instanceof Error ? err.message : String(err) })
     }

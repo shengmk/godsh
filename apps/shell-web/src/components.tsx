@@ -138,3 +138,47 @@ export function ContextMenu({ menu, onClose }: { menu: MenuState; onClose: () =>
     </div>
   )
 }
+
+/**
+ * 轻量 KeepAlive 容器：
+ * 将已访问过的页面常驻挂载于 DOM 中，切换页面时仅切换 display 显隐。
+ * 彻底解决换页重新加载、输入框草稿丢失、更新进度窗口丢失、滚动重置等问题。
+ */
+export function KeepAlive({
+  activeKey,
+  children,
+}: {
+  activeKey: string
+  children: Record<string, React.ReactNode>
+}) {
+  const [mounted, setMounted] = useState<Set<string>>(() => new Set([activeKey]))
+
+  useEffect(() => {
+    setMounted((prev) => {
+      if (prev.has(activeKey)) return prev
+      const next = new Set(prev)
+      next.add(activeKey)
+      return next
+    })
+  }, [activeKey])
+
+  return (
+    <>
+      {Array.from(mounted).map((key) => {
+        const child = children[key]
+        if (!child) return null
+        const isActive = key === activeKey
+        return (
+          <div
+            key={key}
+            data-page-container={key}
+            style={{ display: isActive ? 'block' : 'none' }}
+          >
+            {child}
+          </div>
+        )
+      })}
+    </>
+  )
+}
+
