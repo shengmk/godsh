@@ -446,9 +446,13 @@ export default function AllocationsPage() {
     setTooltip(null)
   }
 
+  /** 官方内核 bundle：由 dsh 自动维护，禁止手动更新/卸载。 */
+  const OFFICIAL_BUNDLES = new Set(['@deepseek-ai/dsh-base', '@deepseek-ai/dsh-web-app', '@deepseek-ai/dsh-headless'])
+  const isOfficialBundle = (id: string) => OFFICIAL_BUNDLES.has(id)
+
   /** 更新单个插件（分配页每行）。 */
   async function updatePlugin(a: Allocation) {
-    if (a.pluginId === '@deepseek-ai/dsh-base' || a.pluginId === '@deepseek-ai/dsh-web-app') {
+    if (isOfficialBundle(a.pluginId)) {
       show('官方内核 bundle 由 dsh 自动维护，无需手动更新', true)
       return
     }
@@ -527,6 +531,10 @@ export default function AllocationsPage() {
   async function uninstall(a: Allocation) {
     if (a.pluginId === '@deepseek-ai/dsh-base') {
       show('dsh-base 是核心内核 bundle，不能卸载（环境依赖它才能启动）', true)
+      return
+    }
+    if (a.pluginId === '@deepseek-ai/dsh-headless') {
+      show('dsh-headless 是官方内核 bundle，不能卸载', true)
       return
     }
     const isWebApp = a.pluginId === '@deepseek-ai/dsh-web-app'

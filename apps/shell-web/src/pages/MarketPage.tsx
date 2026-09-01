@@ -113,14 +113,11 @@ export default function MarketPage() {
   const { toast, show } = useToast()
   const { t } = useI18n()
 
-  // 当前 Profile 已安装的插件清单（dependencies ∪ bundles）
+  // 当前 Profile 已安装的插件清单（dependencies ∪ bundles；切 profile 时权威替换，避免残留）
   useEffect(() => {
     api
       .profilePlugins(profile)
-      .then((r) => setInstalledNames((prev) => {
-        const merged = new Set([...(prev ?? []), ...(r.installedNames ?? [])])
-        return [...merged]
-      }))
+      .then((r) => setInstalledNames(r.installedNames ?? []))
       .catch(() => {})
   }, [profile])
 
@@ -243,18 +240,13 @@ export default function MarketPage() {
   }
 
   /**
-   * 刷新已安装状态：合并策略 —— 新结果与当前已装列表取并集（只增不清）。
-   * 避免因请求时序/返回空数组导致「已安装」状态闪烁为「未安装」；
-   * 卸载成功后调用 removeInstalled 明确移除对应包。
+   * 刷新已安装状态：以后端返回为权威（直接替换，避免并集残留已卸载插件）。
+   * 卸载成功后调用 dropInstalled 立即本地移除，再 refresh 对齐。
    */
   async function refreshInstalled() {
     try {
       const r = await api.profilePlugins(profile)
-      const fresh = r.installedNames ?? []
-      setInstalledNames((prev) => {
-        const merged = new Set([...(prev ?? []), ...fresh])
-        return [...merged]
-      })
+      setInstalledNames(r.installedNames ?? [])
     } catch {
       /* 忽略（保留当前状态） */
     }
@@ -316,6 +308,27 @@ export default function MarketPage() {
     await refreshInstalled()
     setSelected(new Set())
     show(failedCount > 0 ? `批量安装完成：${pkgs.length - failedCount} 成功，${failedCount} 失败（见进度面板）` : `批量安装完成：${pkgs.length} 个全部成功`)
+  }
+
+  /** 重试队列中单个失败的安装项。 */
+  async function retryQueueItem(index: number) {
+    if (!queue || !queue[index]) return
+    const item = queue[index]!
+    if (!profile) return show('请先选择目标 Profile', true)
+    setQueue((prev) => (prev ? prev.map((q, idx) => (idx === index ? { ...q, status: 'installing' as const, error: undefined } : q)) : prev))
+    try {
+      const r = await api.installPlugin(profile, 'add', item.pkg, item.pkg)
+      setQueue((prev) =>
+        prev
+          ? prev.map((q, idx) => (idx === index ? { ...q, status: r.ok ? ('done' as const) : ('error' as const), error: r.ok ? undefined : errorLabel(r) } : q))
+          : prev,
+      )
+      show(r.ok ? `已重试安装 ${item.pkg}` : `重试失败：${errorLabel(r)}`, !r.ok)
+      if (r.ok) await refreshInstalled()
+    } catch (e) {
+      setQueue((prev) => (prev ? prev.map((q, idx) => (idx === index ? { ...q, status: 'error' as const, error: e instanceof Error ? e.message : String(e) } : q)) : prev))
+      show(`重试失败：${e instanceof Error ? e.message : String(e)}`, true)
+    }
   }
 
   const selectedCount = selected.size
@@ -481,6 +494,15 @@ export default function MarketPage() {
                       {q.status === 'done' && '完成'}
                       {q.status === 'error' && (q.error ?? '安装失败')}
                     </span>
+                    {q.status === 'error' && queueDone && (
+                      <button
+                        className="btn sm"
+                        onClick={() => void retryQueueItem(i)}
+                        title="重试安装此插件"
+                      >
+                        重试
+                      </button>
+                    )}
                   </div>
                 ))}
               </div>
