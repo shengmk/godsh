@@ -35,11 +35,33 @@ async function main() {
     'X-GitHub-Api-Version': '2022-11-28',
   };
 
-  // 1) 找 Release
+  // 1) 找 Release（不存在则创建）
+  let rel;
   const relRes = await fetch(`https://api.github.com/repos/${REPO}/releases/tags/${TAG}`, { headers });
-  if (!relRes.ok) { console.error(`获取 Release 失败: ${relRes.status} ${await relRes.text()}`); process.exit(1); }
-  const rel = await relRes.json();
-  console.log(`找到 Release: ${rel.name} (id=${rel.id})`);
+  if (!relRes.ok && relRes.status === 404) {
+    const bodyContent = bodyFile ? fs.readFileSync(bodyFile, 'utf8') : '';
+    const createRes = await fetch(`https://api.github.com/repos/${REPO}/releases`, {
+      method: 'POST',
+      headers: { ...headers, 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        tag_name: TAG,
+        name: `godsh ${TAG}`,
+        body: bodyContent,
+      }),
+    });
+    if (!createRes.ok) {
+      console.error(`创建 Release 失败: ${createRes.status} ${await createRes.text()}`);
+      process.exit(1);
+    }
+    rel = await createRes.json();
+    console.log(`已创建 Release: ${rel.name} (id=${rel.id})`);
+  } else if (!relRes.ok) {
+    console.error(`获取 Release 失败: ${relRes.status} ${await relRes.text()}`);
+    process.exit(1);
+  } else {
+    rel = await relRes.json();
+    console.log(`找到 Release: ${rel.name} (id=${rel.id})`);
+  }
 
   // 2) 更新 body
   if (bodyFile) {
