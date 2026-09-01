@@ -1,6 +1,7 @@
 import http from 'node:http'
 import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from 'node:fs'
 import { extname, join } from 'node:path'
+import { gzipSync } from 'node:zlib'
 import { MONOREPO_ROOT, DATA_DIR, findPidByPort, isPortListening, readLogTail, ensureDshBundles, ensureCacheIntegrity } from '@godsh/core'
 import { fetchMarketIndex } from '@godsh/marketplace'
 import { scanProfiles, ensureProfileWorkspace, ensureProfilePatches } from '@godsh/profile-manager'
@@ -297,6 +298,8 @@ export async function startApiServer(ctx: CliContext, opts: ApiServerOptions): P
   const allowedOriginsRef: { value: string[] } = { value: config.allowedOrigins ?? [] }
   // 当前请求的 Origin（每个请求开始时设置，供 sendJson/OPTIONS 动态匹配 CORS）
   const reqOriginRef: { value: string | null } = { value: null }
+  // 当前请求是否支持 gzip（每个请求开始时设置，供 sendJson 压缩大 JSON）
+  const reqGzipRef: { value: boolean } = { value: false }
 
   /** 路由共享上下文（不可变装配，运行态通过 Map/引用对象共享）。 */
   const routeCtx: RouteContext = {
@@ -322,6 +325,18 @@ export async function startApiServer(ctx: CliContext, opts: ApiServerOptions): P
     },
     sendJson(res, status, data) {
       const body = JSON.stringify(data)
+      // JSON 响应 gzip：市场索引等大数据体（2.3MB → ~400KB）传输大幅降低
+      if (reqGzipRef.value && body.length > 1024) {
+        const gz = gzipSync(body)
+        res.writeHead(status, {
+          'Content-Type': 'application/json; charset=utf-8',
+          'Content-Encoding': 'gzip',
+          ...corsHeaders(allowedOriginsRef.value, reqOriginRef.value),
+          ...securityHeaders(),
+        })
+        res.end(gz)
+        return
+      }
       res.writeHead(status, {
         'Content-Type': 'application/json; charset=utf-8',
         ...corsHeaders(allowedOriginsRef.value, reqOriginRef.value),
@@ -355,6 +370,8 @@ export async function startApiServer(ctx: CliContext, opts: ApiServerOptions): P
     const method = req.method ?? 'GET'
     // 记录当前请求的 Origin（跨域 CORS 匹配用）
     reqOriginRef.value = req.headers.origin ?? null
+    // 记录当前请求是否支持 gzip（JSON 大响应压缩用）
+    reqGzipRef.value = ((req.headers['accept-encoding'] as string | undefined) ?? '').includes('gzip')
 
     // CORS 预检（Origin 在白名单内才放行；同源请求无 Origin 头，直接 204）
     if (method === 'OPTIONS') {
@@ -396,6 +413,9 @@ export async function startApiServer(ctx: CliContext, opts: ApiServerOptions): P
     await serveStatic(res, pathname)
   })
 
+  // 静态资源内存缓存：文件内容 + gzip 压缩版 + mtime（避免每次请求 readFileSync 读盘）
+  const staticCache = new Map<string, { raw: Buffer; gz: Buffer; mtimeMs: number; type: string }>()
+
   async function serveStatic(res: http.ServerResponse, pathname: string): Promise<void> {
     const distDir = join(MONOREPO_ROOT, 'apps', 'shell-web', 'dist')
     let filePath = join(distDir, pathname === '/' ? 'index.html' : pathname)
@@ -408,9 +428,33 @@ export async function startApiServer(ctx: CliContext, opts: ApiServerOptions): P
       res.end('godsh API 服务运行中。前端尚未构建：请在 apps/shell-web 运行 pnpm build。\n')
       return
     }
+    const st = statSync(filePath)
     const ext = extname(filePath).toLowerCase()
-    res.writeHead(200, { 'Content-Type': MIME[ext] ?? 'application/octet-stream', ...securityHeaders() })
-    res.end(readFileSync(filePath))
+    let entry = staticCache.get(filePath)
+    // 文件变更（重新构建）时失效缓存
+    if (!entry || entry.mtimeMs !== st.mtimeMs) {
+      const raw = readFileSync(filePath)
+      entry = { raw, gz: gzipSync(raw), mtimeMs: st.mtimeMs, type: MIME[ext] ?? 'application/octet-stream' }
+      staticCache.set(filePath, entry)
+      // 控制缓存体积（防构建次数过多导致内存膨胀）
+      if (staticCache.size > 200) {
+        const first = staticCache.keys().next().value
+        if (first !== undefined) staticCache.delete(first)
+      }
+    }
+    const useGzip = reqGzipRef.value
+    const body = useGzip ? entry.gz : entry.raw
+    // 带内容 hash 的资源可长缓存；index.html 用 no-cache（随构建更新）
+    const isHashed = /[a-zA-Z0-9_-]{8,}\.(js|css)$/.test(pathname)
+    const headers: Record<string, string> = {
+      'Content-Type': entry.type,
+      ...securityHeaders(),
+    }
+    if (useGzip) headers['Content-Encoding'] = 'gzip'
+    if (isHashed) headers['Cache-Control'] = 'public, max-age=31536000, immutable'
+    else headers['Cache-Control'] = 'no-cache'
+    res.writeHead(200, headers)
+    res.end(body)
   }
 
   await new Promise<void>((resolve) => server.listen(opts.port, opts.host ?? '127.0.0.1', resolve))

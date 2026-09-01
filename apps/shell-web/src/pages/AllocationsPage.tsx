@@ -65,6 +65,17 @@ export default function AllocationsPage() {
     }
   }
 
+  /** 轻量刷新：操作后只重拉分配与可分配清单（profiles/分类几乎不变，避免重复传输）。 */
+  async function refresh() {
+    try {
+      const [a, av] = await Promise.all([api.allocations(), api.allocationsAvailable()])
+      setAllocations(a)
+      setAvailable(av)
+    } catch (e) {
+      show(e instanceof Error ? e.message : String(e), true)
+    }
+  }
+
   useEffect(() => {
     void load()
   }, [])
@@ -122,7 +133,7 @@ export default function AllocationsPage() {
     try {
       const r = await api.assignCategory(profile, category)
       show(`已分配 ${r.assigned} 个 ${zh} 插件到 ${profile}${r.skipped ? `（${r.skipped} 个已分配过）` : ''}`)
-      await load()
+      await refresh()
     } catch (e) {
       show(e instanceof Error ? e.message : String(e), true)
     }
@@ -186,11 +197,11 @@ export default function AllocationsPage() {
         const r = await api.moveWithInstall(pluginId, targetProfile, fromProfile)
         if (r.ok) {
           show(`已把 ${pluginId} 复制到 ${targetProfile}${r.installed ? '' : '（已自动安装）'}`)
-          await load()
+          await refresh()
         }
       } catch (e) {
         show(e instanceof Error ? e.message : String(e), true)
-        await load()
+        await refresh()
       }
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -215,11 +226,11 @@ export default function AllocationsPage() {
         if (!availItem || availItem.kind !== 'avail') return
         try {
           await api.allocate(profile, availItem.avail.pluginId, availItem.avail.pluginId, true)
-          await load()
+          await refresh()
           show(`已分配 ${availItem.avail.pluginId} → ${profile}`)
         } catch (e) {
           show(e instanceof Error ? e.message : String(e), true)
-          await load()
+          await refresh()
         }
         return
       }
@@ -259,7 +270,7 @@ export default function AllocationsPage() {
         await api.reorderAllocations(profile, allocIds)
       } catch (e) {
         show(e instanceof Error ? e.message : String(e), true)
-        await load()
+        await refresh()
       }
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -365,7 +376,7 @@ export default function AllocationsPage() {
       await api.reorderAllocations(a.profile, ids)
     } catch (e) {
       show(e instanceof Error ? e.message : String(e), true)
-      await load()
+      await refresh()
     }
   }
 
@@ -403,7 +414,7 @@ export default function AllocationsPage() {
   async function toggle(a: Allocation) {
     try {
       await api.setEnabled(a.id, !a.enabled)
-      await load()
+      await refresh()
     } catch (e) {
       show(e instanceof Error ? e.message : String(e), true)
     }
@@ -414,10 +425,10 @@ export default function AllocationsPage() {
     try {
       await api.allocate(profile, pluginId, pluginId, true)
       show(`已分配 ${pluginId} → ${profile}`)
-      await load()
+      await refresh()
     } catch (e) {
       show(e instanceof Error ? e.message : String(e), true)
-      await load()
+      await refresh()
     }
   }
 
@@ -445,7 +456,7 @@ export default function AllocationsPage() {
       const r = await api.installPlugin(a.profile, 'update', a.pluginId)
       if (r.ok) show(`已更新 ${a.pluginId}`)
       else show(r.message || `更新失败（${r.errorType ?? 'unknown'}）`, true)
-      await load()
+      await refresh()
     } catch (e) {
       show(e instanceof Error ? e.message : String(e), true)
     }
@@ -483,7 +494,7 @@ export default function AllocationsPage() {
             updatePoll.current = null
             updateTask.current = null
             show(p.status === 'done' ? `环境 ${profile} 插件更新完成` : `更新出错：${p.message || ''}`)
-            await load()
+            await refresh()
           }
         } catch {
           /* 轮询失败继续 */
@@ -506,7 +517,7 @@ export default function AllocationsPage() {
     try {
       await api.removeAllocation(a.id)
       show(`已移除 ${a.pluginId}`)
-      await load()
+      await refresh()
     } catch (e) {
       show(e instanceof Error ? e.message : String(e), true)
     }
@@ -536,7 +547,7 @@ export default function AllocationsPage() {
         /* 分配可能已被其它操作移除 */
       }
       show(`已卸载 ${a.pluginId} ← ${a.profile}`)
-      await load()
+      await refresh()
     } catch (e) {
       show(e instanceof Error ? e.message : String(e), true)
     }

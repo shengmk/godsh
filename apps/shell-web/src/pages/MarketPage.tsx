@@ -103,6 +103,7 @@ export default function MarketPage() {
   const [installedNames, setInstalledNames] = useState<string[]>([])
   const [installing, setInstalling] = useState<string | null>(null)
   const [sortBy, setSortBy] = useState<SortBy>('default')
+  const [category, setCategory] = useState('') // '' = 全部
   const [selected, setSelected] = useState<Set<string>>(new Set())
   const [queue, setQueue] = useState<QueueItem[] | null>(null)
   const [queueDone, setQueueDone] = useState(false)
@@ -137,41 +138,53 @@ export default function MarketPage() {
       .catch((e) => show(e instanceof Error ? e.message : String(e), true))
   }, [])
 
-  useEffect(() => {
-    const t = setTimeout(() => {
-      setVisibleCount(PAGE_STEP)
-      api
-        .market(query)
-        .then(setPlugins)
-        .catch((e) => show(e instanceof Error ? e.message : String(e), true))
-    }, 300)
-    return () => clearTimeout(t)
-  }, [query])
-
-  // 排序切换时重置分批
-  useEffect(() => {
-    setVisibleCount(PAGE_STEP)
-  }, [sortBy])
-
-  // 排序：热门（下载量降序）/ 最新（更新时间或创建时间降序）/ 默认
-  const sortedPlugins = useMemo(() => {
-    const list = [...(plugins ?? [])]
+  // 搜索/分类/排序全部前端内存完成（市场数据已一次加载，零网络请求）
+  const filteredPlugins = useMemo(() => {
+    const list = plugins ?? []
+    const q = query.trim().toLowerCase()
+    let out = list
+    if (q) {
+      out = out.filter(
+        (p) =>
+          (p.name ?? '').toLowerCase().includes(q) ||
+          (p.npm ?? '').toLowerCase().includes(q) ||
+          desc(p).toLowerCase().includes(q),
+      )
+    }
+    if (category) {
+      out = out.filter((p) => (p.category as string | undefined) === category)
+    }
     if (sortBy === 'hot') {
-      list.sort((a, b) => {
+      out = [...out].sort((a, b) => {
         const da = Number(a.downloads ?? a.downloadCount ?? 0)
         const db = Number(b.downloads ?? b.downloadCount ?? 0)
         return db - da || Number(b.stars ?? 0) - Number(a.stars ?? 0)
       })
     } else if (sortBy === 'latest') {
-      list.sort((a, b) => {
+      out = [...out].sort((a, b) => {
         const ta = new Date((a.updatedAt ?? a.createdAt) as string | number | Date).getTime()
         const tb = new Date((b.updatedAt ?? b.createdAt) as string | number | Date).getTime()
         if (Number.isFinite(ta) && Number.isFinite(tb)) return tb - ta
         return 0
       })
     }
-    return list
-  }, [plugins, sortBy])
+    return out
+  }, [plugins, query, category, sortBy])
+
+  // 市场分类列表（用于筛选下拉）
+  const categoryOptions = useMemo(() => {
+    const seen = new Map<string, number>()
+    for (const p of plugins ?? []) {
+      const c = p.category as string | undefined
+      if (c) seen.set(c, (seen.get(c) ?? 0) + 1)
+    }
+    return [...seen.entries()].map(([cat, cnt]) => ({ cat, zh: CATEGORY_LABEL[cat] ?? cat, cnt })).sort((a, b) => b.cnt - a.cnt)
+  }, [plugins])
+
+  // 搜索/分类/排序变化时重置分批
+  useEffect(() => {
+    setVisibleCount(PAGE_STEP)
+  }, [query, category, sortBy])
 
   async function install(pkg: string, display: string, marketName?: string) {
     if (!profile) return show('请先选择目标 Profile', true)
@@ -267,7 +280,7 @@ export default function MarketPage() {
     if (selectedNames.length === 0) return show('请先勾选要安装的插件', true)
     if (!profile) return show('请先选择目标 Profile', true)
     // 每个选中项对应的市场插件（解析真实安装参数）
-    const selectedPlugins = sortedPlugins.filter((p) => selected.has(p.name))
+    const selectedPlugins = filteredPlugins.filter((p) => selected.has(p.name))
     const pkgs = selectedPlugins.map((p) => pkgName(p))
     const marketNames = selectedPlugins.map((p) => p.name)
     if (pkgs.length === 0) return show('选中的插件不在当前列表，请重新选择', true)
@@ -330,6 +343,14 @@ export default function MarketPage() {
           value={query}
           onChange={(e) => setQuery(e.target.value)}
         />
+        <select className="select" value={category} onChange={(e) => setCategory(e.target.value)} title="按市场分类筛选">
+          <option value="">全部分类</option>
+          {categoryOptions.map((c) => (
+            <option key={c.cat} value={c.cat}>
+              {c.zh}（{c.cnt}）
+            </option>
+          ))}
+        </select>
         <select className="select" value={sortBy} onChange={(e) => setSortBy(e.target.value as SortBy)} title="排序方式">
           <option value="default">默认排序</option>
           <option value="hot">🔥 热门（下载量）</option>
@@ -347,16 +368,16 @@ export default function MarketPage() {
 
       {plugins === null ? (
         <Loading />
-      ) : sortedPlugins.length === 0 ? (
+      ) : filteredPlugins.length === 0 ? (
         <ErrorText message="没有匹配的插件" />
       ) : (
         <>
           <div className="muted" style={{ marginBottom: 8, fontSize: 12 }}>
-            共 {sortedPlugins.length} 个插件 · 已显示 {Math.min(visibleCount, sortedPlugins.length)} · 可选{' '}
-            {sortedPlugins.filter((p) => !installedNames.includes(pkgName(p))).length} · 已选 {selectedCount}
+            共 {filteredPlugins.length} 个插件 · 已显示 {Math.min(visibleCount, filteredPlugins.length)} · 可选{' '}
+            {filteredPlugins.filter((p) => !installedNames.includes(pkgName(p))).length} · 已选 {selectedCount}
           </div>
           <div className="grid">
-            {sortedPlugins.slice(0, visibleCount).map((p) => {
+            {filteredPlugins.slice(0, visibleCount).map((p) => {
               const pkg = pkgName(p)
               const installed = installedNames.includes(pkg)
               const isSelected = selected.has(p.name)
@@ -419,10 +440,10 @@ export default function MarketPage() {
             })}
           </div>
 
-          {visibleCount < sortedPlugins.length && (
+          {visibleCount < filteredPlugins.length && (
             <div className="row" style={{ marginTop: 14, justifyContent: 'center' }}>
               <button className="btn" onClick={() => setVisibleCount((v) => v + PAGE_STEP)}>
-                加载更多（已显示 {Math.min(visibleCount, sortedPlugins.length)} / {sortedPlugins.length}）
+                加载更多（已显示 {Math.min(visibleCount, filteredPlugins.length)} / {filteredPlugins.length}）
               </button>
             </div>
           )}
