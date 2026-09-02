@@ -13,6 +13,7 @@ export interface RunOptions extends Omit<SpawnOptions, 'shell'> {
   cwd?: string
   timeoutMs?: number
   env?: NodeJS.ProcessEnv
+  onLog?: (chunk: string) => void
 }
 
 const isWindows = process.platform === 'win32'
@@ -62,8 +63,16 @@ export function run(command: string, args: string[] = [], opts: RunOptions = {})
     const child = spawnProcess(command, args, { stdio: ['ignore', 'pipe', 'pipe'], ...opts })
     let stdout = ''
     let stderr = ''
-    child.stdout?.on('data', (d) => (stdout += d.toString()))
-    child.stderr?.on('data', (d) => (stderr += d.toString()))
+    child.stdout?.on('data', (d) => {
+      const s = d.toString()
+      stdout += s
+      opts.onLog?.(s)
+    })
+    child.stderr?.on('data', (d) => {
+      const s = d.toString()
+      stderr += s
+      opts.onLog?.(s)
+    })
     const timer = opts.timeoutMs ? setTimeout(() => child.kill(), opts.timeoutMs) : null
     child.on('error', (err) => {
       if (timer) clearTimeout(timer)

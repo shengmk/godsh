@@ -1,15 +1,17 @@
-﻿import { join } from 'node:path'
+import { join } from 'node:path'
 import { existsSync, readFileSync, writeFileSync } from 'node:fs'
 import { run } from '@godsh/core'
 import { createProfile, scanProfiles, setProfileBundles } from '@godsh/profile-manager'
-import { pluginAction } from '@godsh/marketplace'
+import { pluginAction, resolveInstallArg } from '@godsh/marketplace'
 import type { ApiHandler } from './types.js'
 
 export interface WorkflowStep {
   type: 'create-profile' | 'install-plugin' | 'batch-category' | 'sync-profile' | 'apply-allocation'
   profile?: string
   pkg?: string
+  pkgs?: string[]
   category?: string
+  limit?: number
   fromProfile?: string
   toProfile?: string
 }
@@ -30,8 +32,8 @@ const PRESET_WORKFLOWS: WorkflowTemplate[] = [
     recommendedProfile: 'dev-workspace',
     steps: [
       { type: 'create-profile', profile: 'dev-workspace' },
-      { type: 'batch-category', profile: 'dev-workspace', category: 'dev' },
-      { type: 'batch-category', profile: 'dev-workspace', category: 'utility' },
+      { type: 'batch-category', profile: 'dev-workspace', category: 'dev', limit: 1 },
+      { type: 'batch-category', profile: 'dev-workspace', category: 'tools', limit: 1 },
     ],
   },
   {
@@ -41,8 +43,8 @@ const PRESET_WORKFLOWS: WorkflowTemplate[] = [
     recommendedProfile: 'agent-workspace',
     steps: [
       { type: 'create-profile', profile: 'agent-workspace' },
-      { type: 'batch-category', profile: 'agent-workspace', category: 'memory' },
-      { type: 'batch-category', profile: 'agent-workspace', category: 'session' },
+      { type: 'batch-category', profile: 'agent-workspace', category: 'memory', limit: 1 },
+      { type: 'batch-category', profile: 'agent-workspace', category: 'session', limit: 1 },
     ],
   },
   {
@@ -63,6 +65,18 @@ export const workflowsHandler: ApiHandler = async (ctx, _req, res, method, seg, 
   // GET /api/workflows —— 获取内置与预设工作流模板
   if (seg.length === 1 && seg[0] === 'workflows' && method === 'GET') {
     ctx.sendJson(res, 200, { workflows: PRESET_WORKFLOWS })
+    return true
+  }
+
+  // GET /api/workflows/progress?task=:taskKey —— 轮询工作流任务进度与实时日志
+  if (seg.length === 2 && seg[0] === 'workflows' && seg[1] === 'progress' && method === 'GET') {
+    const task = String(_url.searchParams.get('task') ?? '')
+    const view = task ? ctx.installTaskView(task) : null
+    if (!view) {
+      ctx.sendJson(res, 404, { error: '任务不存在' })
+      return true
+    }
+    ctx.sendJson(res, 200, view)
     return true
   }
 
@@ -120,23 +134,77 @@ export const workflowsHandler: ApiHandler = async (ctx, _req, res, method, seg, 
             const pName = step.profile || targetProfile
             const category = step.category
             if (!pName || !category) throw new Error('缺少 profile 或 category')
-            log(`  正在为 ${pName} 分类分配 [${category}] ...\n`)
-            // 调用已有分类分配逻辑
-            const catRes = await pluginAction(pName, 'add', `@category/${category}`).catch(() => ({ ok: false }))
-            log(`  ✓ 分类 [${category}] 规则已处理\n`)
+            log(`  正在为 ${pName} 检索分类 [${category}] 推荐插件...\n`)
+
+            let matched: Array<{ name: string; npm?: string; install?: string; stars?: number; downloads?: number }> = []
+            try {
+              const market = (await ctx.getMarket()) as Array<{
+                name?: string
+                npm?: string
+                category?: string
+                install?: string
+                stars?: number
+                downloads?: number
+              }>
+              matched = market.filter((p) => p && p.category === category && (p.name || p.npm)) as any
+            } catch {
+              matched = []
+            }
+
+            matched.sort((a, b) => ((b.downloads ?? 0) + (b.stars ?? 0) * 10) - ((a.downloads ?? 0) + (a.stars ?? 0) * 10))
+            const limit = step.limit ?? 1
+            const picked = matched.slice(0, limit)
+
+            if (picked.length === 0) {
+              log(`  ℹ 分类 [${category}] 市场暂无对应插件，跳过安装\n`)
+            } else {
+              const installArgs = picked.map((p) => resolveInstallArg(p)).filter(Boolean) as string[]
+              log(`  ✓ 匹配推荐插件: ${picked.map((p) => p.name).join(', ')}\n`)
+              log(`  正在批量安装到 ${pName} ...\n`)
+              const r = await pluginAction(pName, 'add', installArgs, {
+                onLog: (chunk) => log(chunk),
+              })
+              if (r.ok) {
+                log(`  ✓ 批量安装成功\n`)
+                for (const p of picked) {
+                  const id = p.npm || p.name.split('#')[0]!
+                  allocations.allocate(pName, id, p.name)
+                }
+                ctx.tryApplyAllocation(pName)
+                log(`  ✓ 已自动生效插件分配规则\n`)
+              } else {
+                log(`  ✗ 批量安装未能完全成功: ${r.stderr || r.stdout}\n`)
+              }
+            }
           } else if (step.type === 'install-plugin') {
             const pName = step.profile || targetProfile
-            const pkg = step.pkg
+            const pkg = step.pkg || (step.pkgs && step.pkgs[0])
             if (!pName || !pkg) throw new Error('缺少 profile 或 pkg')
-            log(`  正在安装 ${pkg} 到 ${pName} ...\n`)
-            const r = await pluginAction(pName, 'add', pkg)
-            log(r.ok ? `  ✓ 安装 ${pkg} 成功\n` : `  ✗ 安装 ${pkg} 失败: ${r.stderr || r.stdout}\n`)
+            const pkgList = Array.isArray(step.pkgs) && step.pkgs.length > 0 ? step.pkgs : [pkg]
+            log(`  正在安装 ${pkgList.join(', ')} 到 ${pName} ...\n`)
+            const r = await pluginAction(pName, 'add', pkgList, {
+              onLog: (chunk) => log(chunk),
+            })
+            if (r.ok) {
+              log(`  ✓ 安装成功\n`)
+              for (const k of pkgList) {
+                allocations.allocate(pName, k, k)
+              }
+              ctx.tryApplyAllocation(pName)
+              log(`  ✓ 已自动生效插件分配规则\n`)
+            } else {
+              log(`  ✗ 安装失败: ${r.stderr || r.stdout}\n`)
+            }
           } else if (step.type === 'sync-profile') {
             const fromP = step.fromProfile
             const toP = step.toProfile || targetProfile
             if (!fromP || !toP) throw new Error('缺少 fromProfile 或 toProfile')
             log(`  正在从 ${fromP} 克隆配置到 ${toP} ...\n`)
-            // 复制分配
+            const profiles = scanProfiles(profilesDir)
+            const src = profiles.find((p) => p.name === fromP)
+            if (src && src.bundles) {
+              setProfileBundles(profilesDir, toP, src.bundles)
+            }
             const fromAllocs = allocations.listByProfile(fromP)
             for (const a of fromAllocs) {
               allocations.allocate(toP, a.pluginId, a.pluginName)

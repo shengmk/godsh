@@ -12,21 +12,29 @@ export const PLUGIN_ACTION_TIMEOUT_MS = 180_000
 /** 常见本地代理端口（Clash/v2rayN/系统代理等默认监听）。 */
 const LOCAL_PROXY_PORTS = [7890, 7897, 10809, 10808, 1080, 12450, 8888]
 
+let cachedProxy: { at: number; value: string | null } | null = null
+
 /**
  * 探测可用的本地 HTTP 代理（同步阻塞短超时）。找不到返回 null。
  * 目的：pnpm 安装 github:/http-tgz 源插件时走代理，否则 GitHub 443 被墙导致下载失败。
- * 注：仅当代理真的能访问目标时才返回（端口监听不代表可用，失效代理注入反而坏事）。
+ * 注：仅当代理真的能访问目标时才返回；附带 60s 内存缓存，避免短时间内重复扫描多个端口阻塞进程。
  */
 export function detectLocalProxy(): string | null {
+  if (cachedProxy && Date.now() - cachedProxy.at < 60_000) {
+    return cachedProxy.value
+  }
   // 1) 显式环境变量优先
   const envProxy = process.env.HTTP_PROXY || process.env.http_proxy || process.env.HTTPS_PROXY || process.env.https_proxy
-  if (envProxy) return envProxy
+  if (envProxy) {
+    cachedProxy = { at: Date.now(), value: envProxy }
+    return envProxy
+  }
   // 2) 同步探测常见本地代理端口，并要求能真正访问 github（避免失效代理）
   for (const port of LOCAL_PROXY_PORTS) {
     try {
       const out = execSync(`netstat -ano -p tcp | findstr "127.0.0.1:${port} LISTENING"`, {
         encoding: 'utf8',
-        timeout: 1500,
+        timeout: 1000,
         windowsHide: true,
         stdio: ['ignore', 'pipe', 'ignore'],
       })
@@ -34,10 +42,12 @@ export function detectLocalProxy(): string | null {
       // 连通性验证：走代理访问 github（失败则跳过该端口）
       try {
         execSync(
-          `curl.exe -s -o NUL -w "%{http_code}" --max-time 6 -x http://127.0.0.1:${port} https://github.com 2>NUL | findstr /R "200 301 302 307"`,
-          { timeout: 8000, windowsHide: true, stdio: 'ignore' },
+          `curl.exe -s -o NUL -w "%{http_code}" --max-time 3 -x http://127.0.0.1:${port} https://github.com 2>NUL | findstr /R "200 301 302 307"`,
+          { timeout: 4000, windowsHide: true, stdio: 'ignore' },
         )
-        return `http://127.0.0.1:${port}`
+        const val = `http://127.0.0.1:${port}`
+        cachedProxy = { at: Date.now(), value: val }
+        return val
       } catch {
         /* 该端口无法访问 github，试下一个 */
       }
@@ -45,16 +55,30 @@ export function detectLocalProxy(): string | null {
       /* 继续 */
     }
   }
+  cachedProxy = { at: Date.now(), value: null }
   return null
 }
 
+export interface PluginActionOptions {
+  timeoutMs?: number
+  onLog?: (chunk: string) => void
+}
+
 /**
- * 封装 `dsh plugin --profile <name> <action> <pkg>`，
+ * 封装 `dsh plugin --profile <name> <action> <pkg...>`，
  * 底层由 dsh 转发给 profile 目录中的 pnpm，并自动 reconcile bundles。
- * 默认带超时（避免无限挂起），可通过 timeoutMs 覆盖。
- * 自动注入本地代理环境变量 + 统一 pnpm store-dir（防止多版本 pnpm 的 store 冲突）。
+ * 支持单包或多包批量安装；支持超时与实时流式输出回调。
+ * 自动注入本地代理环境变量或国内镜像源 + 统一 pnpm store-dir。
  */
-export function pluginAction(profile: string, action: InstallAction, pkg: string, timeoutMs = PLUGIN_ACTION_TIMEOUT_MS): Promise<RunResult> {
+export function pluginAction(
+  profile: string,
+  action: InstallAction,
+  pkg: string | string[],
+  optsOrTimeout: PluginActionOptions | number = PLUGIN_ACTION_TIMEOUT_MS,
+): Promise<RunResult> {
+  const timeoutMs = typeof optsOrTimeout === 'number' ? optsOrTimeout : optsOrTimeout?.timeoutMs ?? PLUGIN_ACTION_TIMEOUT_MS
+  const onLog = typeof optsOrTimeout === 'object' ? optsOrTimeout?.onLog : undefined
+
   const proxy = detectLocalProxy()
   const env: Record<string, string> = {}
   if (proxy) {
@@ -64,6 +88,9 @@ export function pluginAction(profile: string, action: InstallAction, pkg: string
     env.https_proxy = proxy
     env.npm_config_proxy = proxy
     env.npm_config_https_proxy = proxy
+  } else if (!process.env.npm_config_registry && !process.env.NPM_CONFIG_REGISTRY) {
+    // 若无本地代理且系统未特别指定源，默认注入国内镜像源大幅提升下载速度
+    env.npm_config_registry = 'https://registry.npmmirror.com'
   }
   // 统一 pnpm store：固定到 %LOCALAPPDATA%\pnpm\store，避免 DSH 内置 pnpm(11.8)
   // 与 npm 全局 pnpm(11.22) 默认 store 位置不同导致 ERR_PNPM_UNEXPECTED_STORE。
@@ -77,7 +104,8 @@ export function pluginAction(profile: string, action: InstallAction, pkg: string
   // dsh 命令解析：优先用已解析的 dsh 绝对路径（config dsh.bin 或 npm 全局），
   // 避免 PATH 异常时 "dsh is not recognized"。
   const dshCmd = resolveDshCommand()
-  return run(dshCmd, ['plugin', '--profile', profile, action, pkg], { timeoutMs, env })
+  const pkgs = Array.isArray(pkg) ? pkg : [pkg]
+  return run(dshCmd, ['plugin', '--profile', profile, action, ...pkgs], { timeoutMs, env, onLog })
 }
 
 /** 解析 dsh 可执行文件路径（cmd shim 优先；找不到回退 'dsh' 让 PATH 解析）。 */

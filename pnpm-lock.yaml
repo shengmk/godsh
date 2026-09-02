@@ -96,6 +96,24 @@ importers:
         specifier: workspace:*
         version: link:../profile-manager
 
+  packages/dsh-plugin:
+    dependencies:
+      '@godsh/allocation':
+        specifier: workspace:*
+        version: link:../allocation
+      '@godsh/core':
+        specifier: workspace:*
+        version: link:../core
+      '@godsh/kernel-manager':
+        specifier: workspace:*
+        version: link:../kernel-manager
+      '@godsh/marketplace':
+        specifier: workspace:*
+        version: link:../marketplace
+      '@godsh/profile-manager':
+        specifier: workspace:*
+        version: link:../profile-manager
+
   packages/kernel-manager:
     dependencies:
       '@godsh/core':

@@ -1,4 +1,4 @@
-﻿import { api } from './api'
+import { api } from './api'
 
 export type TaskType = 'update-all' | 'batch-install' | 'workflow' | 'import-profile' | 'dsh-install'
 export type TaskStatus = 'running' | 'done' | 'error'
@@ -136,6 +136,74 @@ class TaskManager {
 
       this.activePolls.set(taskId, poll)
       return { ok: true }
+    } catch (e) {
+      return { ok: false, message: e instanceof Error ? e.message : String(e) }
+    }
+  }
+
+  /**
+   * 启动工作流后台任务并接管全局轮询与流式回显
+   */
+  async startWorkflowTask(
+    workflowId: string,
+    profile?: string,
+    onDone?: (ok: boolean) => void,
+  ): Promise<{ ok: boolean; task?: string; title?: string; message?: string }> {
+    try {
+      const res = await api.runWorkflow({ workflowId, profile })
+      if (!res.task) {
+        return { ok: false, message: '未能创建工作流任务' }
+      }
+
+      const taskId = res.task
+      this.addTask({
+        id: taskId,
+        type: 'workflow',
+        title: res.title,
+        profile,
+        status: 'running',
+        log: '⚡ 工作流已启动，正在准备执行环境…\n',
+        progress: 10,
+      })
+
+      // 启动全局轮询（1 秒高频轮询，驱动任务中心实时刷新）
+      const poll = setInterval(async () => {
+        try {
+          const p = await api.getWorkflowProgress(taskId)
+          const isFinished = p.status !== 'running'
+
+          // 解析日志中的进度标记如 [1/3] -> 33%, [2/3] -> 66%
+          let calculatedProgress = 20
+          const matches = p.log.match(/\[(\d+)\/(\d+)\]/g)
+          if (matches && matches.length > 0) {
+            const last = matches[matches.length - 1]
+            const m = /\[(\d+)\/(\d+)\]/.exec(last)
+            if (m) {
+              const cur = Number(m[1])
+              const total = Number(m[2])
+              calculatedProgress = Math.min(95, Math.round((cur / (total + 0.5)) * 100))
+            }
+          }
+
+          this.updateTask(taskId, {
+            log: p.log,
+            status: (p.status as TaskStatus) || 'running',
+            progress: isFinished ? 100 : calculatedProgress,
+            message: p.message,
+          })
+
+          if (isFinished) {
+            clearInterval(poll)
+            this.activePolls.delete(taskId)
+            onDone?.(p.status === 'done')
+          }
+        } catch {
+          // 轮询异常继续尝试
+        }
+      }, 1000)
+
+      this.activePolls.set(taskId, poll)
+      return { ok: true, task: taskId, title: res.title }
     } catch (e) {
       return { ok: false, message: e instanceof Error ? e.message : String(e) }
     }

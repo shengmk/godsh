@@ -293,6 +293,10 @@ export const api = {
       body: JSON.stringify(body),
     }),
 
+  /** 查询工作流任务执行进度与实时日志 */
+  getWorkflowProgress: (taskKey: string) =>
+    req<{ status: string; log: string; message?: string }>(`/workflows/progress?task=${encodeURIComponent(taskKey)}`),
+
   /** 批量规则：环境间一键克隆同步（复制 bundles 与插件分配） */
   syncProfileAllocations: (fromProfile: string, toProfile: string) =>
     req<{ ok: boolean; fromProfile: string; toProfile: string; copiedAllocations: number; bundles: number }>(

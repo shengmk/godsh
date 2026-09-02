@@ -1,11 +1,11 @@
 {
-    "name":  "@godsh/plugin-registry",
-    "version":  "0.4.1",
-    "private":  true,
-    "type":  "module",
-    "description":  "godsh 插件识别：bundle / client 插件",
-    "exports":  {
-                    ".":  "./src/index.ts"
-                },
-    "main":  "./src/index.ts"
+  "name": "@godsh/plugin-registry",
+  "version": "0.5.0",
+  "private": true,
+  "type": "module",
+  "description": "godsh 插件识别：bundle / client 插件",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "main": "./src/index.ts"
 }

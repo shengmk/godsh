@@ -256,17 +256,17 @@ export default function ProfilesPage() {
     const target = wfTargetProfile.trim() || undefined
     setWfSubmitting(true)
     try {
-      const res = await api.runWorkflow({ workflowId: selectedWfId, profile: target })
-      taskManager.addTask({
-        id: res.task,
-        type: 'workflow',
-        title: res.title,
-        status: 'running',
-        log: '工作流开始执行…\n',
+      const res = await taskManager.startWorkflowTask(selectedWfId, target, (ok) => {
+        void load()
+        show(ok ? '工作流执行完毕！' : '工作流执行遇到警告或部分步骤未成功，请查看任务中心日志', !ok)
       })
-      show(`已触发工作流：${res.title}，可在全局任务中心查看进度`)
+      if (!res.ok) {
+        show(res.message || '启动工作流失败', true)
+        return
+      }
+      show(`已触发工作流：${res.title}，可在全局任务中心查看实时进度`)
       setWorkflowsModalOpen(false)
-      setTimeout(load, 2000)
+      setTimeout(load, 1500)
     } catch (e) {
       show(e instanceof Error ? e.message : String(e), true)
     } finally {

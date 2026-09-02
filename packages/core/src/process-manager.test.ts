@@ -1,10 +1,11 @@
-﻿import { test } from 'node:test'
+import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { mkdtempSync, rmSync, writeFileSync, existsSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { findProcessesByProfile, killAllProfileProcesses } from './process-manager.js'
 import { ConfigStore } from './config-store.js'
+import { run } from './run.js'
 
 test('findProcessesByProfile: 不存在的 profile 返回空数组', () => {
   const pids = findProcessesByProfile('non_existent_profile_xyz_' + Date.now())
@@ -60,3 +61,18 @@ test('ConfigStore: allowMultiPort 默认值为 false，可持久化保存', () =
     rmSync(dir, { recursive: true, force: true })
   }
 })
+
+test('run: 执行命令时触发 onLog 流式输出回调', async () => {
+  const chunks: string[] = []
+  const res = await run(process.execPath, ['-e', 'console.log("stream-test-1"); console.log("stream-test-2")'], {
+    onLog: (chunk) => chunks.push(chunk),
+  })
+
+  assert.equal(res.ok, true)
+  assert.equal(res.code, 0)
+  assert.ok(res.stdout.includes('stream-test-1'))
+  assert.ok(res.stdout.includes('stream-test-2'))
+  assert.ok(chunks.length > 0)
+  assert.ok(chunks.join('').includes('stream-test-1'))
+})
+
