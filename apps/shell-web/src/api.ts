@@ -41,15 +41,69 @@ function resolveBase(): Promise<string> {
   return Promise.resolve(FALLBACK_BASE)
 }
 
+/** 端口自愈：当首选端口请求失败时，扫描 4780–4899 找真实后端（防 invoke 失效/端口顺延错位）。 */
+let probedBase: string | null = null
+async function probeBackend(): Promise<string | null> {
+  if (probedBase) return probedBase
+  const tries: number[] = []
+  for (let port = 4780; port <= 4899; port++) tries.push(port)
+  // 并发小批量探测，任一 /api/health 响应即视为命中
+  const results = await Promise.allSettled(
+    tries.map(async (port) => {
+      const ctrl = new AbortController()
+      const timer = setTimeout(() => ctrl.abort(), 700)
+      try {
+        const res = await fetch(`http://127.0.0.1:${port}/api/health`, { signal: ctrl.signal })
+        if (res.ok) return port
+        throw new Error(String(res.status))
+      } finally {
+        clearTimeout(timer)
+      }
+    }),
+  )
+  for (let i = 0; i < results.length; i++) {
+    const r = results[i]
+    if (r.status === 'fulfilled' && typeof r.value === 'number') {
+      probedBase = `http://127.0.0.1:${r.value as number}/api`
+      return probedBase
+    }
+  }
+  return null
+}
+
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms))
+
+/** 带自动重试与端口自愈的请求：覆盖「后端冷启动慢」与「端口被占顺延」两种首屏失败。 */
+async function reqWithRetry<T>(path: string, init?: RequestInit): Promise<T> {
+  const primary = await resolveBase()
+  let base = primary
+  let lastErr: unknown
+
+  for (let attempt = 0; attempt < 8; attempt++) {
+    try {
+      const res = await fetch(`${base}${path}`, {
+        headers: init?.body ? { 'Content-Type': 'application/json' } : undefined,
+        ...init,
+      })
+      const data = (await res.json().catch(() => ({}))) as T & { error?: string }
+      if (!res.ok) throw new Error(data.error ?? `请求失败 (${res.status})`)
+      return data
+    } catch (err) {
+      lastErr = err
+      // 网络层失败（TypeError：连接拒绝/中断）→ 尝试端口自愈换 base
+      if (err instanceof TypeError && base === primary) {
+        const found = await probeBackend()
+        if (found) base = found
+      }
+      // 冷启动竞态：后端起 server 需数秒，退避重试
+      await sleep(Math.min(300 * Math.pow(1.6, attempt), 3000))
+    }
+  }
+  throw lastErr instanceof Error ? lastErr : new Error('请求失败')
+}
+
 async function req<T>(path: string, init?: RequestInit): Promise<T> {
-  const base = await resolveBase()
-  const res = await fetch(`${base}${path}`, {
-    headers: init?.body ? { 'Content-Type': 'application/json' } : undefined,
-    ...init,
-  })
-  const data = (await res.json().catch(() => ({}))) as T & { error?: string }
-  if (!res.ok) throw new Error(data.error ?? `请求失败 (${res.status})`)
-  return data
+  return reqWithRetry(path, init)
 }
 
 export const api = {
