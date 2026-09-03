@@ -34,7 +34,7 @@ jobs:
           install: mingw-w64-x86_64-gcc
 
       - name: Install deps
-        run: pnpm install --ignore-scripts
+        run: pnpm install --no-frozen-lockfile --ignore-scripts
 
       - name: Typecheck & unit tests
         run: |
