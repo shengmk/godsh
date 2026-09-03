@@ -1,3 +1,4 @@
+use std::net::TcpListener;
 use std::path::PathBuf;
 use std::process::{Child, Command};
 use std::sync::Mutex;
@@ -37,19 +38,33 @@ fn data_dir() -> String {
   })
 }
 
+/// 动态探测空闲端口：优先 preferred（默认 4780），若已占用则从 preferred+1 向后找，
+/// 最多扫描 100 个端口。TcpListener::bind 成功即说明端口可用（绑定测试后立即释放）。
+fn find_free_port(preferred: u16) -> u16 {
+  for port in preferred..=preferred.saturating_add(100) {
+    if TcpListener::bind(("127.0.0.1", port)).is_ok() {
+      return port;
+    }
+  }
+  // 兜底：让 OS 分配（极端情况下 4780–4880 全占满）
+  if let Ok(l) = TcpListener::bind("127.0.0.1:0") {
+    if let Ok(addr) = l.local_addr() {
+      return addr.port();
+    }
+  }
+  preferred
+}
+
 /// 定位 DSH Desktop 可执行文件（官方桌面应用，专门用于打开 dsh 环境界面）。
-/// 查找顺序：标准安装路径 → DSH Desktop shim（dsh.cmd）里引用的 exe 路径。
 fn find_dsh_desktop() -> Option<PathBuf> {
   let local = std::env::var("LOCALAPPDATA").unwrap_or_default();
   let standard = PathBuf::from(&local).join("Programs").join("DSH Desktop").join("DSH Desktop.exe");
   if standard.exists() {
     return Some(standard);
   }
-  // 从 shim 解析：%APPDATA%\DSH Desktop\host-commands\desktop\bin\dsh.cmd
   let appdata = std::env::var("APPDATA").unwrap_or_default();
   let shim = PathBuf::from(&appdata).join("DSH Desktop").join("host-commands").join("desktop").join("bin").join("dsh.cmd");
   if let Ok(text) = std::fs::read_to_string(&shim) {
-    // shim 内形如 "C:\...\DSH Desktop\DSH Desktop.exe" 的引用
     if let Some(start) = text.find("DSH Desktop.exe") {
       let before = &text[..start];
       if let Some(quote) = before.rfind('"') {
@@ -66,14 +81,11 @@ fn find_dsh_desktop() -> Option<PathBuf> {
 
 /// 「打开环境」：优先用独立的 DSH Desktop 桌面软件打开指定 profile；
 /// 未安装 DSH Desktop 时回退系统浏览器打开 web URL。
-/// 返回实际使用的打开方式：desktop | browser。
 #[tauri::command]
 fn open_dsh_profile(profile: String, url: String) -> Result<String, String> {
   if let Some(exe) = find_dsh_desktop() {
     let mut cmd = Command::new(&exe);
-    // DSH Desktop 通过该环境变量决定启动哪个 profile（与官方 shim 一致）
     cmd.env("DSH_DESKTOP_DEFAULT_PROFILE", &profile);
-    // 沿用当前 DSH_HOME（若已设置）
     if let Ok(home) = std::env::var("DSH_HOME") {
       if !home.is_empty() {
         cmd.env("DSH_HOME", home);
@@ -82,7 +94,6 @@ fn open_dsh_profile(profile: String, url: String) -> Result<String, String> {
     cmd.spawn().map_err(|e| format!("启动 DSH Desktop 失败: {e}"))?;
     return Ok("desktop".into());
   }
-  // 无 DSH Desktop → 系统浏览器打开 web
   let parsed: url::Url = url.parse().map_err(|e| format!("无效 URL: {e}"))?;
   Command::new("cmd")
     .args(["/c", "start", "", parsed.as_str()])
@@ -92,16 +103,13 @@ fn open_dsh_profile(profile: String, url: String) -> Result<String, String> {
 }
 
 /// 定位浏览器可执行文件（用于「网址应用化」模式：--app=URL 打开独立窗口）。
-/// 优先 Edge（Windows 自带，默认浏览器），其次 Chrome。
 fn find_browser_exe() -> Option<PathBuf> {
   let pf86 = std::env::var("ProgramFiles(x86)").unwrap_or_default();
   let pf = std::env::var("ProgramFiles").unwrap_or_default();
   let local = std::env::var("LOCALAPPDATA").unwrap_or_default();
   let candidates = [
-    // Edge
     PathBuf::from(&pf86).join("Microsoft").join("Edge").join("Application").join("msedge.exe"),
     PathBuf::from(&pf).join("Microsoft").join("Edge").join("Application").join("msedge.exe"),
-    // Chrome
     PathBuf::from(&pf).join("Google").join("Chrome").join("Application").join("chrome.exe"),
     PathBuf::from(&pf86).join("Google").join("Chrome").join("Application").join("chrome.exe"),
     PathBuf::from(&local).join("Google").join("Chrome").join("Application").join("chrome.exe"),
@@ -114,10 +122,7 @@ fn find_browser_exe() -> Option<PathBuf> {
   None
 }
 
-/// 「网址应用化」打开 dsh web 界面：
-/// 用系统浏览器（Edge/Chrome）的 `--app=URL` 模式启动一个独立应用窗口
-/// （无地址栏、独立任务栏图标，体验接近桌面应用；浏览器渲染，不会白屏）。
-/// 找不到浏览器时回退普通系统浏览器打开。
+/// 「网址应用化」打开 dsh web 界面（无地址栏独立窗口）。
 #[tauri::command]
 fn open_app_window(url: String) -> Result<(), String> {
   let parsed: url::Url = url.parse().map_err(|e| format!("无效 URL: {e}"))?;
@@ -127,7 +132,6 @@ fn open_app_window(url: String) -> Result<(), String> {
     cmd.spawn().map_err(|e| format!("启动应用窗口失败: {e}"))?;
     return Ok(());
   }
-  // 回退：系统默认浏览器普通打开
   Command::new("cmd")
     .args(["/c", "start", "", parsed.as_str()])
     .spawn()
@@ -135,11 +139,10 @@ fn open_app_window(url: String) -> Result<(), String> {
   Ok(())
 }
 
-/// 用系统默认浏览器打开 URL（桌面端「复制地址」之外的备选入口）。
+/// 用系统默认浏览器打开 URL。
 #[tauri::command]
 fn open_external(url: String) -> Result<(), String> {
   let parsed: url::Url = url.parse().map_err(|e| format!("无效 URL: {e}"))?;
-  // Windows: cmd /c start "" <url>（无需额外依赖；open crate 离线不可用）
   Command::new("cmd")
     .args(["/c", "start", "", parsed.as_str()])
     .spawn()
@@ -161,7 +164,10 @@ pub fn run() {
         )?;
       }
 
-      // 优先 DSH_LAUNCHER_SERVER（开发用），否则资源目录
+      // 动态探测空闲端口（首选 4780，已占用则顺序找下一个空闲端口）
+      let port = find_free_port(4780);
+      eprintln!("[godsh] 后端端口: {port}");
+
       let server = std::env::var("DSH_LAUNCHER_SERVER")
         .ok()
         .filter(|p| !p.is_empty())
@@ -174,7 +180,8 @@ pub fn run() {
         cmd.arg(&server)
           .arg("serve")
           .arg("--port")
-          .arg("4780")
+          .arg(port.to_string())
+          .env("DSH_LAUNCHER_PORT", port.to_string())
           .env("DSH_LAUNCHER_DATA_DIR", data_dir());
         if let Some(templates) = resolve_resource(app, "templates") {
           cmd.env(
