@@ -18,9 +18,8 @@ jobs:
         with:
           node-version: 20
 
-      - uses: pnpm/action-setup@v4
-        with:
-          version: 11
+      - name: Install pnpm
+        run: npm install -g pnpm@11.22.0
 
       # Rust GNU 工具链（与本地已验证的打包环境一致，会产出 WebView2Loader.dll）
       - uses: dtolnay/rust-toolchain@stable
