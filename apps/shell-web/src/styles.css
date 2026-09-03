@@ -58,6 +58,19 @@
   box-sizing: border-box;
 }
 
+@keyframes shimmer {
+  0% { opacity: 0.35; }
+  50% { opacity: 0.75; }
+  100% { opacity: 0.35; }
+}
+
+.skeleton-box {
+  display: inline-block;
+  background: var(--surface-soft, rgba(148, 163, 184, 0.25));
+  border-radius: 6px;
+  animation: shimmer 1.4s infinite ease-in-out;
+}
+
 html,
 body,
 #root {

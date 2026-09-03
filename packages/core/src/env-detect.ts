@@ -74,6 +74,13 @@ function readPackageEntry(pkgDir: string): string | null {
  * 3. 用户配置的额外目录（extraDirs，package.json 目录）
  * 每个实例给出可直接 `node <run>` 的入口与版本号。
  */
+// 模块级版本探测持久缓存（60s TTL）：避免每次请求重复派生子进程检测版本
+const GLOBAL_DSH_VERSION_CACHE = new Map<string, { at: number; version: string | null }>()
+
+export function clearEnvDetectCache(): void {
+  GLOBAL_DSH_VERSION_CACHE.clear()
+}
+
 export function findDshInstances(extraDirs: string[] = []): DshInstance[] {
   const out = new Map<string, DshInstance>()
   const add = (name: string, path: string, run: string | null) => {
@@ -115,18 +122,16 @@ export function findDshInstances(extraDirs: string[] = []): DshInstance[] {
     if (d && existsSync(join(d, 'package.json'))) add(`dir:${d}`, d, readPackageEntry(d))
   }
 
-  // 版本探测缓存 10s：避免每次 list()/settings 都对每个实例跑 node 子进程
-  const versionCache = new Map<string, { at: number; version: string | null }>()
   const now = Date.now()
   for (const inst of out.values()) {
-    const cached = versionCache.get(inst.run)
-    if (cached && now - cached.at < 10_000) {
+    const cached = GLOBAL_DSH_VERSION_CACHE.get(inst.run)
+    if (cached && now - cached.at < 60_000) {
       inst.version = cached.version
       continue
     }
     const r = runSync('node', [inst.run, '--version'])
     const version = r.ok ? (r.stdout.split(/\r?\n/)[0]?.trim() ?? null) : null
-    versionCache.set(inst.run, { at: now, version })
+    GLOBAL_DSH_VERSION_CACHE.set(inst.run, { at: now, version })
     inst.version = version
   }
   return [...out.values()]

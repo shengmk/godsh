@@ -17,19 +17,13 @@ export default function DashboardPage({ onNavigate }: { onNavigate: (p: PageKey)
   const { t } = useI18n()
 
   async function load() {
+    void api.profiles().then(setProfiles).catch(() => {})
+    void api.plugins().then(setPlugins).catch(() => {})
+    void api.kernels().then(setKernels).catch(() => {})
+    void api.allocations().then(setAllocations).catch(() => {})
     try {
-      const [h, p, pl, k, a] = await Promise.all([
-        api.health(),
-        api.profiles(),
-        api.plugins(),
-        api.kernels(),
-        api.allocations(),
-      ])
+      const h = await api.health()
       setHealth(h)
-      setProfiles(p)
-      setPlugins(pl)
-      setKernels(k)
-      setAllocations(a)
     } catch (e) {
       show(e instanceof Error ? e.message : String(e), true)
     }

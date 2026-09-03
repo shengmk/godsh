@@ -129,7 +129,14 @@ importers:
         specifier: workspace:*
         version: link:../core
 
-  packages/plugin-registry: {}
+  packages/plugin-registry:
+    dependencies:
+      '@godsh/core':
+        specifier: workspace:*
+        version: link:../core
+      '@godsh/profile-manager':
+        specifier: workspace:*
+        version: link:../profile-manager
 
   packages/profile-manager:
     dependencies:

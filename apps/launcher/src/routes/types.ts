@@ -4,6 +4,7 @@ import type { ConfigStore, EnvInfo, LauncherConfig } from '@godsh/core'
 import type { AllocationManager } from '@godsh/allocation'
 import type { KernelManager, UnifiedKernelManager } from '@godsh/kernel-manager'
 import type { DshEnvManager } from '@godsh/dsh-env'
+import type { VaultManager } from '@godsh/plugin-registry'
 import type { SourcePolicy } from '@godsh/security'
 
 /** 会话内运行中的 dsh web 进程。 */
@@ -65,6 +66,7 @@ export interface RouteContext {
   allocations: AllocationManager
   unifiedKernel: UnifiedKernelManager
   dshEnvs: DshEnvManager
+  vault: VaultManager
   sourcePolicy: SourcePolicy
   /** 启动时的配置快照（动态读取用 store.readConfig()） */
   config: LauncherConfig
@@ -85,7 +87,7 @@ export interface RouteContext {
   resolveDshBin: (profile?: string) => string | undefined
   tryApplyAllocation: (profile: string, removedIds?: string[]) => ApplyResult
   getMarket: () => Promise<unknown[]>
-  findFreePort: (base: number) => Promise<number>
+  findFreePort: (preferredPort?: number, isCustom?: boolean) => Promise<number>
   profileStatusView: (name: string) => Promise<ProfileStatusView>
   profileView: (name: string) => Promise<ProfileViewResult>
   startInstallTask: (

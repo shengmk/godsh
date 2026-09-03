@@ -27,19 +27,16 @@ export default function ControllerConsolePage({ onNavigate }: { onNavigate: (p: 
   const { t } = useI18n()
 
   async function load() {
+    // 1. 本地高速数据：完全解耦独立并发加载，毫秒级直接呈现
+    void api.profiles().then(setProfiles).catch(() => {})
+    void api.plugins().then(setPlugins).catch(() => {})
+    void api.kernels().then(setKernels).catch(() => {})
+    void api.allocations().then(setAllocations).catch(() => {})
+
+    // 2. DSH 状态与版本检测：异步到达，不阻断其他卡片加载
     try {
-      const [s, p, pl, k, a] = await Promise.all([
-        api.dshStatus(),
-        api.profiles(),
-        api.plugins(),
-        api.kernels(),
-        api.allocations(),
-      ])
+      const s = await api.dshStatus()
       setStatus(s)
-      setProfiles(p)
-      setPlugins(pl)
-      setKernels(k)
-      setAllocations(a)
     } catch (e) {
       show(e instanceof Error ? e.message : String(e), true)
     }
@@ -154,30 +151,48 @@ export default function ControllerConsolePage({ onNavigate }: { onNavigate: (p: 
 
       <div className="dash-grid">
         <div className="card dash-card">
-          <div className="dash-value">{status?.found ? status.currentVersion ?? '?' : '—'}</div>
+          <div className="dash-value">
+            {status === null ? (
+              <span className="skeleton-box" style={{ width: 68, height: 28 }} />
+            ) : status.found ? (
+              status.currentVersion ?? '?'
+            ) : (
+              '未安装'
+            )}
+          </div>
           <div className="dash-label">
             {t('dash.dshVersion')}
             {status && status.detectedCount > 1 ? `（共 ${status.detectedCount} 个）` : ''}
           </div>
         </div>
         <div className="card dash-card">
-          <div className="dash-value">{profiles === null ? '…' : profiles.length}</div>
+          <div className="dash-value">
+            {profiles === null ? <span className="skeleton-box" style={{ width: 36, height: 28 }} /> : profiles.length}
+          </div>
           <div className="dash-label">{t('dash.profiles')}</div>
         </div>
         <div className="card dash-card accent">
-          <div className="dash-value">{profiles === null ? '…' : running}</div>
+          <div className="dash-value">
+            {profiles === null ? <span className="skeleton-box" style={{ width: 36, height: 28 }} /> : running}
+          </div>
           <div className="dash-label">{t('dash.running')}</div>
         </div>
         <div className="card dash-card">
-          <div className="dash-value">{plugins === null ? '…' : plugins.length}</div>
+          <div className="dash-value">
+            {plugins === null ? <span className="skeleton-box" style={{ width: 36, height: 28 }} /> : plugins.length}
+          </div>
           <div className="dash-label">{t('dash.plugins')}</div>
         </div>
         <div className="card dash-card">
-          <div className="dash-value">{kernels === null ? '…' : kernels.instances.length}</div>
+          <div className="dash-value">
+            {kernels === null ? <span className="skeleton-box" style={{ width: 36, height: 28 }} /> : kernels.instances.length}
+          </div>
           <div className="dash-label">{t('dash.kernels')}</div>
         </div>
         <div className="card dash-card">
-          <div className="dash-value">{allocations === null ? '…' : allocations.length}</div>
+          <div className="dash-value">
+            {allocations === null ? <span className="skeleton-box" style={{ width: 36, height: 28 }} /> : allocations.length}
+          </div>
           <div className="dash-label">{t('dash.allocations')}</div>
         </div>
       </div>

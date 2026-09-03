@@ -21,6 +21,7 @@ import type {
   UnifiedKernelConfig,
   ProfilePackage,
   WorkflowTemplate,
+  VaultPlugin,
 } from './types'
 
 // 默认同源 /api（Web 模式）；Tauri 模式可设 VITE_API_BASE=http://127.0.0.1:4780/api
@@ -237,6 +238,10 @@ export const api = {
 
   dshStatus: () => req<DshStatus>('/dsh/status'),
 
+  dshRefresh: () => req<{ ok: boolean; message?: string }>('/dsh/refresh', { method: 'POST' }),
+
+  dshClearTasks: () => req<{ ok: boolean }>('/dsh/tasks/clear', { method: 'POST' }),
+
   dshVersions: () => req<{ published: string[]; local: DshInstance[] }>('/dsh/versions'),
 
   dshInstall: (version?: string) =>
@@ -306,5 +311,39 @@ export const api = {
         body: JSON.stringify({ fromProfile, toProfile }),
       },
     ),
+
+  /** 仓库沙箱：获取就绪态插件列表 */
+  vault: () => req<{ plugins: VaultPlugin[] }>('/vault').then((r) => r.plugins),
+
+  /** 仓库沙箱：导入本地插件 */
+  vaultImportLocal: (targetPath: string, category?: string) =>
+    req<{ ok: boolean; plugin: VaultPlugin }>('/vault/import-local', {
+      method: 'POST',
+      body: JSON.stringify({ targetPath, category }),
+    }),
+
+  /** 仓库沙箱：从市场暂存插件入库 */
+  vaultAddMarket: (body: { name: string; version: string; description?: string; category?: string }) =>
+    req<{ ok: boolean; plugin: VaultPlugin }>('/vault/add-market', {
+      method: 'POST',
+      body: JSON.stringify(body),
+    }),
+
+  /** 仓库沙箱：瞬时部署注入到目标 Profile */
+  vaultDeploy: (pluginId: string, targetProfile: string) =>
+    req<{ ok: boolean; deployed: string[]; companionAdded?: string[] }>('/vault/deploy', {
+      method: 'POST',
+      body: JSON.stringify({ pluginId, targetProfile }),
+    }),
+
+  /** 仓库沙箱：移除插件 */
+  vaultRemove: (id: string) =>
+    req<{ ok: boolean }>(`/vault/${encodeURIComponent(id)}`, { method: 'DELETE' }),
+
+  /** 仓库沙箱：批量静默比对更新 */
+  vaultCheckUpdates: () =>
+    req<{ updates: { id: string; hasUpdate: boolean; latestVersion?: string }[] }>('/vault/check-updates', {
+      method: 'POST',
+    }),
 }
 

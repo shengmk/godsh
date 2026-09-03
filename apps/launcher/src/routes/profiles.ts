@@ -290,8 +290,9 @@ export const profilesHandler: ApiHandler = async (ctx, _req, res, method, seg, b
         /* 缓存修复失败不阻断，dsh 会给出具体报错 */
       }
       ctx.ensureUnifiedKernel(name)
-      const basePort = Number(body.port) || config.webKernel.defaultPort || 3080
-      const port = await ctx.findFreePort(basePort)
+      const isCustom = Boolean(body.port && Number(body.port) > 0)
+      const preferredPort = isCustom ? Number(body.port) : undefined
+      const port = await ctx.findFreePort(preferredPort, isCustom)
       invalidatePortProbe(port)
       const { info, child } = spawnWebProfile({
         profile: name,
@@ -352,8 +353,9 @@ export const profilesHandler: ApiHandler = async (ctx, _req, res, method, seg, b
       } catch {}
       ctx.ensureUnifiedKernel(name)
 
-      const basePort = Number(body.port) || existing?.port || config.webKernel.defaultPort || 3080
-      const port = await ctx.findFreePort(basePort)
+      const isCustom = Boolean(body.port && Number(body.port) > 0)
+      const preferredPort = isCustom ? Number(body.port) : (existing?.port || undefined)
+      const port = await ctx.findFreePort(preferredPort, isCustom)
       invalidatePortProbe(port)
       const { info, child } = spawnWebProfile({
         profile: name,

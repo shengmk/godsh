@@ -1,11 +1,11 @@
 {
-  "name": "@godsh/core",
-  "version": "0.5.0",
-  "private": true,
-  "type": "module",
-  "description": "godsh 核心：环境检测、进程管理、配置存储、事件总线",
-  "exports": {
-    ".": "./src/index.ts"
-  },
-  "main": "./src/index.ts"
+    "name":  "@godsh/core",
+    "version":  "0.5.1",
+    "private":  true,
+    "type":  "module",
+    "description":  "godsh 核心：环境检测、进程管理、配置存储、事件总线",
+    "exports":  {
+                    ".":  "./src/index.ts"
+                },
+    "main":  "./src/index.ts"
 }

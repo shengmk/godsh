@@ -1,14 +1,14 @@
 {
-  "name": "@godsh/marketplace",
-  "version": "0.5.0",
-  "private": true,
-  "type": "module",
-  "description": "godsh 插件市场与安装封装",
-  "exports": {
-    ".": "./src/index.ts"
-  },
-  "main": "./src/index.ts",
-  "dependencies": {
-    "@godsh/core": "workspace:*"
-  }
+    "name":  "@godsh/marketplace",
+    "version":  "0.5.1",
+    "private":  true,
+    "type":  "module",
+    "description":  "godsh 插件市场与安装封装",
+    "exports":  {
+                    ".":  "./src/index.ts"
+                },
+    "main":  "./src/index.ts",
+    "dependencies":  {
+                         "@godsh/core":  "workspace:*"
+                     }
 }

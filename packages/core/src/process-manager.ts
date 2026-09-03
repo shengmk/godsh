@@ -1,5 +1,5 @@
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync, createWriteStream, readdirSync } from 'node:fs'
-import type { ChildProcess } from 'node:child_process'
+import { spawnSync, type ChildProcess } from 'node:child_process'
 import http from 'node:http'
 import { join } from 'node:path'
 import { killProcess, runSync, spawnCommand } from './run.js'
@@ -254,16 +254,22 @@ export function findProcessesByProfile(profile: string): number[] {
 
   if (process.platform === 'win32') {
     // 匹配命令行中包含 --profile <profile> 或 --profile "<profile>" 或 --profile '<profile>'
-    const psCmd = `Get-CimInstance Win32_Process | Where-Object { $_.CommandLine -and ($_.CommandLine -match '--profile\\s+[\"\'']?${safeProfile}[\"\'']?(\\s|$)') } | Select-Object -ExpandProperty ProcessId`
-    const r = runSync('powershell', ['-NoProfile', '-NonInteractive', '-Command', psCmd])
-    if (r.ok && r.stdout) {
-      for (const line of r.stdout.split(/\r?\n/)) {
-        const pid = Number.parseInt(line.trim(), 10)
-        if (Number.isFinite(pid) && pid > 0) {
-          pids.push(pid)
+    const psCmd = `Get-CimInstance Win32_Process | Where-Object { $_.CommandLine -and ($_.CommandLine -match '--profile\\s+["\']?${safeProfile}["\']?(\\s|$)') } | Select-Object -ExpandProperty ProcessId`
+    try {
+      const r = spawnSync('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', psCmd], {
+        windowsHide: true,
+        encoding: 'utf8',
+        timeout: 5000,
+      })
+      if (r.stdout) {
+        for (const line of r.stdout.split(/\r?\n/)) {
+          const pid = Number.parseInt(line.trim(), 10)
+          if (Number.isFinite(pid) && pid > 0) {
+            pids.push(pid)
+          }
         }
       }
-    }
+    } catch {}
     return pids
   }
 

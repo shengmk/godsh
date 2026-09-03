@@ -1,39 +1,39 @@
 {
-  "name": "@godsh/dsh-plugin",
-  "version": "0.5.0",
-  "type": "module",
-  "description": "godsh 原生 DSH/Cordis 插件：环境治理、零重启热插拔、配置化工作流、长期思维记忆与多版本快照热备份",
-  "exports": {
-    ".": "./dist/index.mjs",
-    "./client": "./dist/client.mjs"
-  },
-  "main": "./dist/index.mjs",
-  "dsh": {
-    "entry": {
-      "host": "./dist/index.mjs",
-      "client": "./dist/client.mjs"
-    },
-    "client": {
-      "inject": [
-        "@deepseek-ai/dsh-client-ui-slots",
-        "@deepseek-ai/dsh-client-ui-settings"
-      ]
-    },
-    "category": "dev",
-    "tags": [
-      "manager",
-      "workflow",
-      "profile",
-      "tools",
-      "memory",
-      "backup"
-    ]
-  },
-  "dependencies": {
-    "@godsh/core": "workspace:*",
-    "@godsh/profile-manager": "workspace:*",
-    "@godsh/allocation": "workspace:*",
-    "@godsh/marketplace": "workspace:*",
-    "@godsh/kernel-manager": "workspace:*"
-  }
+    "name":  "@godsh/dsh-plugin",
+    "version":  "0.5.1",
+    "type":  "module",
+    "description":  "godsh 原生 DSH/Cordis 插件：环境治理、零重启热插拔、配置化工作流、长期思维记忆与多版本快照热备份",
+    "exports":  {
+                    ".":  "./dist/index.mjs",
+                    "./client":  "./dist/client.mjs"
+                },
+    "main":  "./dist/index.mjs",
+    "dsh":  {
+                "entry":  {
+                              "host":  "./dist/index.mjs",
+                              "client":  "./dist/client.mjs"
+                          },
+                "client":  {
+                               "inject":  [
+                                              "@deepseek-ai/dsh-client-ui-slots",
+                                              "@deepseek-ai/dsh-client-ui-settings"
+                                          ]
+                           },
+                "category":  "dev",
+                "tags":  [
+                             "manager",
+                             "workflow",
+                             "profile",
+                             "tools",
+                             "memory",
+                             "backup"
+                         ]
+            },
+    "dependencies":  {
+                         "@godsh/core":  "workspace:*",
+                         "@godsh/profile-manager":  "workspace:*",
+                         "@godsh/allocation":  "workspace:*",
+                         "@godsh/marketplace":  "workspace:*",
+                         "@godsh/kernel-manager":  "workspace:*"
+                     }
 }

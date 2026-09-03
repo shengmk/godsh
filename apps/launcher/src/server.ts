@@ -2,7 +2,7 @@ import http from 'node:http'
 import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from 'node:fs'
 import { extname, join } from 'node:path'
 import { gzipSync } from 'node:zlib'
-import { MONOREPO_ROOT, DATA_DIR, findPidByPort, isPortListening, readLogTail, ensureDshBundles, ensureCacheIntegrity } from '@godsh/core'
+import { MONOREPO_ROOT, DATA_DIR, findPidByPort, isPortListening, readLogTail, ensureDshBundles, ensureCacheIntegrity, isPortAvailable } from '@godsh/core'
 import { fetchMarketIndex } from '@godsh/marketplace'
 import { scanProfiles, ensureProfileWorkspace, ensureProfilePatches } from '@godsh/profile-manager'
 import type { CliContext } from './context.js'
@@ -96,7 +96,7 @@ export interface ApiServerOptions {
  * - 其它路径回退到 apps/shell-web/dist 的静态资源（若已构建）
  */
 export async function startApiServer(ctx: CliContext, opts: ApiServerOptions): Promise<http.Server> {
-  const { store, env, profilesDir, pidDir, logDir, pluginsDir, templatesDir, kernels, allocations, unifiedKernel, dshEnvs, sourcePolicy } = ctx
+  const { store, env, profilesDir, pidDir, logDir, pluginsDir, templatesDir, kernels, allocations, unifiedKernel, dshEnvs, vault, sourcePolicy } = ctx
   const config = store.readConfig()
 
   // 启动自愈：DSH Desktop junction 断链时提取官方 bundle，保证 profile 可启动。
@@ -199,16 +199,38 @@ export async function startApiServer(ctx: CliContext, opts: ApiServerOptions): P
   }
 
   /**
-   * 找空闲端口：跳过「已在监听」和「已分配给运行中/启动中环境」的端口。
-   * 后者保证多个环境可同时启动且端口互不冲突（即使进程还没就绪也占住端口）。
+   * 找空闲端口：
+   * - 若用户指定了 preferredPort（且 isCustom=true），优先探测该端口是否未被占用；
+   * - 若用户未自定义，则在安全的随机端口区间（3200~3999）内随机分配一个绝对空闲端口，彻底杜绝冲突！
    */
-  async function findFreePort(base: number): Promise<number> {
+  async function findFreePort(preferredPort?: number, isCustom?: boolean): Promise<number> {
     const allocated = new Set([...running.values()].map((p) => p.port))
-    for (let port = base; port < base + 100; port++) {
-      if (allocated.has(port)) continue
-      if (!(await isPortListening(port))) return port
+
+    // 1. 若为显式自定义端口：优先校验并使用
+    if (isCustom && preferredPort && preferredPort > 0) {
+      if (!allocated.has(preferredPort) && (await isPortAvailable(preferredPort))) {
+        return preferredPort
+      }
+      console.warn(`[PortEngine] 用户自定义端口 ${preferredPort} 已被占用，进入自动随机端口协商...`)
     }
-    throw new Error('找不到可用端口')
+
+    // 2. 动态随机端口分配（3200 ~ 3999 安全私有区间）
+    const min = 3200
+    const max = 3999
+    for (let i = 0; i < 30; i++) {
+      const candidate = Math.floor(Math.random() * (max - min + 1)) + min
+      if (!allocated.has(candidate) && (await isPortAvailable(candidate))) {
+        return candidate
+      }
+    }
+
+    // 3. 线性回退探活
+    for (let port = 3080; port < 3180; port++) {
+      if (allocated.has(port)) continue
+      if (await isPortAvailable(port)) return port
+    }
+
+    throw new Error('找不到可用空闲端口')
   }
 
   /**
@@ -314,6 +336,7 @@ export async function startApiServer(ctx: CliContext, opts: ApiServerOptions): P
     allocations,
     unifiedKernel,
     dshEnvs,
+    vault,
     sourcePolicy,
     config,
     running,

@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { api } from '../api'
-import type { Allocation, AvailablePlugin, MarketCategory, ProfileView } from '../types'
+import type { Allocation, AvailablePlugin, MarketCategory, ProfileView, VaultPlugin } from '../types'
 import { ContextMenu, Toast, type MenuState } from '../components'
 import { useToast } from '../hooks'
 import { useI18n } from '../i18n'
@@ -44,12 +44,28 @@ export default function AllocationsPage() {
   const [expanded, setExpanded] = useState<Set<string>>(new Set())
   const [drag, setDrag] = useState<DragState | null>(null)
   const [menu, setMenu] = useState<MenuState | null>(null)
+  const [vaultPlugins, setVaultPlugins] = useState<VaultPlugin[]>([])
+  const [vaultExpanded, setVaultExpanded] = useState(true)
+  const [importModalOpen, setImportModalOpen] = useState(false)
+  const [importPath, setImportPath] = useState('')
+  const [importCategory, setImportCategory] = useState('dev')
+  const [deployTargetProfile, setDeployTargetProfile] = useState<Record<string, string>>({})
+  const [vaultChecking, setVaultChecking] = useState(false)
+
   const dragRef = useRef<DragState | null>(null)
   const { toast, show } = useToast()
   const { t } = useI18n()
 
+  const loadVault = useCallback(async () => {
+    try {
+      const v = await api.vault()
+      setVaultPlugins(v)
+    } catch {}
+  }, [])
+
   async function load() {
     try {
+      void loadVault()
       const [p, a, av, cats] = await Promise.all([
         api.profiles(),
         api.allocations(),
@@ -551,6 +567,64 @@ export default function AllocationsPage() {
     }
   }
 
+  async function handleImportLocal() {
+    if (!importPath.trim()) return
+    try {
+      const r = await api.vaultImportLocal(importPath.trim(), importCategory)
+      show(`✅ 已导入本地插件: ${r.plugin.name} (v${r.plugin.version})`)
+      setImportModalOpen(false)
+      setImportPath('')
+      await loadVault()
+    } catch (e) {
+      show(e instanceof Error ? e.message : String(e), true)
+    }
+  }
+
+  async function handleDeployVault(plugin: VaultPlugin) {
+    const target = deployTargetProfile[plugin.id] || profiles[0]?.name
+    if (!target) {
+      show('请先选择目标环境', true)
+      return
+    }
+    try {
+      const r = await api.vaultDeploy(plugin.id, target)
+      if (r.companionAdded && r.companionAdded.length > 0) {
+        show(`✅ 已秒级分发到 ${target}，并自动补齐伴随驱动: ${r.companionAdded.join(', ')}`)
+      } else {
+        show(`✅ 已秒级分发 ${plugin.name} 到 ${target}`)
+      }
+      await refresh()
+      await loadVault()
+    } catch (e) {
+      show(e instanceof Error ? e.message : String(e), true)
+    }
+  }
+
+  async function handleRemoveVault(id: string) {
+    if (!window.confirm('确定将该插件从仓库沙箱中移除？（不影响已分配的 Profile）')) return
+    try {
+      await api.vaultRemove(id)
+      show('已移出沙箱')
+      await loadVault()
+    } catch (e) {
+      show(e instanceof Error ? e.message : String(e), true)
+    }
+  }
+
+  async function handleCheckVaultUpdates() {
+    setVaultChecking(true)
+    try {
+      const r = await api.vaultCheckUpdates()
+      const updated = r.updates.filter((x) => x.hasUpdate).length
+      show(updated > 0 ? `已比对，发现 ${updated} 个插件有新版本` : '已比对，沙箱插件均为最新版本')
+      await loadVault()
+    } catch (e) {
+      show(e instanceof Error ? e.message : String(e), true)
+    } finally {
+      setVaultChecking(false)
+    }
+  }
+
   const totalAllocated = allocations.length
 
   return (
@@ -574,6 +648,179 @@ export default function AllocationsPage() {
           刷新
         </button>
       </div>
+
+      {/* 📦 仓库沙箱中枢 (Plugin Vault) */}
+      <div className="card" style={{ marginBottom: 16, border: '1px solid rgba(59, 130, 246, 0.4)' }}>
+        <div
+          className="row"
+          style={{ justifyContent: 'space-between', alignItems: 'center', cursor: 'pointer' }}
+          onClick={() => setVaultExpanded(!vaultExpanded)}
+        >
+          <div className="row" style={{ gap: 8, alignItems: 'center' }}>
+            <span style={{ fontSize: 16 }}>{vaultExpanded ? '▼' : '▶'}</span>
+            <div className="card-title" style={{ margin: 0, color: 'var(--brand-2, #3b82f6)' }}>
+              📦 插件仓库沙箱中枢 (Plugin Vault)
+            </div>
+            <span className="badge info">{vaultPlugins.length} 个就绪插件</span>
+            <span className="muted" style={{ fontSize: 12 }}>
+              代替临时 profiles 暂存 · 启动静默差量检更 · 快速秒级流转到环境
+            </span>
+          </div>
+          <div className="row" style={{ gap: 8 }} onClick={(e) => e.stopPropagation()}>
+            <button className="btn sm primary" onClick={() => setImportModalOpen(true)}>
+              📥 导入本地插件
+            </button>
+            <button
+              className={`btn sm ${vaultChecking ? 'loading' : ''}`}
+              disabled={vaultChecking}
+              onClick={() => void handleCheckVaultUpdates()}
+            >
+              {vaultChecking ? '🔄 检测中…' : '🔄 检查沙箱更新'}
+            </button>
+          </div>
+        </div>
+
+        {vaultExpanded && (
+          <div style={{ marginTop: 14 }}>
+            {vaultPlugins.length === 0 ? (
+              <div className="empty" style={{ padding: '16px 0' }}>
+                沙箱为空。可点击「📥 导入本地插件」导入本地开发包或从市场暂存。
+              </div>
+            ) : (
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(320px, 1fr))', gap: 12 }}>
+                {vaultPlugins.map((vp) => (
+                  <div
+                    key={vp.id}
+                    className="card"
+                    style={{
+                      padding: 12,
+                      background: 'var(--surface-soft, rgba(0,0,0,0.02))',
+                      border: vp.hasUpdate ? '1px solid rgba(245, 158, 11, 0.7)' : '1px solid var(--card-border)',
+                    }}
+                  >
+                    <div className="row" style={{ justifyContent: 'space-between', alignItems: 'center' }}>
+                      <span style={{ fontWeight: 600, fontSize: 14 }}>{vp.name}</span>
+                      <span className="badge sm">{vp.version}</span>
+                    </div>
+                    <div className="row" style={{ gap: 6, marginTop: 4, alignItems: 'center' }}>
+                      <span className={`badge sm ${vp.source === 'local' ? 'warning' : 'info'}`}>
+                        {vp.source === 'local' ? '本地导入' : '市场暂存'}
+                      </span>
+                      {vp.category && <span className="badge sm muted">{vp.category}</span>}
+                      {vp.hasUpdate && (
+                        <span className="badge sm warning">有新版: v{vp.latestVersion}</span>
+                      )}
+                    </div>
+                    {vp.description && (
+                      <p className="card-sub" style={{ margin: '6px 0', fontSize: 12, lineHeight: 1.4 }}>
+                        {vp.description}
+                      </p>
+                    )}
+                    <div className="row" style={{ gap: 6, marginTop: 8, alignItems: 'center', justifyContent: 'space-between' }}>
+                      <div className="row" style={{ gap: 6, alignItems: 'center' }}>
+                        <select
+                          className="input sm"
+                          style={{ padding: '2px 6px', fontSize: 12 }}
+                          value={deployTargetProfile[vp.id] || profiles[0]?.name || ''}
+                          onChange={(e) => setDeployTargetProfile({ ...deployTargetProfile, [vp.id]: e.target.value })}
+                        >
+                          {profiles.map((p) => (
+                            <option key={p.name} value={p.name}>
+                              {p.name}
+                            </option>
+                          ))}
+                        </select>
+                        <button
+                          className="btn sm primary"
+                          title="秒级部署至目标环境"
+                          onClick={() => void handleDeployVault(vp)}
+                        >
+                          ⚡ 分发
+                        </button>
+                      </div>
+                      <button
+                        className="btn sm danger"
+                        style={{ padding: '2px 8px' }}
+                        title="从沙箱移出"
+                        onClick={() => void handleRemoveVault(vp.id)}
+                      >
+                        🗑
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+
+      {/* 本地插件导入弹窗 */}
+      {importModalOpen && (
+        <div
+          style={{
+            position: 'fixed',
+            inset: 0,
+            background: 'rgba(0,0,0,0.5)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            zIndex: 9999,
+          }}
+          onClick={() => setImportModalOpen(false)}
+        >
+          <div
+            className="card"
+            style={{ width: 460, maxWidth: '90vw', padding: 20 }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="card-title" style={{ marginBottom: 8 }}>
+              📥 导入本地插件至仓库沙箱
+            </div>
+            <p className="card-sub" style={{ marginBottom: 14 }}>
+              支持输入本地插件解压包或源码文件夹路径，系统将自动读取 package.json 并标记为就绪态。
+            </p>
+            <div style={{ marginBottom: 12 }}>
+              <label style={{ display: 'block', fontSize: 12, marginBottom: 4, fontWeight: 500 }}>
+                本地目录绝对路径：
+              </label>
+              <input
+                type="text"
+                className="input"
+                style={{ width: '100%' }}
+                placeholder="例如: C:\Users\...\my-dsh-plugin"
+                value={importPath}
+                onChange={(e) => setImportPath(e.target.value)}
+              />
+            </div>
+            <div style={{ marginBottom: 16 }}>
+              <label style={{ display: 'block', fontSize: 12, marginBottom: 4, fontWeight: 500 }}>
+                选择所属分类：
+              </label>
+              <select
+                className="input"
+                style={{ width: '100%' }}
+                value={importCategory}
+                onChange={(e) => setImportCategory(e.target.value)}
+              >
+                <option value="dev">dev（开发与调试）</option>
+                <option value="workflow">workflow（自动化与工作流）</option>
+                <option value="tools">tools（通用工具）</option>
+                <option value="agi">agi（AI 智能体）</option>
+                <option value="ui">ui（界面定制）</option>
+              </select>
+            </div>
+            <div className="row" style={{ justifyContent: 'flex-end', gap: 8 }}>
+              <button className="btn" onClick={() => setImportModalOpen(false)}>
+                取消
+              </button>
+              <button className="btn primary" onClick={() => void handleImportLocal()}>
+                确认导入
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {profiles.length === 0 ? (
         <div className="empty">未发现任何 Profile</div>

@@ -3,12 +3,29 @@ import { existsSync, rmSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { DATA_DIR, readLogTail, stopWeb } from '@godsh/core'
+import { DshEnvManager } from '@godsh/dsh-env'
 import { removeProfile, scanProfiles } from '@godsh/profile-manager'
 import type { ApiHandler } from './types.js'
 
 /** /api/dsh*、/api/dsh-envs* —— DSH 本体状态 / 安装 / 并列环境 */
 export const dshHandler: ApiHandler = async (ctx, _req, res, method, seg, body, _url) => {
   const { store, dshEnvs, pidDir, running, installTasks } = ctx
+
+  // POST /api/dsh/refresh - 强制刷新探测缓存
+  if (seg.length === 2 && seg[0] === 'dsh' && seg[1] === 'refresh' && method === 'POST') {
+    DshEnvManager.invalidateCache()
+    ctx.sendJson(res, 200, { ok: true, message: '已刷新环境与版本缓存' })
+    return true
+  }
+
+  // POST /api/dsh/tasks/clear - 清理已结束的任务日志
+  if (seg.length === 3 && seg[0] === 'dsh' && seg[1] === 'tasks' && seg[2] === 'clear' && method === 'POST') {
+    for (const [k, rec] of installTasks.entries()) {
+      if (rec.status !== 'running') installTasks.delete(k)
+    }
+    ctx.sendJson(res, 200, { ok: true })
+    return true
+  }
 
   // GET /api/dsh/status
   if (seg.length === 2 && seg[0] === 'dsh' && seg[1] === 'status' && method === 'GET') {
@@ -17,7 +34,7 @@ export const dshHandler: ApiHandler = async (ctx, _req, res, method, seg, body, 
       key,
       status: rec.status,
       message: rec.message ?? null,
-      log: readLogTail(rec.logFile, 100),
+      log: readLogTail(rec.logFile, 200),
     }))
     ctx.sendJson(res, 200, { ...st, tasks, activeVersionName: store.readConfig().dsh.activeVersion ?? '' })
     return true

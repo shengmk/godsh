@@ -55,6 +55,21 @@ export interface PortInfo {
 
 export type PluginKind = 'bundle' | 'client' | 'both' | 'unknown'
 
+export interface VaultPlugin {
+  id: string
+  name: string
+  version: string
+  kind: PluginKind
+  source: 'market' | 'local'
+  sourcePath?: string
+  category?: string
+  description?: string
+  installedProfiles?: string[]
+  hasUpdate?: boolean
+  latestVersion?: string
+  stagedAt: number
+}
+
 export interface LocalPlugin {
   name: string
   dir: string

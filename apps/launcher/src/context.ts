@@ -15,6 +15,7 @@ import {
 import { KernelManager, UnifiedKernelManager } from '@godsh/kernel-manager'
 import { AllocationManager } from '@godsh/allocation'
 import { DshEnvManager } from '@godsh/dsh-env'
+import { VaultManager } from '@godsh/plugin-registry'
 import { SourcePolicy } from '@godsh/security'
 
 export interface CliContext {
@@ -30,6 +31,7 @@ export interface CliContext {
   allocations: AllocationManager
   unifiedKernel: UnifiedKernelManager
   dshEnvs: DshEnvManager
+  vault: VaultManager
   sourcePolicy: SourcePolicy
 }
 
@@ -59,6 +61,7 @@ export function createContext(): CliContext {
     allocations: new AllocationManager(store),
     unifiedKernel: new UnifiedKernelManager(store),
     dshEnvs: new DshEnvManager(store, join(DATA_DIR, 'dsh-envs')),
+    vault: new VaultManager(DATA_DIR),
     sourcePolicy: new SourcePolicy(),
   }
 }

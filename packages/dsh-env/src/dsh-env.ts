@@ -1,6 +1,6 @@
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
-import { findDshInstances, runSync, spawnCommand, type ConfigStore, type DshInstance } from '@godsh/core'
+import { clearEnvDetectCache, findDshInstances, runSync, spawnCommand, type ConfigStore, type DshInstance } from '@godsh/core'
 import { createProfile } from '@godsh/profile-manager'
 
 export type DshEnvKind = 'base' | 'managed' | 'external'
@@ -27,6 +27,11 @@ interface EnvFile {
 
 const BASE_ID = 'base'
 
+/** 获取可用的 npm 镜像源（优先尊重用户配置，默认注入 npmmirror 保证极速） */
+export function resolveNpmRegistry(): string {
+  return process.env.npm_config_registry || process.env.NPM_CONFIG_REGISTRY || 'https://registry.npmmirror.com'
+}
+
 /**
  * DSH 环境管理（类比 Anaconda：base 主环境 + 并列 conda 环境；每个"环境"装一个 dsh 本体）。
  * - base：官方 dsh（npm 全局安装），自动安装建立；可重新安装 / 更新，不直接删除。
@@ -41,9 +46,16 @@ export class DshEnvManager {
   private static latestCache: { at: number; value: string | null } | null = null
   private static versionsCache: { at: number; value: string[] } | null = null
 
+  public static invalidateCache(): void {
+    DshEnvManager.detectCache = null
+    DshEnvManager.latestCache = null
+    DshEnvManager.versionsCache = null
+    clearEnvDetectCache()
+  }
+
   private detectedFresh(): DshInstance[] {
     const now = Date.now()
-    if (DshEnvManager.detectCache && now - DshEnvManager.detectCache.at < 5000) {
+    if (DshEnvManager.detectCache && now - DshEnvManager.detectCache.at < 10000) {
       return DshEnvManager.detectCache.data
     }
     const data = findDshInstances(this.store.readConfig().dsh.dirs ?? [])
@@ -53,12 +65,13 @@ export class DshEnvManager {
 
   private latestFresh(): string | null {
     const now = Date.now()
-    if (DshEnvManager.latestCache && now - DshEnvManager.latestCache.at < 60_000) {
+    if (DshEnvManager.latestCache && now - DshEnvManager.latestCache.at < 120_000) {
       return DshEnvManager.latestCache.value
     }
     let latest: string | null = null
     try {
-      const r = runSync('npm', ['view', '@deepseek-ai/dsh', 'version', '--fetch-timeout=8000'])
+      const reg = resolveNpmRegistry()
+      const r = runSync('npm', ['view', '@deepseek-ai/dsh', 'version', `--registry=${reg}`, '--fetch-timeout=4000'])
       latest = r.ok ? (r.stdout.split(/\r?\n/)[0]?.trim() ?? null) : null
     } catch {
       latest = null
@@ -69,12 +82,13 @@ export class DshEnvManager {
 
   private versionsFresh(): string[] {
     const now = Date.now()
-    if (DshEnvManager.versionsCache && now - DshEnvManager.versionsCache.at < 60_000) {
+    if (DshEnvManager.versionsCache && now - DshEnvManager.versionsCache.at < 120_000) {
       return DshEnvManager.versionsCache.value
     }
     let versions: string[] = []
     try {
-      const r = runSync('npm', ['view', '@deepseek-ai/dsh', 'versions', '--json', '--fetch-timeout=8000'])
+      const reg = resolveNpmRegistry()
+      const r = runSync('npm', ['view', '@deepseek-ai/dsh', 'versions', '--json', `--registry=${reg}`, '--fetch-timeout=5000'])
       if (r.ok) {
         const v = JSON.parse(r.stdout) as unknown
         if (Array.isArray(v)) versions = v.filter((x): x is string => typeof x === 'string').slice(-20).reverse()
@@ -237,8 +251,22 @@ export class DshEnvManager {
   /** 安装官方 dsh 为 base 主环境（npm 全局）。 */
   async installBase(versionSpec?: string, onLog?: (line: string) => void): Promise<{ id: string; command: string }> {
     const spec = versionSpec ? `@deepseek-ai/dsh@${versionSpec}` : '@deepseek-ai/dsh'
-    const r = await this.runStreamed('npm', ['install', '-g', spec], onLog)
-    if (!r.ok) throw new Error(`npm 安装失败: ${r.output}`)
+    const reg = resolveNpmRegistry()
+    onLog?.(`[godsh] 正在使用镜像源加速: ${reg}\n[godsh] 准备更新/安装 ${spec}...\n`)
+    const args = [
+      'install',
+      '-g',
+      spec,
+      `--registry=${reg}`,
+      '--fetch-timeout=60000',
+      '--allow-scripts=@deepseek-ai/dsh-subprocess-local,koffi,node-pty,@google/genai,protobufjs',
+    ]
+    const r = await this.runStreamed('npm', args, onLog)
+    if (!r.ok) {
+      onLog?.(`\n[godsh 错误诊断] 安装失败。\n1. 若提示 EPERM，请确保关闭后台正在运行的 dsh/node 进程；\n2. 尝试以管理员身份重新运行 godsh。\n`)
+      throw new Error(`npm 安装失败: ${r.output}`)
+    }
+    DshEnvManager.invalidateCache()
     // 注册 base：找 npm 全局实例
     const detected = findDshInstances([])
     const global = detected.find((d) => d.name.startsWith('npm-')) ?? detected[0]
@@ -268,7 +296,7 @@ export class DshEnvManager {
       cfg.dsh.activeVersion = this.instanceName(BASE_ID)
       this.store.writeConfig(cfg)
     }
-    return { id: BASE_ID, command: `npm install -g ${spec}` }
+    return { id: BASE_ID, command: `npm ${args.join(' ')}` }
   }
 
   /** 添加并列环境（npm --prefix 安装到受管目录）。 */
@@ -279,11 +307,23 @@ export class DshEnvManager {
     const dir = join(this.managedRoot, name)
     mkdirSync(dir, { recursive: true })
     const spec = versionSpec ? `@deepseek-ai/dsh@${versionSpec}` : '@deepseek-ai/dsh'
-    const r = await this.runStreamed('npm', ['install', '--prefix', dir, spec], onLog)
+    const reg = resolveNpmRegistry()
+    onLog?.(`[godsh] 正在使用镜像源加速: ${reg}\n[godsh] 准备创建并列环境 ${name} (${spec})...\n`)
+    const args = [
+      'install',
+      '--prefix',
+      dir,
+      spec,
+      `--registry=${reg}`,
+      '--fetch-timeout=60000',
+      '--allow-scripts=@deepseek-ai/dsh-subprocess-local,koffi,node-pty,@google/genai,protobufjs',
+    ]
+    const r = await this.runStreamed('npm', args, onLog)
     if (!r.ok) {
       rmSync(dir, { recursive: true, force: true })
       throw new Error(`npm 安装失败: ${r.output}`)
     }
+    DshEnvManager.invalidateCache()
     const pkgDir = join(dir, 'node_modules', '@deepseek-ai', 'dsh')
     const entry = this.packageEntry(pkgDir)
     if (!entry) {

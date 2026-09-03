@@ -14,6 +14,7 @@ export default function DshEnvsPage() {
   const [profiles, setProfiles] = useState<ProfileView[]>([])
   const [envName, setEnvName] = useState('')
   const [envVersion, setEnvVersion] = useState('')
+  const [refreshing, setRefreshing] = useState(false)
   const pollTimer = useRef<ReturnType<typeof setInterval> | null>(null)
   const { toast, show } = useToast()
   const { t } = useI18n()
@@ -25,6 +26,30 @@ export default function DshEnvsPage() {
       setProfiles(p)
       setPublishedVersions(v.published ?? [])
       setStatus(s)
+    } catch (err) {
+      show(err instanceof Error ? err.message : String(err), true)
+    }
+  }
+
+  async function handleRefresh() {
+    if (refreshing) return
+    setRefreshing(true)
+    try {
+      await api.dshRefresh()
+      await load()
+      show('✅ 已刷新 DSH 环境与版本探测缓存')
+    } catch (err) {
+      show(err instanceof Error ? err.message : String(err), true)
+    } finally {
+      setRefreshing(false)
+    }
+  }
+
+  async function handleClearTasks() {
+    try {
+      await api.dshClearTasks()
+      await load()
+      show('已清空历史任务日志')
     } catch (err) {
       show(err instanceof Error ? err.message : String(err), true)
     }
@@ -139,23 +164,92 @@ export default function DshEnvsPage() {
 
   const { envs, activeVersionName, byProfile, tasks } = info
   const activeId = activeVersionName.replace(/^env:/, '')
-  const runningTask = tasks.find((x) => x.status === 'running')
+  const latestTask = tasks.length > 0 ? tasks[tasks.length - 1] : null
 
   return (
     <>
-      <div className="page-head">
-        <h1 className="page-title">{t('page.dshEnvs.title')}</h1>
-        <p className="page-desc">{t('page.dshEnvs.desc')}</p>
+      <div className="page-head row" style={{ justifyContent: 'space-between', alignItems: 'flex-start' }}>
+        <div>
+          <h1 className="page-title">{t('page.dshEnvs.title')}</h1>
+          <p className="page-desc">{t('page.dshEnvs.desc')}</p>
+        </div>
+        <div className="row" style={{ gap: 8 }}>
+          <button
+            className={`btn ${refreshing ? 'loading' : ''}`}
+            disabled={refreshing}
+            onClick={() => void handleRefresh()}
+          >
+            {refreshing ? '🔄 刷新中…' : '🔄 刷新'}
+          </button>
+        </div>
       </div>
 
-      {runningTask && (
-        <div className="card" style={{ marginBottom: 16, border: '1px solid rgba(245, 158, 11, 0.5)' }}>
-          <div className="card-title" style={{ color: 'var(--warn)' }}>
-            安装中：{runningTask.key}
+      {latestTask && (
+        <div
+          className="card"
+          style={{
+            marginBottom: 16,
+            border:
+              latestTask.status === 'running'
+                ? '1px solid rgba(245, 158, 11, 0.6)'
+                : latestTask.status === 'error'
+                  ? '1px solid rgba(239, 68, 68, 0.6)'
+                  : '1px solid rgba(16, 185, 129, 0.6)',
+          }}
+        >
+          <div className="row" style={{ justifyContent: 'space-between', alignItems: 'center' }}>
+            <div className="row" style={{ gap: 8, alignItems: 'center' }}>
+              <div className="card-title" style={{ margin: 0 }}>
+                任务日志：{latestTask.key}
+              </div>
+              <span
+                className={`badge ${
+                  latestTask.status === 'running'
+                    ? 'running'
+                    : latestTask.status === 'done'
+                      ? 'success'
+                      : 'stopped'
+                }`}
+              >
+                {latestTask.status === 'running' ? '⏳ 执行中…' : latestTask.status === 'done' ? '✅ 已完成' : '❌ 失败'}
+              </span>
+            </div>
+            <div className="row" style={{ gap: 8 }}>
+              {latestTask.log && (
+                <button
+                  className="btn sm"
+                  onClick={() => {
+                    void navigator.clipboard.writeText(latestTask.log)
+                    show('已复制日志到剪贴板')
+                  }}
+                >
+                  📋 复制日志
+                </button>
+              )}
+              <button className="btn sm" onClick={() => void handleClearTasks()}>
+                清空日志
+              </button>
+            </div>
           </div>
-          <div className="log-panel" style={{ marginTop: 8, maxHeight: 160 }}>
-            {runningTask.log || '（等待输出…）'}
-          </div>
+          {latestTask.status === 'error' && latestTask.message && (
+            <div style={{ marginTop: 8, color: 'var(--err)', fontSize: 13, fontWeight: 500 }}>
+              ⚠ 错误原因：{latestTask.message}
+            </div>
+          )}
+          <pre
+            className="log-panel"
+            style={{
+              marginTop: 8,
+              maxHeight: 220,
+              overflowY: 'auto',
+              whiteSpace: 'pre-wrap',
+              wordBreak: 'break-word',
+              fontFamily: 'Consolas, monospace',
+              fontSize: 12,
+            }}
+          >
+            {latestTask.log || '（等待输出…）'}
+          </pre>
         </div>
       )}
 

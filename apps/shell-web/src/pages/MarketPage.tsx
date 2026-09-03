@@ -445,6 +445,25 @@ export default function MarketPage() {
                         >
                           {isSelected ? '取消勾选' : '加入队列'}
                         </button>
+                        <button
+                          className="btn sm"
+                          title="暂存到仓库沙箱中枢，以便随取随用"
+                          onClick={async () => {
+                            try {
+                              await api.vaultAddMarket({
+                                name: pkg,
+                                version: p.version || 'latest',
+                                description: desc(p),
+                                category: typeof p.category === 'string' ? p.category : undefined,
+                              })
+                              show(`✅ 已暂存 ${p.name} 到仓库沙箱`)
+                            } catch (e) {
+                              show(e instanceof Error ? e.message : String(e), true)
+                            }
+                          }}
+                        >
+                          📦 暂存
+                        </button>
                       </>
                     )}
                   </div>
