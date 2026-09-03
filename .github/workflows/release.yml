@@ -11,6 +11,9 @@ permissions:
 jobs:
   build:
     runs-on: windows-latest
+    defaults:
+      run:
+        shell: pwsh
     steps:
       - uses: actions/checkout@v4
 
@@ -19,7 +22,13 @@ jobs:
           node-version: 20
 
       - name: Install pnpm
-        run: npm install -g pnpm@11.22.0
+        run: |
+          npm install -g pnpm@11.22.0
+          $prefix = (npm config get prefix).Trim()
+          Add-Content -Path $env:GITHUB_PATH -Value $prefix
+          Add-Content -Path $env:GITHUB_PATH -Value "$env:APPDATA\npm"
+          Remove-Item "$env:APPDATA\npm\pnpm.ps1" -Force -ErrorAction SilentlyContinue
+          Remove-Item "$prefix\pnpm.ps1" -Force -ErrorAction SilentlyContinue
 
       # Rust GNU 工具链（与本地已验证的打包环境一致，会产出 WebView2Loader.dll）
       - uses: dtolnay/rust-toolchain@stable
