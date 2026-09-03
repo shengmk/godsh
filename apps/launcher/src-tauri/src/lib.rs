@@ -2,9 +2,18 @@ use std::net::TcpListener;
 use std::path::PathBuf;
 use std::process::{Child, Command};
 use std::sync::Mutex;
-use tauri::Manager;
+use tauri::{Manager, State};
 
 struct ServerProc(Mutex<Option<Child>>);
+
+/// 实际选定的后端端口（Tauri command 暴露给前端，保证前后端一致）。
+struct BackendPort(u16);
+
+/// 返回实际监听的后端端口（供前端动态拼接 API 基址，避免 4780 被占后偏移错位）。
+#[tauri::command]
+fn get_server_port(state: State<BackendPort>) -> u16 {
+  state.0
+}
 
 /// 去掉 Windows 的 `\\?\`（verbatim）前缀，node 无法解析带该前缀的路径。
 fn clean_path(p: PathBuf) -> PathBuf {
@@ -154,7 +163,12 @@ fn open_external(url: String) -> Result<(), String> {
 pub fn run() {
   tauri::Builder::default()
     .manage(ServerProc(Mutex::new(None)))
-    .invoke_handler(tauri::generate_handler![open_dsh_profile, open_app_window, open_external])
+    .invoke_handler(tauri::generate_handler![
+      get_server_port,
+      open_dsh_profile,
+      open_app_window,
+      open_external
+    ])
     .setup(|app| {
       if cfg!(debug_assertions) {
         app.handle().plugin(
@@ -167,6 +181,7 @@ pub fn run() {
       // 动态探测空闲端口（首选 4780，已占用则顺序找下一个空闲端口）
       let port = find_free_port(4780);
       eprintln!("[godsh] 后端端口: {port}");
+      app.manage(BackendPort(port));
 
       let server = std::env::var("DSH_LAUNCHER_SERVER")
         .ok()

@@ -23,12 +23,27 @@ import type {
   WorkflowTemplate,
   VaultPlugin,
 } from './types'
+import { isTauri, tauriInvoke } from './tauri'
 
-// 默认同源 /api（Web 模式）；Tauri 模式可设 VITE_API_BASE=http://127.0.0.1:4780/api
-const BASE = (import.meta.env.VITE_API_BASE as string | undefined) ?? '/api'
+// 非 Tauri（Web/浏览器）回退基址：默认同源 /api；也可由 VITE_API_BASE 覆盖。
+const FALLBACK_BASE = (import.meta.env.VITE_API_BASE as string | undefined) ?? '/api'
+
+// Tauri 桌面端：后端端口由 Rust 动态探测（4780 被占则顺延），
+// 前端必须运行时查询实际端口，避免前后端端口错位导致「连接被拒绝」。
+let basePromise: Promise<string> | null = null
+function resolveBase(): Promise<string> {
+  if (isTauri()) {
+    basePromise ??= tauriInvoke('get_server_port')
+      .then((port) => `http://127.0.0.1:${port as number}/api`)
+      .catch(() => FALLBACK_BASE)
+    return basePromise
+  }
+  return Promise.resolve(FALLBACK_BASE)
+}
 
 async function req<T>(path: string, init?: RequestInit): Promise<T> {
-  const res = await fetch(`${BASE}${path}`, {
+  const base = await resolveBase()
+  const res = await fetch(`${base}${path}`, {
     headers: init?.body ? { 'Content-Type': 'application/json' } : undefined,
     ...init,
   })
