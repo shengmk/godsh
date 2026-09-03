@@ -23,7 +23,10 @@ tauri-build = { version = "2.6.3" }
 serde_json = "1.0"
 serde = { version = "1.0", features = ["derive"] }
 log = "0.4"
-tauri = { version = "2.11.3" }
+# custom-protocol：tauri 判定 release 模式的关键 feature（dev = !custom_protocol）。
+# 未启用时 cargo build 产出的是 dev 版 exe → 加载 devUrl(localhost:5173) 而非内嵌前端，
+# 表现为「localhost 拒绝连接」。必须显式启用以在纯 cargo build 下嵌入 frontendDist。
+tauri = { version = "2.11.3", features = ["custom-protocol"] }
 tauri-plugin-log = "2"
 url = "2"
 
