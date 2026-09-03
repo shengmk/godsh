@@ -47,6 +47,52 @@ fn data_dir() -> String {
   })
 }
 
+/// 启动诊断日志：写入 <data>/logs/desktop-boot.log（追加），便于定位「打不开/端口拒绝」。
+fn boot_log(msg: &str) {
+  use std::io::Write;
+  let data = data_dir();
+  let dir = format!("{}\\logs", data);
+  let _ = std::fs::create_dir_all(&dir);
+  let ts = std::time::SystemTime::now()
+    .duration_since(std::time::UNIX_EPOCH)
+    .map(|d| d.as_secs())
+    .unwrap_or(0);
+  if let Ok(mut f) = std::fs::OpenOptions::new()
+    .create(true)
+    .append(true)
+    .open(format!("{}\\desktop-boot.log", dir))
+  {
+    let _ = writeln!(f, "[{ts}] {msg}");
+  }
+}
+
+/// 定位 node 可执行文件：先环境变量覆盖，再常见安装路径，最后回退 PATH 的 node。
+fn find_node_exe() -> Option<PathBuf> {
+  if let Ok(n) = std::env::var("DSH_LAUNCHER_NODE") {
+    if !n.is_empty() {
+      let p = PathBuf::from(n);
+      if p.exists() {
+        return Some(p);
+      }
+    }
+  }
+  let sys = std::env::var("SystemDrive").unwrap_or_else(|_| "C:".into());
+  let local = std::env::var("LOCALAPPDATA").unwrap_or_default();
+  let candidates = [
+    format!("{}\\Program Files\\nodejs\\node.exe", sys),
+    format!("{}\\Program Files (x86)\\nodejs\\node.exe", sys),
+    format!("{}\\Programs\\nodejs\\node.exe", local),
+    format!("{}\\Programs\\fnm\\node.exe", local),
+  ];
+  for c in candidates {
+    let p = PathBuf::from(c);
+    if p.exists() {
+      return Some(p);
+    }
+  }
+  None
+}
+
 /// 动态探测空闲端口：优先 preferred（默认 4780），若已占用则从 preferred+1 向后找，
 /// 最多扫描 100 个端口。TcpListener::bind 成功即说明端口可用（绑定测试后立即释放）。
 fn find_free_port(preferred: u16) -> u16 {
@@ -181,8 +227,10 @@ pub fn run() {
       // 动态探测空闲端口（首选 4780，已占用则顺序找下一个空闲端口）
       let port = find_free_port(4780);
       eprintln!("[godsh] 后端端口: {port}");
+      boot_log(&format!("godsh 启动; 探测端口: {port}; data: {}", data_dir()));
       app.manage(BackendPort(port));
 
+      // 解析后端入口 server.mjs（env 覆盖 → 打包资源）
       let server = std::env::var("DSH_LAUNCHER_SERVER")
         .ok()
         .filter(|p| !p.is_empty())
@@ -191,7 +239,22 @@ pub fn run() {
         .or_else(|| resolve_resource(app, "server.mjs"));
 
       if let Some(server) = server {
-        let mut cmd = Command::new("node");
+        let server_str = server.to_string_lossy().to_string();
+        boot_log(&format!("server.mjs 解析: {server_str} (exists={})", server.exists()));
+
+        // node 定位：绝对路径优先，避免桌面环境 PATH 差异导致后端无法启动
+        let node_exe = find_node_exe();
+        let mut cmd = match &node_exe {
+          Some(p) => {
+            boot_log(&format!("node 定位(绝对路径): {p:?}"));
+            let mut c = Command::new(p);
+            c
+          }
+          None => {
+            boot_log("node 未在常见路径找到，回退 PATH 'node'");
+            Command::new("node")
+          }
+        };
         cmd.arg(&server)
           .arg("serve")
           .arg("--port")
@@ -206,14 +269,19 @@ pub fn run() {
         }
         match cmd.spawn() {
           Ok(child) => {
+            boot_log(&format!("后端已启动 pid={}", child.id()));
             *app.state::<ServerProc>().0.lock().unwrap() = Some(child);
           }
           Err(e) => {
-            eprintln!("[godsh] 启动后端失败: {e}");
+            let msg = format!("后端启动失败: {e}");
+            eprintln!("[godsh] {msg}");
+            boot_log(&msg);
           }
         }
       } else {
-        eprintln!("[godsh] 未找到 server.mjs，后端未启动");
+        let msg = "未找到 server.mjs，后端未启动";
+        eprintln!("[godsh] {msg}");
+        boot_log(msg);
       }
 
       Ok(())
