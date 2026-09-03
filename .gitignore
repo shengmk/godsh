@@ -15,14 +15,6 @@ data/*
 data/logs/*
 !data/logs/.gitkeep
 data/runtime/
-data/config.json
-data/dsh-envs.json
-data/plugins.json
-data/kernels.json
-data/allocations.json
-data/profiles.json
-data/unified-kernel.json
-data/build-permissions.json
 
 # release 二进制（作为 GitHub Release 附件，不提交到仓库）
 release/*.exe

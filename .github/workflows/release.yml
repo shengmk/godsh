@@ -17,7 +17,7 @@ jobs:
 
       - uses: pnpm/action-setup@v4
         with:
-          version: 9
+          version: 11
 
       - name: Install Rust (GNU/MinGW)
         uses: dtolnay/rust-toolchain@stable
@@ -45,4 +45,5 @@ jobs:
             release/godsh-*.exe
             release/godsh-*.zip
             release/SHA256SUMS.txt
-          draft: true
+          draft: false
+          generate_release_notes: true
