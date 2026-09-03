@@ -5,6 +5,9 @@ on:
     tags:
       - 'v*'
 
+permissions:
+  contents: write
+
 jobs:
   build:
     runs-on: windows-latest
@@ -14,15 +17,23 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 20
+          cache: pnpm
 
       - uses: pnpm/action-setup@v4
         with:
           version: 11
 
-      - name: Install Rust (GNU/MinGW)
-        uses: dtolnay/rust-toolchain@stable
+      # Rust GNU 工具链（与本地已验证的打包环境一致，会产出 WebView2Loader.dll）
+      - uses: dtolnay/rust-toolchain@stable
         with:
           targets: x86_64-pc-windows-gnu
+
+      # MinGW gcc：GNU 链接必需
+      - uses: msys2/setup-msys2@v2
+        with:
+          msystem: MINGW64
+          update: false
+          install: mingw-w64-x86_64-gcc
 
       - name: Install deps
         run: pnpm install --ignore-scripts
@@ -32,13 +43,14 @@ jobs:
           pnpm typecheck
           pnpm test
 
-      - name: Build & package
+      - name: Build & package (NSIS installer + portable zip)
         shell: pwsh
         run: |
           $v = "${{ github.ref_name }}".TrimStart('v')
+          $env:Path = "C:\msys64\mingw64\bin;" + $env:Path
           pwsh -File scripts/make-release.ps1 -Version $v
 
-      - name: Upload Release
+      - name: Upload Release Assets
         uses: softprops/action-gh-release@v2
         with:
           files: |
@@ -46,4 +58,16 @@ jobs:
             release/godsh-*.zip
             release/SHA256SUMS.txt
           draft: false
-          generate_release_notes: true
+          overwrite: true
+          fail_on_unmatched_files: false
+          body: |
+            ## godsh v${{ github.ref_name }} — 自动云端编译版
+
+            本 Release 由 GitHub Actions 在云端完整编译生成（真正的新版桌面程序）。
+
+            ### 📦 下载
+            - `godsh-*-x64-setup.exe` — Windows 安装程序
+            - `godsh-*-x64.zip` — 便携版（解压即用）
+            - `SHA256SUMS.txt` — SHA256 校验和
+
+            ### 更新内容详见仓库 docs/方案/
