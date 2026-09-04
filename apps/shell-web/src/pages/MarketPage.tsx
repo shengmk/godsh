@@ -1,6 +1,6 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { api } from '../api'
-import type { MarketPlugin, ProfileView } from '../types'
+import type { MarketPlugin, ProfileView, VaultPlugin } from '../types'
 import { ErrorText, Loading, Toast } from '../components'
 import { useToast } from '../hooks'
 import { useI18n } from '../i18n'
@@ -67,12 +67,12 @@ const ERROR_TYPE_LABEL: Record<string, string> = {
   'not-installed': '非独立依赖',
   protected: '受保护的内核',
   'release-age': '发布年龄限制',
-  other: '安装失败',
+  other: '操作失败',
 }
 
 function errorLabel(r: { errorType?: string; message?: string; stderr?: string }): string {
   const type = r.errorType ?? 'other'
-  const label = ERROR_TYPE_LABEL[type] ?? '安装失败'
+  const label = ERROR_TYPE_LABEL[type] ?? '操作失败'
   const msg = r.message || r.stderr || ''
   return msg ? `${label}：${msg}` : label
 }
@@ -80,7 +80,6 @@ function errorLabel(r: { errorType?: string; message?: string; stderr?: string }
 /**
  * 真实安装包名：市场索引的 `name`（展示名）≠ npm 包名。
  * 例如 name='dsh-memory'，npm='@furongjun1999/dsh-memory'——必须用 npm 字段才能装。
- * 返回 p.npm（真实包名）优先，无 npm 字段时回退 name（部分插件 npm 字段为空，可能是同名词或需 tarball）。
  */
 function pkgName(p: MarketPlugin): string {
   if (typeof p.npm === 'string' && p.npm.trim()) return p.npm.trim()
@@ -88,9 +87,12 @@ function pkgName(p: MarketPlugin): string {
 }
 
 type SortBy = 'default' | 'hot' | 'latest'
+type StatusFilter = 'all' | 'uninstalled' | 'vault' | 'installed'
 
 interface QueueItem {
   pkg: string
+  displayName: string
+  action: 'profile-install' | 'vault-download'
   status: 'pending' | 'installing' | 'done' | 'error'
   error?: string
 }
@@ -100,26 +102,46 @@ export default function MarketPage() {
   const [profile, setProfile] = useState('web')
   const [query, setQuery] = useState('')
   const [plugins, setPlugins] = useState<MarketPlugin[] | null>(null)
+  const [vaultPlugins, setVaultPlugins] = useState<VaultPlugin[]>([])
   const [installedNames, setInstalledNames] = useState<string[]>([])
   const [installing, setInstalling] = useState<string | null>(null)
+  const [vaultActing, setVaultActing] = useState<string | null>(null)
   const [sortBy, setSortBy] = useState<SortBy>('default')
   const [category, setCategory] = useState('') // '' = 全部
+  const [statusFilter, setStatusFilter] = useState<StatusFilter>('all')
   const [selected, setSelected] = useState<Set<string>>(new Set())
   const [queue, setQueue] = useState<QueueItem[] | null>(null)
   const [queueDone, setQueueDone] = useState(false)
-  // 分批渲染：初始 60，滚动/「加载更多」每次 +60（市场全量 2467 条不一次性渲染）
+  const [queueTitle, setQueueTitle] = useState('安装进度')
+  // 分批渲染：初始 60，滚动/「加载更多」每次 +60
   const [visibleCount, setVisibleCount] = useState(60)
   const PAGE_STEP = 60
   const { toast, show } = useToast()
   const { t } = useI18n()
 
-  // 当前 Profile 已安装的插件清单（dependencies ∪ bundles；切 profile 时权威替换，避免残留）
-  useEffect(() => {
-    api
-      .profilePlugins(profile)
-      .then((r) => setInstalledNames(r.installedNames ?? []))
-      .catch(() => {})
+  const loadVault = useCallback(async () => {
+    try {
+      const v = await api.vault()
+      setVaultPlugins(v)
+    } catch {
+      /* 忽略 */
+    }
+  }, [])
+
+  // 当前 Profile 已安装的插件清单
+  const refreshInstalled = useCallback(async () => {
+    if (!profile) return
+    try {
+      const r = await api.profilePlugins(profile)
+      setInstalledNames(r.installedNames ?? [])
+    } catch {
+      /* 忽略 */
+    }
   }, [profile])
+
+  useEffect(() => {
+    void refreshInstalled()
+  }, [refreshInstalled])
 
   useEffect(() => {
     api
@@ -133,9 +155,25 @@ export default function MarketPage() {
       .market()
       .then(setPlugins)
       .catch((e) => show(e instanceof Error ? e.message : String(e), true))
+    void loadVault()
   }, [])
 
-  // 搜索/分类/排序全部前端内存完成（市场数据已一次加载，零网络请求）
+  // 辅助判断是否在沙箱仓库中
+  const getVaultPlugin = useCallback(
+    (p: MarketPlugin): VaultPlugin | undefined => {
+      const pkg = pkgName(p)
+      return vaultPlugins.find(
+        (v) =>
+          v.id === p.name ||
+          v.id === pkg ||
+          v.name === p.name ||
+          v.name === pkg,
+      )
+    },
+    [vaultPlugins],
+  )
+
+  // 搜索/分类/状态/排序前端内存即时完成
   const filteredPlugins = useMemo(() => {
     const list = plugins ?? []
     const q = query.trim().toLowerCase()
@@ -151,6 +189,14 @@ export default function MarketPage() {
     if (category) {
       out = out.filter((p) => (p.category as string | undefined) === category)
     }
+    if (statusFilter === 'installed') {
+      out = out.filter((p) => installedNames.includes(pkgName(p)))
+    } else if (statusFilter === 'vault') {
+      out = out.filter((p) => Boolean(getVaultPlugin(p)))
+    } else if (statusFilter === 'uninstalled') {
+      out = out.filter((p) => !installedNames.includes(pkgName(p)))
+    }
+
     if (sortBy === 'hot') {
       out = [...out].sort((a, b) => {
         const da = Number(a.downloads ?? a.downloadCount ?? 0)
@@ -166,30 +212,33 @@ export default function MarketPage() {
       })
     }
     return out
-  }, [plugins, query, category, sortBy])
+  }, [plugins, query, category, statusFilter, sortBy, installedNames, getVaultPlugin])
 
-  // 市场分类列表（用于筛选下拉）
+  // 市场分类统计
   const categoryOptions = useMemo(() => {
     const seen = new Map<string, number>()
     for (const p of plugins ?? []) {
       const c = p.category as string | undefined
       if (c) seen.set(c, (seen.get(c) ?? 0) + 1)
     }
-    return [...seen.entries()].map(([cat, cnt]) => ({ cat, zh: CATEGORY_LABEL[cat] ?? cat, cnt })).sort((a, b) => b.cnt - a.cnt)
+    return [...seen.entries()]
+      .map(([cat, cnt]) => ({ cat, zh: CATEGORY_LABEL[cat] ?? cat, cnt }))
+      .sort((a, b) => b.cnt - a.cnt)
   }, [plugins])
 
-  // 搜索/分类/排序变化时重置分批
+  // 搜索/分类/排序变化时重置分页
   useEffect(() => {
     setVisibleCount(PAGE_STEP)
-  }, [query, category, sortBy])
+  }, [query, category, statusFilter, sortBy])
 
-  async function install(pkg: string, display: string, marketName?: string) {
+  // 单插件安装到当前 Profile
+  async function installToProfile(pkg: string, display: string, marketName?: string) {
     if (!profile) return show('请先选择目标 Profile', true)
     setInstalling(pkg)
     try {
       const r = await api.installPlugin(profile, 'add', pkg, marketName)
       if (r.ok) {
-        show(`已安装 ${display} → ${profile}`)
+        show(`✅ 已成功安装 ${display} → ${profile}`)
         await refreshInstalled()
       } else {
         show(errorLabel(r), true)
@@ -201,6 +250,50 @@ export default function MarketPage() {
     }
   }
 
+  // 单插件下载到沙箱仓库 (Vault)
+  async function downloadToVault(p: MarketPlugin) {
+    const pkg = pkgName(p)
+    setVaultActing(pkg)
+    try {
+      const r = await api.vaultAddMarket({
+        name: pkg,
+        version: p.version || 'latest',
+        description: desc(p),
+        category: typeof p.category === 'string' ? p.category : undefined,
+      })
+      if (r.ok) {
+        show(`📦 已将 ${p.name} 成功下载保存至沙箱仓库`)
+        await loadVault()
+      } else {
+        show('暂存沙箱失败', true)
+      }
+    } catch (e) {
+      show(e instanceof Error ? e.message : String(e), true)
+    } finally {
+      setVaultActing(null)
+    }
+  }
+
+  // 从沙箱瞬时注入/部署到当前 Profile
+  async function deployFromVault(vPlugin: VaultPlugin, display: string) {
+    if (!profile) return show('请先选择目标 Profile', true)
+    setVaultActing(vPlugin.name)
+    try {
+      const r = await api.vaultDeploy(vPlugin.id, profile)
+      if (r.ok) {
+        show(`🚀 已从沙箱成功挂载部署 ${display} → ${profile}`)
+        await refreshInstalled()
+        await loadVault()
+      } else {
+        show('沙箱注入失败', true)
+      }
+    } catch (e) {
+      show(e instanceof Error ? e.message : String(e), true)
+    } finally {
+      setVaultActing(null)
+    }
+  }
+
   async function remove(pkg: string, display: string) {
     if (!profile) return show('请先选择目标 Profile', true)
     if (!window.confirm(`确定从 ${profile} 卸载 ${display}？`)) return
@@ -209,7 +302,7 @@ export default function MarketPage() {
       const r = await api.uninstallPlugin(profile, pkg)
       if (r.ok) {
         show(`已卸载 ${display}`)
-        dropInstalled(pkg)
+        setInstalledNames((prev) => (prev ?? []).filter((x) => x !== pkg))
         await refreshInstalled()
       } else {
         show(r.message || `卸载失败（${r.errorType ?? 'unknown'}）`, true)
@@ -239,24 +332,6 @@ export default function MarketPage() {
     }
   }
 
-  /**
-   * 刷新已安装状态：以后端返回为权威（直接替换，避免并集残留已卸载插件）。
-   * 卸载成功后调用 dropInstalled 立即本地移除，再 refresh 对齐。
-   */
-  async function refreshInstalled() {
-    try {
-      const r = await api.profilePlugins(profile)
-      setInstalledNames(r.installedNames ?? [])
-    } catch {
-      /* 忽略（保留当前状态） */
-    }
-  }
-
-  /** 明确移除某包（卸载成功后调用），避免合并策略残留已卸载插件。 */
-  function dropInstalled(pkg: string) {
-    setInstalledNames((prev) => (prev ?? []).filter((x) => x !== pkg))
-  }
-
   function toggleSelect(name: string) {
     setSelected((prev) => {
       const next = new Set(prev)
@@ -266,29 +341,44 @@ export default function MarketPage() {
     })
   }
 
-  /** 批量安装：串行队列安装，逐个显示进度（1/3、2/3…），失败时标出具体包。 */
+  // 批量安装到当前 Profile
   async function batchInstall() {
     const selectedNames = Array.from(selected)
     if (selectedNames.length === 0) return show('请先勾选要安装的插件', true)
     if (!profile) return show('请先选择目标 Profile', true)
-    // 每个选中项对应的市场插件（解析真实安装参数）
-    const selectedPlugins = filteredPlugins.filter((p) => selected.has(p.name))
-    const pkgs = selectedPlugins.map((p) => pkgName(p))
-    const marketNames = selectedPlugins.map((p) => p.name)
-    if (pkgs.length === 0) return show('选中的插件不在当前列表，请重新选择', true)
-    setQueue(pkgs.map((p) => ({ pkg: p, status: 'pending' as const })))
+    const selectedPlugins = (plugins ?? []).filter((p) => selected.has(p.name))
+    if (selectedPlugins.length === 0) return show('选中的插件不在列表中，请重新选择', true)
+
+    setQueueTitle(`批量安装到 [${profile}]`)
+    setQueue(
+      selectedPlugins.map((p) => ({
+        pkg: pkgName(p),
+        displayName: p.name,
+        action: 'profile-install',
+        status: 'pending' as const,
+      })),
+    )
     setQueueDone(false)
     let failedCount = 0
-    for (let i = 0; i < pkgs.length; i++) {
-      setQueue((prev) => (prev ? prev.map((q, idx) => (idx === i ? { ...q, status: 'installing' as const } : q)) : prev))
+
+    for (let i = 0; i < selectedPlugins.length; i++) {
+      const p = selectedPlugins[i]!
+      const pkg = pkgName(p)
+      setQueue((prev) =>
+        prev ? prev.map((q, idx) => (idx === i ? { ...q, status: 'installing' as const } : q)) : prev,
+      )
       try {
-        const r = await api.installPlugin(profile, 'add', pkgs[i]!, marketNames[i])
+        const r = await api.installPlugin(profile, 'add', pkg, p.name)
         if (!r.ok) failedCount++
         setQueue((prev) =>
           prev
             ? prev.map((q, idx) =>
                 idx === i
-                  ? { ...q, status: r.ok ? ('done' as const) : ('error' as const), error: r.ok ? undefined : errorLabel(r) }
+                  ? {
+                      ...q,
+                      status: r.ok ? ('done' as const) : ('error' as const),
+                      error: r.ok ? undefined : errorLabel(r),
+                    }
                   : q,
               )
             : prev,
@@ -298,7 +388,9 @@ export default function MarketPage() {
         setQueue((prev) =>
           prev
             ? prev.map((q, idx) =>
-                idx === i ? { ...q, status: 'error' as const, error: e instanceof Error ? e.message : String(e) } : q,
+                idx === i
+                  ? { ...q, status: 'error' as const, error: e instanceof Error ? e.message : String(e) }
+                  : q,
               )
             : prev,
         )
@@ -307,93 +399,208 @@ export default function MarketPage() {
     setQueueDone(true)
     await refreshInstalled()
     setSelected(new Set())
-    show(failedCount > 0 ? `批量安装完成：${pkgs.length - failedCount} 成功，${failedCount} 失败（见进度面板）` : `批量安装完成：${pkgs.length} 个全部成功`)
+    show(
+      failedCount > 0
+        ? `批量安装完成：${selectedPlugins.length - failedCount} 成功，${failedCount} 失败`
+        : `批量安装完成：${selectedPlugins.length} 个全部成功`,
+    )
   }
 
-  /** 重试队列中单个失败的安装项。 */
-  async function retryQueueItem(index: number) {
-    if (!queue || !queue[index]) return
-    const item = queue[index]!
-    if (!profile) return show('请先选择目标 Profile', true)
-    setQueue((prev) => (prev ? prev.map((q, idx) => (idx === index ? { ...q, status: 'installing' as const, error: undefined } : q)) : prev))
-    try {
-      const r = await api.installPlugin(profile, 'add', item.pkg, item.pkg)
+  // 批量下载到沙箱仓库 (Vault)
+  async function batchDownloadVault() {
+    const selectedNames = Array.from(selected)
+    if (selectedNames.length === 0) return show('请先勾选要下载到沙箱的插件', true)
+    const selectedPlugins = (plugins ?? []).filter((p) => selected.has(p.name))
+    if (selectedPlugins.length === 0) return show('选中的插件不在列表中，请重新选择', true)
+
+    setQueueTitle('批量下载到沙箱隔离仓库 (Vault)')
+    setQueue(
+      selectedPlugins.map((p) => ({
+        pkg: pkgName(p),
+        displayName: p.name,
+        action: 'vault-download',
+        status: 'pending' as const,
+      })),
+    )
+    setQueueDone(false)
+    let failedCount = 0
+
+    for (let i = 0; i < selectedPlugins.length; i++) {
+      const p = selectedPlugins[i]!
+      const pkg = pkgName(p)
       setQueue((prev) =>
-        prev
-          ? prev.map((q, idx) => (idx === index ? { ...q, status: r.ok ? ('done' as const) : ('error' as const), error: r.ok ? undefined : errorLabel(r) } : q))
-          : prev,
+        prev ? prev.map((q, idx) => (idx === i ? { ...q, status: 'installing' as const } : q)) : prev,
       )
-      show(r.ok ? `已重试安装 ${item.pkg}` : `重试失败：${errorLabel(r)}`, !r.ok)
-      if (r.ok) await refreshInstalled()
-    } catch (e) {
-      setQueue((prev) => (prev ? prev.map((q, idx) => (idx === index ? { ...q, status: 'error' as const, error: e instanceof Error ? e.message : String(e) } : q)) : prev))
-      show(`重试失败：${e instanceof Error ? e.message : String(e)}`, true)
+      try {
+        const r = await api.vaultAddMarket({
+          name: pkg,
+          version: p.version || 'latest',
+          description: desc(p),
+          category: typeof p.category === 'string' ? p.category : undefined,
+        })
+        if (!r.ok) failedCount++
+        setQueue((prev) =>
+          prev
+            ? prev.map((q, idx) =>
+                idx === i
+                  ? {
+                      ...q,
+                      status: r.ok ? ('done' as const) : ('error' as const),
+                      error: r.ok ? undefined : '沙箱存储失败',
+                    }
+                  : q,
+              )
+            : prev,
+        )
+      } catch (e) {
+        failedCount++
+        setQueue((prev) =>
+          prev
+            ? prev.map((q, idx) =>
+                idx === i
+                  ? { ...q, status: 'error' as const, error: e instanceof Error ? e.message : String(e) }
+                  : q,
+              )
+            : prev,
+        )
+      }
     }
+    setQueueDone(true)
+    await loadVault()
+    setSelected(new Set())
+    show(
+      failedCount > 0
+        ? `批量下载沙箱完成：${selectedPlugins.length - failedCount} 成功，${failedCount} 失败`
+        : `批量下载沙箱完成：${selectedPlugins.length} 个全部就绪`,
+    )
   }
 
   const selectedCount = selected.size
+  const totalMarketCount = plugins?.length ?? 0
+  const vaultCount = vaultPlugins.length
+  const installedCount = installedNames.length
 
   return (
     <>
       <div className="page-head">
         <h1 className="page-title">{t('page.market.title')}</h1>
-        <p className="page-desc">{t('page.market.desc')} · 勾选多个插件可批量安装，支持按热门 / 最新排序</p>
+        <p className="page-desc">
+          发现并扩展 Godsh 插件 · 支持一键安全下至沙箱仓库、环境瞬时注入与批量极速安装
+        </p>
       </div>
 
-      <div className="toolbar">
-        <span className="muted">安装到</span>
-        <select className="select" value={profile} onChange={(e) => setProfile(e.target.value)}>
-          {profiles.map((p) => (
-            <option key={p.name} value={p.name}>
-              {p.name}
-            </option>
-          ))}
-        </select>
+      {/* 顶部多维控制与过滤中枢 */}
+      <div className="toolbar" style={{ flexWrap: 'wrap', gap: 10 }}>
+        <div className="row" style={{ gap: 8, alignItems: 'center' }}>
+          <span className="muted" style={{ fontSize: 13 }}>目标环境:</span>
+          <select className="select" value={profile} onChange={(e) => setProfile(e.target.value)}>
+            {profiles.map((p) => (
+              <option key={p.name} value={p.name}>
+                {p.name}
+              </option>
+            ))}
+          </select>
+        </div>
+
         <input
           className="input"
-          style={{ flex: 1, minWidth: 220 }}
-          placeholder="搜索插件…"
+          style={{ flex: 1, minWidth: 200 }}
+          placeholder="🔍 搜索插件名、npm 标识或功能描述…"
           value={query}
           onChange={(e) => setQuery(e.target.value)}
         />
+
         <select className="select" value={category} onChange={(e) => setCategory(e.target.value)} title="按市场分类筛选">
-          <option value="">全部分类</option>
+          <option value="">全部分类 ({totalMarketCount})</option>
           {categoryOptions.map((c) => (
             <option key={c.cat} value={c.cat}>
               {c.zh}（{c.cnt}）
             </option>
           ))}
         </select>
-        <select className="select" value={sortBy} onChange={(e) => setSortBy(e.target.value as SortBy)} title="排序方式">
-          <option value="default">默认排序</option>
-          <option value="hot">🔥 热门（下载量）</option>
-          <option value="latest">🆕 最新</option>
-        </select>
-        <button className="btn primary" disabled={selectedCount === 0} onClick={() => void batchInstall()}>
-          {selectedCount > 0 ? `批量安装（${selectedCount}）` : '批量安装'}
-        </button>
-        {selectedCount > 0 && (
-          <button className="btn sm" onClick={() => setSelected(new Set())}>
-            清空选择
+
+        {/* 状态分段控制器 */}
+        <div className="segmented-control">
+          <button
+            className={`segmented-btn ${statusFilter === 'all' ? 'active' : ''}`}
+            onClick={() => setStatusFilter('all')}
+          >
+            全部
           </button>
-        )}
+          <button
+            className={`segmented-btn ${statusFilter === 'vault' ? 'active' : ''}`}
+            onClick={() => setStatusFilter('vault')}
+            title="查看已下载至沙箱隔离仓库的插件"
+          >
+            📦 沙箱就绪 ({vaultCount})
+          </button>
+          <button
+            className={`segmented-btn ${statusFilter === 'installed' ? 'active' : ''}`}
+            onClick={() => setStatusFilter('installed')}
+            title={`查看已安装至当前 [${profile}] 环境的插件`}
+          >
+            🟢 当前已装 ({installedCount})
+          </button>
+          <button
+            className={`segmented-btn ${statusFilter === 'uninstalled' ? 'active' : ''}`}
+            onClick={() => setStatusFilter('uninstalled')}
+          >
+            未安装
+          </button>
+        </div>
+
+        <select className="select" value={sortBy} onChange={(e) => setSortBy(e.target.value as SortBy)} title="排序方式">
+          <option value="default">默认推荐</option>
+          <option value="hot">🔥 热门度 (下载与 Star)</option>
+          <option value="latest">🆕 最新发布</option>
+        </select>
       </div>
+
+      {/* 批量操作浮动条 */}
+      {selectedCount > 0 && (
+        <div className="batch-action-bar">
+          <div className="row" style={{ alignItems: 'center', gap: 10 }}>
+            <span className="badge vault" style={{ fontSize: 13, padding: '4px 10px' }}>
+              已选择 {selectedCount} 项
+            </span>
+            <button className="btn primary" onClick={() => void batchInstall()}>
+              ⚡ 批量安装到 [{profile}]
+            </button>
+            <button className="btn vault" onClick={() => void batchDownloadVault()}>
+              📦 批量下载到沙箱 (Vault)
+            </button>
+            <button className="btn sm subtle" onClick={() => setSelected(new Set())}>
+              清空选择
+            </button>
+          </div>
+        </div>
+      )}
 
       {plugins === null ? (
         <Loading />
       ) : filteredPlugins.length === 0 ? (
-        <ErrorText message="没有匹配的插件" />
+        <ErrorText message="没有匹配的插件，请尝试更换关键词或筛选条件" />
       ) : (
         <>
-          <div className="muted" style={{ marginBottom: 8, fontSize: 12 }}>
-            共 {filteredPlugins.length} 个插件 · 已显示 {Math.min(visibleCount, filteredPlugins.length)} · 可选{' '}
-            {filteredPlugins.filter((p) => !installedNames.includes(pkgName(p))).length} · 已选 {selectedCount}
+          <div className="muted" style={{ marginBottom: 10, fontSize: 12, display: 'flex', justifyContent: 'space-between' }}>
+            <span>
+              共匹配 <strong>{filteredPlugins.length}</strong> 个插件 · 当前已渲染 {Math.min(visibleCount, filteredPlugins.length)}
+            </span>
+            {selectedCount > 0 && (
+              <span style={{ color: 'var(--brand-2)' }}>已勾选 {selectedCount} 个项目准备批量处理</span>
+            )}
           </div>
+
           <div className="grid">
             {filteredPlugins.slice(0, visibleCount).map((p) => {
               const pkg = pkgName(p)
               const installed = installedNames.includes(pkg)
+              const vPlugin = getVaultPlugin(p)
+              const inVault = Boolean(vPlugin)
               const isSelected = selected.has(p.name)
+              const isInstalling = installing === pkg
+              const isVaultActing = vaultActing === pkg
+
               return (
                 <div className={`card${isSelected ? ' selected' : ''}`} key={pkg}>
                   <div className="card-title">
@@ -402,67 +609,92 @@ export default function MarketPage() {
                         type="checkbox"
                         checked={isSelected}
                         onChange={() => toggleSelect(p.name)}
-                        disabled={installed}
-                        title={installed ? '已安装的插件无需再次选择' : '勾选后可批量安装'}
+                        title="勾选后可进行批量安装或批量拉取到沙箱"
                       />
                       <span className="checkbox-label">{isSelected ? '已选' : '选择'}</span>
                     </label>
-                    {p.name}
-                    {p.npm && p.npm !== p.name ? <span className="badge kind">{p.npm}</span> : null}
-                    {p.version ? <span className="badge kind">v{p.version}</span> : null}
-                    {installed && <span className="badge enabled">已安装</span>}
+
+                    <span className="plugin-name" title={p.name}>{p.name}</span>
+
+                    {p.version && <span className="badge kind">v{p.version}</span>}
+                    {installed && <span className="badge enabled">已装入 [{profile}]</span>}
+                    {inVault && <span className="badge vault" title="此插件已在本地沙箱隔离仓库中就绪">📦 沙箱就绪</span>}
                   </div>
-                  <p className="card-sub">{desc(p) || '（无描述）'}</p>
-                  <div className="row" style={{ marginTop: 8, gap: 6 }}>
+
+                  {p.npm && p.npm !== p.name && (
+                    <div className="mono-tag" title="npm 安装标识">
+                      npm: {p.npm}
+                    </div>
+                  )}
+
+                  <p className="card-sub">{desc(p) || '（暂无详细说明文档）'}</p>
+
+                  <div className="row" style={{ marginTop: 'auto', gap: 6, alignItems: 'center' }}>
                     {categoryLabel(p) && <span className="badge">{categoryLabel(p)}</span>}
-                    {fmtCount(p.stars) && <span className="muted">★ {fmtCount(p.stars)}</span>}
+                    {fmtCount(p.stars) && <span className="muted stat-tag">★ {fmtCount(p.stars)}</span>}
                     {fmtCount(p.downloads ?? p.downloadCount) && (
-                      <span className="muted">↓ {fmtCount(p.downloads ?? p.downloadCount)}</span>
+                      <span className="muted stat-tag">↓ {fmtCount(p.downloads ?? p.downloadCount)}</span>
                     )}
                   </div>
-                  <div className="row" style={{ marginTop: 10 }}>
+
+                  <div className="row action-buttons" style={{ marginTop: 12, gap: 8, flexWrap: 'wrap' }}>
                     {installed ? (
                       <>
-                        <button className="btn sm" disabled={installing === pkg} onClick={() => update(pkg, p.name, p.name)}>
-                          {installing === pkg ? '处理中…' : '更新'}
+                        <button
+                          className="btn sm"
+                          disabled={isInstalling}
+                          onClick={() => update(pkg, p.name, p.name)}
+                          title="从官方源检查并更新此插件"
+                        >
+                          {isInstalling ? '更新中…' : '🔄 更新'}
                         </button>
-                        <button className="btn danger sm" disabled={installing === pkg} onClick={() => remove(pkg, p.name)}>
-                          卸载
+                        <button
+                          className="btn danger sm"
+                          disabled={isInstalling}
+                          onClick={() => remove(pkg, p.name)}
+                        >
+                          🗑️ 卸载
                         </button>
                       </>
                     ) : (
                       <>
-                        <button className="btn primary sm" disabled={installing === pkg} onClick={() => install(pkg, p.name, p.name)}>
-                          {installing === pkg ? '安装中…' : '安装'}
-                        </button>
+                        {/* 主安装到 Profile */}
                         <button
-                          className="btn sm"
-                          disabled={installing === pkg}
-                          onClick={() => {
-                            toggleSelect(p.name)
-                            show(isSelected ? '已取消选择' : '已加入批量安装队列')
-                          }}
+                          className="btn primary sm"
+                          disabled={isInstalling || isVaultActing}
+                          onClick={() => installToProfile(pkg, p.name, p.name)}
+                          title={`直接安装并配置到当前运行环境 [${profile}]`}
                         >
-                          {isSelected ? '取消勾选' : '加入队列'}
+                          {isInstalling ? '安装中…' : `⚡ 安装到 ${profile}`}
                         </button>
+
+                        {/* 沙箱操作双轨 */}
+                        {inVault ? (
+                          <button
+                            className="btn vault-inject-btn sm"
+                            disabled={isInstalling || isVaultActing}
+                            onClick={() => deployFromVault(vPlugin!, p.name)}
+                            title="从沙箱秒级挂载注入到当前环境（无需重新下载）"
+                          >
+                            {isVaultActing ? '注入中…' : '🚀 瞬时注入'}
+                          </button>
+                        ) : (
+                          <button
+                            className="btn vault sm"
+                            disabled={isInstalling || isVaultActing}
+                            onClick={() => downloadToVault(p)}
+                            title="下载并隔离暂存到沙箱仓库，不污染生产环境"
+                          >
+                            {isVaultActing ? '下载中…' : '📦 下至沙箱'}
+                          </button>
+                        )}
+
                         <button
-                          className="btn sm"
-                          title="暂存到仓库沙箱中枢，以便随取随用"
-                          onClick={async () => {
-                            try {
-                              await api.vaultAddMarket({
-                                name: pkg,
-                                version: p.version || 'latest',
-                                description: desc(p),
-                                category: typeof p.category === 'string' ? p.category : undefined,
-                              })
-                              show(`✅ 已暂存 ${p.name} 到仓库沙箱`)
-                            } catch (e) {
-                              show(e instanceof Error ? e.message : String(e), true)
-                            }
-                          }}
+                          className={`btn sm subtle ${isSelected ? 'active' : ''}`}
+                          onClick={() => toggleSelect(p.name)}
+                          title="加入/移除批量操作队列"
                         >
-                          📦 暂存
+                          {isSelected ? '✓ 取消' : '+ 队列'}
                         </button>
                       </>
                     )}
@@ -473,30 +705,31 @@ export default function MarketPage() {
           </div>
 
           {visibleCount < filteredPlugins.length && (
-            <div className="row" style={{ marginTop: 14, justifyContent: 'center' }}>
-              <button className="btn" onClick={() => setVisibleCount((v) => v + PAGE_STEP)}>
+            <div className="row" style={{ marginTop: 18, justifyContent: 'center' }}>
+              <button className="btn subtle" onClick={() => setVisibleCount((v) => v + PAGE_STEP)}>
                 加载更多（已显示 {Math.min(visibleCount, filteredPlugins.length)} / {filteredPlugins.length}）
               </button>
             </div>
           )}
 
+          {/* 队列进度监视器 */}
           {queue && (
             <div className="queue-panel">
-              <div className="row">
-                <strong>安装进度</strong>
-                <span className="muted">
-                  {queue.filter((q) => q.status === 'done' || q.status === 'error').length}/{queue.length}
+              <div className="row" style={{ alignItems: 'center' }}>
+                <strong>{queueTitle}</strong>
+                <span className="muted" style={{ marginLeft: 8 }}>
+                  进度: {queue.filter((q) => q.status === 'done' || q.status === 'error').length} / {queue.length}
                 </span>
                 <span className="spacer" />
                 {queueDone ? (
-                  <button className="btn sm" onClick={() => setQueue(null)}>
-                    关闭
+                  <button className="btn sm primary" onClick={() => setQueue(null)}>
+                    完成并关闭
                   </button>
                 ) : (
-                  <span className="muted">正在安装…</span>
+                  <span className="badge running">处理中…</span>
                 )}
               </div>
-              <div className="queue-list">
+              <div className="queue-list" style={{ marginTop: 10 }}>
                 {queue.map((q, i) => (
                   <div className={`queue-item ${q.status}`} key={i}>
                     <span className="queue-status">
@@ -505,23 +738,15 @@ export default function MarketPage() {
                       {q.status === 'done' && '✅'}
                       {q.status === 'error' && '❌'}
                     </span>
-                    <span className="queue-name">{q.pkg}</span>
+                    <span className="queue-name">{q.displayName}</span>
+                    <span className="muted mono-tag" style={{ fontSize: 11 }}>{q.pkg}</span>
                     <span className="spacer" />
-                    <span className="muted">
-                      {q.status === 'pending' && '等待中'}
-                      {q.status === 'installing' && '安装中…'}
-                      {q.status === 'done' && '完成'}
-                      {q.status === 'error' && (q.error ?? '安装失败')}
+                    <span className="muted" style={{ fontSize: 12 }}>
+                      {q.status === 'pending' && '排队中…'}
+                      {q.status === 'installing' && (q.action === 'vault-download' ? '正在拉取到沙箱…' : '正在安装…')}
+                      {q.status === 'done' && '已完成'}
+                      {q.status === 'error' && (q.error ?? '执行失败')}
                     </span>
-                    {q.status === 'error' && queueDone && (
-                      <button
-                        className="btn sm"
-                        onClick={() => void retryQueueItem(i)}
-                        title="重试安装此插件"
-                      >
-                        重试
-                      </button>
-                    )}
                   </div>
                 ))}
               </div>
