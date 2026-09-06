@@ -1,6 +1,7 @@
-import { existsSync, readFileSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { parsePatchList, serializePatchList } from '@godsh/profile-manager'
+import { DATA_DIR } from '@godsh/core'
+import { readPatchChecked, serializePatchList } from '@godsh/profile-manager'
 
 /**
  * PatchManager：操作 cordis.patch.yml 实现零重启 HMR 热插拔与规则治理
@@ -12,6 +13,18 @@ export class PatchManager {
     return join(this.profilesDir, profile, 'cordis.patch.yml')
   }
 
+  private backupPatch(profile: string, patchPath: string): void {
+    if (!existsSync(patchPath)) return
+    try {
+      const backupDir = join(DATA_DIR, 'patches-backup')
+      mkdirSync(backupDir, { recursive: true })
+      const backupPath = join(backupDir, `${profile}-${Date.now()}.yml`)
+      writeFileSync(backupPath, readFileSync(patchPath, 'utf8'), 'utf8')
+    } catch {
+      // 备份失败不阻断流程
+    }
+  }
+
   /**
    * 读取环境 patch 列表
    */
@@ -19,8 +32,7 @@ export class PatchManager {
     const p = this.getPatchPath(profile)
     if (!existsSync(p)) return []
     try {
-      const content = readFileSync(p, 'utf8')
-      const parsed = parsePatchList(content)
+      const parsed = readPatchChecked(p)
       const ids: string[] = []
       for (const e of parsed) {
         ids.push(...e.ids)
@@ -36,8 +48,7 @@ export class PatchManager {
    */
   enablePlugin(profile: string, pluginId: string): boolean {
     const p = this.getPatchPath(profile)
-    const content = existsSync(p) ? readFileSync(p, 'utf8') : ''
-    const list = content ? parsePatchList(content) : []
+    const list = existsSync(p) ? readPatchChecked(p) : []
     let insertEntry = list.find((e) => e.op === 'insert')
     if (!insertEntry) {
       insertEntry = { op: 'insert', ids: [], disabledIds: [] }
@@ -47,6 +58,8 @@ export class PatchManager {
       insertEntry.ids.push(pluginId)
     }
     insertEntry.disabledIds = insertEntry.disabledIds.filter((id) => id !== pluginId)
+
+    this.backupPatch(profile, p)
     writeFileSync(p, serializePatchList(list), 'utf8')
     return true
   }
@@ -56,8 +69,7 @@ export class PatchManager {
    */
   disablePlugin(profile: string, pluginId: string): boolean {
     const p = this.getPatchPath(profile)
-    const content = existsSync(p) ? readFileSync(p, 'utf8') : ''
-    const list = content ? parsePatchList(content) : []
+    const list = existsSync(p) ? readPatchChecked(p) : []
     let insertEntry = list.find((e) => e.op === 'insert')
     if (!insertEntry) {
       insertEntry = { op: 'insert', ids: [], disabledIds: [] }
@@ -69,6 +81,8 @@ export class PatchManager {
     if (!insertEntry.disabledIds.includes(pluginId)) {
       insertEntry.disabledIds.push(pluginId)
     }
+
+    this.backupPatch(profile, p)
     writeFileSync(p, serializePatchList(list), 'utf8')
     return true
   }

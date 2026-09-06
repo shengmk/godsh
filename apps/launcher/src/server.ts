@@ -1,6 +1,6 @@
 import http from 'node:http'
 import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from 'node:fs'
-import { dirname, extname, join, resolve } from 'node:path'
+import { dirname, extname, join, normalize, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { gzipSync } from 'node:zlib'
 import { MONOREPO_ROOT, DATA_DIR, findPidByPort, isPortListening, readLogTail, extractDshWebUrl, ensureDshBundles, ensureCacheIntegrity, ensureCompatibilityShims, isPortAvailable } from '@godsh/core'
@@ -137,6 +137,13 @@ export async function startApiServer(ctx: CliContext, opts: ApiServerOptions): P
   } catch (err) {
     console.warn(`[godsh] patch 修复跳过: ${err instanceof Error ? err.message : String(err)}`)
   }
+  // 清理沙箱中指向已物理删除 Profile 的悬空废弃引用
+  try {
+    const danglingCleaned = vault.cleanDanglingProfiles(profilesDir)
+    if (danglingCleaned > 0) console.log(`[godsh] 已清理沙箱中 ${danglingCleaned} 条已失效 Profile 的悬空索引`)
+  } catch (err) {
+    console.warn(`[godsh] 悬空索引清理跳过: ${err instanceof Error ? err.message : String(err)}`)
+  }
 
   // 会话内运行中的 dsh web 进程（profile → 进程）
   const running = new Map<string, RuntimeProc>()
@@ -148,11 +155,18 @@ export async function startApiServer(ctx: CliContext, opts: ApiServerOptions): P
   for (const e of readRuntimeState(pidDir)) {
     if (running.has(e.profile)) continue
     if (await isPortListening(e.port)) {
-      const logFile = join(logDir, `dsh-web-${e.profile}-${e.port}.log`)
+      const primaryLog = join(logDir, `dsh-${e.profile}-${e.port}.log`)
+      const fallbackLog = join(logDir, `dsh-web-${e.profile}-${e.port}.log`)
+      const logFile = existsSync(primaryLog) ? primaryLog : fallbackLog
       const restoredUrl = extractDshWebUrl(logFile) ?? `http://127.0.0.1:${e.port}`
       running.set(e.profile, { port: e.port, child: null, startedAt: e.startedAt, status: 'running', url: restoredUrl })
     }
   }
+  // 启动即刻清洗 runtime.json 中的僵尸/已死亡进程条目
+  writeRuntimeState(
+    pidDir,
+    [...running.entries()].map(([profile, p]) => ({ profile, port: p.port, startedAt: p.startedAt })),
+  )
 
   /** 将当前运行表持久化到 runtime.json（start/stop/进程退出时调用）。 */
   function persistRuntime(): void {
@@ -271,7 +285,9 @@ export async function startApiServer(ctx: CliContext, opts: ApiServerOptions): P
     }
     if (runningState && port !== null) {
       if (!authUrl) {
-        const logFile = join(logDir, `dsh-web-${name}-${port}.log`)
+        const primaryLog = join(logDir, `dsh-${name}-${port}.log`)
+        const fallbackLog = join(logDir, `dsh-web-${name}-${port}.log`)
+        const logFile = existsSync(primaryLog) ? primaryLog : fallbackLog
         authUrl = extractDshWebUrl(logFile)
       }
       if (!authUrl) {
@@ -468,7 +484,24 @@ export async function startApiServer(ctx: CliContext, opts: ApiServerOptions): P
       const fallback = join(here, 'shell-web')
       if (existsSync(join(fallback, 'index.html'))) distDir = resolve(fallback)
     }
-    let filePath = join(distDir, pathname === '/' ? 'index.html' : pathname)
+    // 安全防御：严格防止路径遍历（Path Traversal）逃逸到 distDir 外部
+    const safeRelPath = normalize(pathname).replace(/^(\.\.[\/\\])+/, '')
+    const targetPath = resolve(
+      distDir,
+      safeRelPath === '/' || safeRelPath === ''
+        ? 'index.html'
+        : safeRelPath.startsWith('/') || safeRelPath.startsWith('\\')
+          ? safeRelPath.slice(1)
+          : safeRelPath,
+    )
+    const resolvedRoot = resolve(distDir)
+    if (!targetPath.startsWith(resolvedRoot)) {
+      res.writeHead(403, { 'Content-Type': 'text/plain; charset=utf-8', ...securityHeaders() })
+      res.end('Forbidden: Path Traversal Detected\n')
+      return
+    }
+
+    let filePath = targetPath
     if (!existsSync(filePath) || !statSync(filePath).isFile()) {
       // SPA 回退到 index.html
       filePath = join(distDir, 'index.html')

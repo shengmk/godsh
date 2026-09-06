@@ -29,11 +29,34 @@ const NAV: { key: PageKey; labelKey: string; descKey: string }[] = [
   { key: 'settings', labelKey: 'nav.settings', descKey: 'nav.settingsDesc' },
 ]
 
+const VALID_PAGES: PageKey[] = ['console', 'profiles', 'market', 'vault', 'allocations', 'kernels', 'dsh-envs', 'settings']
+
+function getPageFromHash(): PageKey {
+  if (typeof window === 'undefined') return 'console'
+  const hash = window.location.hash.replace(/^#\/?/, '').trim()
+  return (VALID_PAGES.includes(hash as PageKey) ? hash : 'console') as PageKey
+}
 
 export default function App() {
-  const [page, setPage] = useState<PageKey>('console')
+  const [page, setPageState] = useState<PageKey>(getPageFromHash)
   const { t, locale, changeLocale } = useI18n()
   const { theme, changeTheme } = useTheme()
+
+  const setPage = (newPage: PageKey) => {
+    setPageState(newPage)
+    if (typeof window !== 'undefined' && window.location.hash !== `#${newPage}`) {
+      window.location.hash = `#${newPage}`
+    }
+  }
+
+  useEffect(() => {
+    const handleHashChange = () => {
+      const p = getPageFromHash()
+      setPageState(p)
+    }
+    window.addEventListener('hashchange', handleHashChange)
+    return () => window.removeEventListener('hashchange', handleHashChange)
+  }, [])
 
   // 顶栏：dsh 版本（实际激活 + 来源）+ 全局搜索
   const [health, setHealth] = useState<Health | null>(null)

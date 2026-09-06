@@ -229,6 +229,13 @@ export const vaultHandler: ApiHandler = async (ctx, _req, res, method, seg, body
     return true
   }
 
+  // POST /api/vault/clean-dangling —— 清理失效环境的悬空引用
+  if (seg.length === 2 && seg[0] === 'vault' && seg[1] === 'clean-dangling' && method === 'POST') {
+    const cleaned = vault.cleanDanglingProfiles(profilesDir)
+    ctx.sendJson(res, 200, { ok: true, cleaned, message: `已清理 ${cleaned} 条失效环境的悬空索引` })
+    return true
+  }
+
   // DELETE /api/vault/:id —— 从沙箱移除
   if (seg.length === 2 && seg[0] === 'vault' && method === 'DELETE') {
     const id = decodeURIComponent(seg[1] ?? '')

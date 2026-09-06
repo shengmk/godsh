@@ -979,6 +979,26 @@ export class VaultManager {
   }
 
   /**
+   * 清理已物理删除 Profile 在沙箱中的废弃悬空索引（返回清理条数）
+   */
+  cleanDanglingProfiles(profilesDir: string): number {
+    const data = this.readData()
+    let cleaned = 0
+    for (const plugin of data.plugins) {
+      if (!plugin.installedProfiles || plugin.installedProfiles.length === 0) continue
+      const valid = plugin.installedProfiles.filter((prof) => existsSync(join(profilesDir, prof)))
+      if (valid.length !== plugin.installedProfiles.length) {
+        cleaned += plugin.installedProfiles.length - valid.length
+        plugin.installedProfiles = valid
+      }
+    }
+    if (cleaned > 0) {
+      this.saveData(data)
+    }
+    return cleaned
+  }
+
+  /**
    * 自动更新沙箱中的指定插件至目标版本（默认 latest）并同步已挂载的 Profile
    */
   async updatePlugin(
@@ -991,6 +1011,7 @@ export class VaultManager {
     fromVersion?: string
     toVersion?: string
     message?: string
+    failedSyncProfiles?: { profile: string; error: string }[]
   }> {
     const data = this.readData()
     const plugin = data.plugins.find((p) => p.id === id || p.name === id)
@@ -1074,14 +1095,30 @@ export class VaultManager {
     }
     this.saveData(data)
 
-    // 6. 原子同步升级所有已挂载该插件的 Profile
+    // 6. 原子同步升级所有已挂载该插件的 Profile（带物理存在性验真与悬空清理）
+    const failedSyncProfiles: { profile: string; error: string }[] = []
     if (profilesDir && plugin.installedProfiles && plugin.installedProfiles.length > 0) {
+      const validProfiles: string[] = []
       for (const prof of plugin.installedProfiles) {
+        const profDir = join(profilesDir, prof)
+        if (!existsSync(profDir)) {
+          // 该 Profile 已被物理删除，清理悬空废弃引用
+          continue
+        }
+        validProfiles.push(prof)
         try {
           await this.deployToProfile(plugin.id, prof, profilesDir, ver)
         } catch (err) {
+          failedSyncProfiles.push({
+            profile: prof,
+            error: err instanceof Error ? err.message : String(err),
+          })
           console.error(`自动同步至环境 ${prof} 失败:`, err)
         }
+      }
+      if (validProfiles.length !== plugin.installedProfiles.length) {
+        plugin.installedProfiles = validProfiles
+        this.saveData(data)
       }
     }
 
@@ -1099,7 +1136,13 @@ export class VaultManager {
     })
     this.saveHistory(history)
 
-    return { ok: true, plugin, fromVersion, toVersion: ver }
+    return {
+      ok: true,
+      plugin,
+      fromVersion,
+      toVersion: ver,
+      failedSyncProfiles: failedSyncProfiles.length > 0 ? failedSyncProfiles : undefined,
+    }
   }
 
   /**

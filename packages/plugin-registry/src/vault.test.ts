@@ -170,3 +170,36 @@ test('VaultManager: harvestSingle 能够将环境中已安装的插件存入/下
   }
 })
 
+test('VaultManager: 自动清理已物理删除 Profile 的悬空索引', async () => {
+  const tempDir = mkdtempSync(join(tmpdir(), 'godsh-vault-dangling-'))
+  try {
+    const dataDir = join(tempDir, 'data')
+    const profilesDir = join(tempDir, 'profiles')
+    mkdirSync(dataDir, { recursive: true })
+    mkdirSync(profilesDir, { recursive: true })
+
+    // 创建实际存在的 profile
+    mkdirSync(join(profilesDir, 'existing-profile'), { recursive: true })
+
+    const vm = new VaultManager(dataDir)
+    await vm.addFromMarket({ name: 'test-dangling-pkg', version: '1.0.0' })
+
+    // 手动构造含有不存在 profile 的 installedProfiles
+    const data = (vm as any).readData()
+    const p = data.plugins.find((x: any) => x.name === 'test-dangling-pkg')!
+    p.installedProfiles = ['existing-profile', 'deleted-profile-1', 'deleted-profile-2']
+    ;(vm as any).saveData(data)
+
+    // 清洗悬空索引
+    const cleaned = vm.cleanDanglingProfiles(profilesDir)
+    assert.equal(cleaned, 2)
+
+    const dataAfter = (vm as any).readData()
+    const pAfter = dataAfter.plugins.find((x: any) => x.name === 'test-dangling-pkg')!
+    assert.deepEqual(pAfter.installedProfiles, ['existing-profile'])
+  } finally {
+    rmSync(tempDir, { recursive: true, force: true })
+  }
+})
+
+

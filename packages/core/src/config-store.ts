@@ -8,9 +8,15 @@ const DEFAULT_CONFIG: LauncherConfig = {
   runtime: { node: 'node', pnpm: 'pnpm' },
   webKernel: { defaultTemplateId: 'web-default', defaultPort: 3080, allowMultiPort: false },
   pluginMarket: { enabled: true, indexUrl: 'https://awesome-dsh-plugin.com/plugins.json' },
-  // 默认白名单必须包含 Tauri 桌面端来源（前端在 tauri.localhost，API 在 127.0.0.1:4780，属跨域）。
-  // 同源 Web 场景不受影响（同源请求不校验 Origin）。用户可在设置中追加其它来源。
-  allowedOrigins: ['http://tauri.localhost', 'https://tauri.localhost', 'tauri://localhost', 'http://localhost'],
+  // 默认白名单包含 Tauri 桌面端来源与本地固定开发/生产端口（避免泛 localhost 通配导致 CSRF 隐患）
+  allowedOrigins: [
+    'http://tauri.localhost',
+    'https://tauri.localhost',
+    'tauri://localhost',
+    'http://localhost:5173',
+    'http://localhost:4780',
+    'http://127.0.0.1:4780',
+  ],
   dataDir: './data',
 }
 

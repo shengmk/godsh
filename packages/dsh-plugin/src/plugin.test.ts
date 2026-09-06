@@ -56,6 +56,19 @@ test('PatchManager: 热启用与热禁用插件到 cordis.patch.yml', () => {
   }
 })
 
+test('PatchManager: 遇到不可安全解析的 patch 时拒绝盲目覆盖破坏', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'godsh-patch-guard-test-'))
+  try {
+    const profileDir = join(dir, 'complex-profile')
+    mkdirSync(profileDir, { recursive: true })
+    writeFileSync(join(profileDir, 'cordis.patch.yml'), 'custom_directive: !!js/function >\n  function() {}\n', 'utf8')
+    const pm = new PatchManager(dir)
+    assert.throws(() => pm.enablePlugin('complex-profile', 'test-p'), /无法安全重写/)
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
 test('BackupManager: 创建快照、列出快照与一键回滚', () => {
   const dir = mkdtempSync(join(tmpdir(), 'godsh-backup-test-'))
   try {
