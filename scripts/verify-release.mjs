@@ -1,3 +1,4 @@
+import fs from 'node:fs';
 import { execFileSync } from 'child_process';
 
 function gitCred() {
@@ -9,8 +10,9 @@ function gitCred() {
   return out.split('\n').find(l => l.startsWith('password='))?.slice(9).trim();
 }
 
+const rootPkg = JSON.parse(fs.readFileSync(new URL('../package.json', import.meta.url), 'utf8'));
 const token = gitCred();
-const version = process.argv[2] ?? '0.2.9';
+const version = process.argv[2] ?? rootPkg.version;
 const headers = { Authorization: `Bearer ${token}`, Accept: 'application/vnd.github+json' };
 const rel = await (await fetch(`https://api.github.com/repos/shengmk/godsh/releases/tags/v${version}`, { headers })).json();
 console.log(`Release: ${rel.name} | tag: ${rel.tag_name} | draft: ${rel.draft} | prerelease: ${rel.prerelease}`);
