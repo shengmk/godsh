@@ -122,12 +122,13 @@ export function ensureProfilePatches(profilesDir: string): number {
     const patchPath = join(profilesDir, e.name, 'cordis.patch.yml')
     try {
       if (!existsSync(patchPath)) continue
+      const raw = readFileSync(patchPath, 'utf8')
       const trimmed = raw.trim()
       // 0 字节 / 纯空白 / 空对象 {} / 纯注释（无任何有效 YAML 数组声明）→ 恢复为合法空数组 []
       const isCorruptedOrEmpty =
         !trimmed ||
         trimmed === '{}' ||
-        (trimmed.split('\n').every((line) => !line.trim() || line.trim().startsWith('#')) && trimmed !== '[]')
+        (trimmed.split('\n').every((line: string) => !line.trim() || line.trim().startsWith('#')) && trimmed !== '[]')
       if (isCorruptedOrEmpty) {
         writeFileSync(patchPath, '[]\n', 'utf8')
         fixed++

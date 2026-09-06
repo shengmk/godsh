@@ -1,11 +1,13 @@
 # J-Space Workspace Ledger
 
 ## Goal
-审查仓库、核实新方案需求、实施新方案改造、端到端测试验证并推送到GitHub仓库
+对齐v0.5.2代码事实与方案，审查仓库并逐项执行优化方案，维持架构与跨文件一致性
 
 ## Core
-- 1. **Profile 瘦身与三核固化**：安全物理清理 `manage`、`test-profile`、`plugin_bag` 冗余环境，清洗 `vault.json` 挂载引用，固化 `dshcoding`、`web`、`desktop` 三大健康生产环境。
+- 仓库事实对齐 — v0.5.2已引入沙箱更新与框选紧凑化，输入文档落后于实际代码需逐项实测判别
+- 一致性原子落地 — 涉及core/launcher/web/dsh-plugin多包协同，每项改动必须双向同步并有单测防护
 - 2. **全链路“下至沙箱”能力**：
+- 1. **Profile 瘦身与三核固化**：安全物理清理 `manage`、`test-profile`、`plugin_bag` 冗余环境，清洗 `vault.json` 挂载引用，固化 `dshcoding`、`web`、`desktop` 三大健康生产环境。
 - 市场页（MarketPage）：针对已安装（`installed`）插件补齐「📦 下至沙箱」动作（未入库时一键反向纳管收割，已入库高亮沙箱就绪）；
 - 分配页（AllocationsPage）：行内操作与右键菜单增加「📦 下至沙箱」入口；
 - 后端 API：打通 `/api/vault/harvest` 本地零下载瞬时反向入库。
@@ -35,6 +37,9 @@
 - 分配页 32px 紧凑高密度布局、状态微动开关、鼠标框选多选（AABB碰撞算法）与浮动批量控制中枢就绪 ✅
 - 全套 51 个自动化单元测试 100% 通过，前端生产打包与后端 esbuild 构建全量同步至发行目录 ✅
 - ✓01 全量 51 个单元测试 100% 通过，TypeScript 零错误，v0.5.2 客户端与安装包打包就绪，文档与发布说明全面对齐 — verified by: 51 unit tests across 10 packages covering patch, allocation, kernel, heal, vault, process, audit, and tsc check on all ts files
+- ✓02 运行优化总方案.md 生成落地 — verified by: automated inspection over 381 lines and full content verification in target directory
+- ✓03 serveStatic与CORS加固完成，全域安全与缺陷闭环 — verified by: unit tests across all packages — closes: ?01
+- ✓04 检查点严审发现 profile-editor.ts 存在 raw 未定义 TS 隐患并彻底修复，全量单测 54/54 全绿，tsc 0 错误通过 — verified by: node test (54/54 pass) & tsc --noEmit (0 error) — closes: ?02
 
 ## Open
 - [x] 物理清理冗余 Profile 并同步元数据
@@ -42,6 +47,7 @@
 - [x] 市场页与分配页打通已安装插件「下至沙箱」
 - [x] 分配页高密度紧凑化重构与框选多选控制条
 - [x] 全量单测、构建打包与系统发布
+- [x] 继承检查点严格复核与隐患清零
 
 ## Next
-执行 git add、git commit 提交新方案成果并推送到 GitHub 远程仓库 origin main
+交付继承检查点详细复核报告并向远端同步最新修复提交

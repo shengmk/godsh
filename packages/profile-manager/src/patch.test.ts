@@ -1,9 +1,10 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { mkdtempSync, writeFileSync, rmSync } from 'node:fs'
+import { mkdtempSync, writeFileSync, rmSync, mkdirSync, readFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { checkPatchParsable, parsePatchList, readPatchChecked, serializePatchList } from './patch.js'
+import { ensureProfilePatches } from './profile-editor.js'
 
 test('parsePatchList: 解析规范 insert 列表', () => {
   const raw = `- insert:
@@ -99,6 +100,40 @@ test('readPatchChecked: 可解析时正常返回', () => {
     writeFileSync(p, `- insert:\n    - id: a\n`, 'utf8')
     const entries = readPatchChecked(p)
     assert.equal(entries[0]!.ids[0], 'a')
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
+test('ensureProfilePatches: 自动将 0 字节、纯空白、空对象与纯注释的损毁 patch 修复为合法空数组', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'dshl-ensure-patches-'))
+  try {
+    const p1 = join(dir, 'p1')
+    const p2 = join(dir, 'p2')
+    const p3 = join(dir, 'p3')
+    const p4 = join(dir, 'p4')
+    const pGood = join(dir, 'pGood')
+    mkdirSync(p1, { recursive: true })
+    mkdirSync(p2, { recursive: true })
+    mkdirSync(p3, { recursive: true })
+    mkdirSync(p4, { recursive: true })
+    mkdirSync(pGood, { recursive: true })
+
+    writeFileSync(join(p1, 'cordis.patch.yml'), '', 'utf8') // 0 字节
+    writeFileSync(join(p2, 'cordis.patch.yml'), '   \n  \n', 'utf8') // 纯空白
+    writeFileSync(join(p3, 'cordis.patch.yml'), '{}\n', 'utf8') // 空对象
+    writeFileSync(join(p4, 'cordis.patch.yml'), '# 仅有注释\n# 没有数组\n', 'utf8') // 纯注释
+    const goodContent = '- insert:\n    - id: normal-pkg\n'
+    writeFileSync(join(pGood, 'cordis.patch.yml'), goodContent, 'utf8') // 正常配置
+
+    const fixedCount = ensureProfilePatches(dir)
+    assert.equal(fixedCount, 4)
+
+    assert.equal(readFileSync(join(p1, 'cordis.patch.yml'), 'utf8'), '[]\n')
+    assert.equal(readFileSync(join(p2, 'cordis.patch.yml'), 'utf8'), '[]\n')
+    assert.equal(readFileSync(join(p3, 'cordis.patch.yml'), 'utf8'), '[]\n')
+    assert.equal(readFileSync(join(p4, 'cordis.patch.yml'), 'utf8'), '[]\n')
+    assert.equal(readFileSync(join(pGood, 'cordis.patch.yml'), 'utf8'), goodContent)
   } finally {
     rmSync(dir, { recursive: true, force: true })
   }
