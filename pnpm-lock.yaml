@@ -137,6 +137,9 @@ importers:
       '@godsh/profile-manager':
         specifier: workspace:*
         version: link:../profile-manager
+      '@godsh/security':
+        specifier: workspace:*
+        version: link:../security
 
   packages/profile-manager:
     dependencies:

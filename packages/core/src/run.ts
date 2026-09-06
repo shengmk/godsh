@@ -39,6 +39,13 @@ function spawnProcess(command: string, args: string[], opts: RunOptions) {
   const env = opts.env ? { ...process.env, ...opts.env } : undefined
   const mergedOpts = { ...opts, env }
   if (isWindows) {
+    const isDirectExe = command.toLowerCase().endsWith('.exe') || command === process.execPath
+    if (isDirectExe) {
+      return spawn(command, args, {
+        windowsHide: true,
+        ...mergedOpts,
+      })
+    }
     // shell + 单条命令字符串（无 args 数组），避免 DEP0190 且参数已转义
     return spawn(buildCommandLine(command, args), [], {
       shell: true,
@@ -87,14 +94,15 @@ export function run(command: string, args: string[] = [], opts: RunOptions = {})
 
 /** 同步执行命令，用于轻量的版本探测。 */
 export function runSync(command: string, args: string[] = [], opts: RunOptions = {}): RunResult {
-  const r = isWindows
+  const isDirectExe = isWindows && (command.toLowerCase().endsWith('.exe') || command === process.execPath)
+  const r = isWindows && !isDirectExe
     ? spawnSync(buildCommandLine(command, args), [], {
         shell: true,
         windowsHide: true,
         encoding: 'utf8',
         ...opts,
       })
-    : spawnSync(command, args, { encoding: 'utf8', ...opts })
+    : spawnSync(command, args, { encoding: 'utf8', windowsHide: isWindows, ...opts })
   if (r.error) {
     return { ok: false, code: null, signal: null, stdout: '', stderr: String(r.error) }
   }

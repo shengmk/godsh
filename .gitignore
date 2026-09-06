@@ -19,7 +19,9 @@ data/runtime/
 # release 二进制（作为 GitHub Release 附件，不提交到仓库）
 release/*.exe
 release/*.zip
+release/*.dll
 release/SHA256SUMS.txt
+release/godsh-*/
 
 # 冒烟测试临时输出
 smoke-out.txt

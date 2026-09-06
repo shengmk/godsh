@@ -55,6 +55,46 @@ export interface PortInfo {
 
 export type PluginKind = 'bundle' | 'client' | 'both' | 'unknown'
 
+export type SecurityLevel = 'official' | 'safe' | 'warning' | 'danger'
+
+export interface AuditFinding {
+  ruleId: string
+  severity: 'info' | 'warning' | 'danger'
+  file: string
+  line: number
+  snippet: string
+  message: string
+}
+
+export interface PluginAuditReport {
+  pluginId: string
+  pluginName: string
+  version: string
+  level: SecurityLevel
+  score: number
+  findings: AuditFinding[]
+  scannedFiles: number
+  auditedAt: number
+}
+
+export interface DeploymentSnapshot {
+  id: string
+  timestamp: number
+  profile: string
+  pluginId: string
+  pluginName: string
+  fromVersion?: string
+  toVersion: string
+  action: 'deploy' | 'switch' | 'rollback' | 'unmount'
+}
+
+export interface DiskSavingsReport {
+  totalVaultBytes: number
+  savedBytes: number
+  totalJunctions: number
+  pluginCount: number
+}
+
 export interface VaultPlugin {
   id: string
   name: string
@@ -68,7 +108,15 @@ export interface VaultPlugin {
   hasUpdate?: boolean
   latestVersion?: string
   stagedAt: number
+  versions?: string[]
+  activeVersion?: string
+  sizeBytes?: number
+  securityLevel?: SecurityLevel
+  securityScore?: number
+  auditReport?: PluginAuditReport
+  isJunctionLinked?: boolean
 }
+
 
 export interface LocalPlugin {
   name: string

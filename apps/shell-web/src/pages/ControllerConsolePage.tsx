@@ -86,7 +86,7 @@ export default function ControllerConsolePage({ onNavigate }: { onNavigate: (p: 
       setPhase('starting')
       setPhaseMsg('启动默认环境 web…')
       const r = await api.startProfile('web')
-      setStartedUrl(`http://127.0.0.1:${r.port}`)
+      setStartedUrl(r.url ?? `http://127.0.0.1:${r.port}`)
       setPhase('done')
       setPhaseMsg('默认模板已启动')
       void load()

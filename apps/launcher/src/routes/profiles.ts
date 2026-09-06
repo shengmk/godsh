@@ -1,6 +1,6 @@
 import { join } from 'node:path'
 import { mkdirSync, readFileSync, writeFileSync, existsSync } from 'node:fs'
-import { readLogTail, spawnWebProfile, stopWeb, waitForPort, isPortListening, findPidByPort, findProcessName, invalidatePortProbe, ensureProfileBundles, ensureCacheIntegrity, killAllProfileProcesses } from '@godsh/core'
+import { readLogTail, extractDshWebUrl, spawnWebProfile, stopWeb, waitForPort, isPortListening, findPidByPort, findProcessName, invalidatePortProbe, ensureProfileBundles, ensureCacheIntegrity, killAllProfileProcesses, verifyProfileDeps } from '@godsh/core'
 import { createProfile, removeProfile, scanProfiles, setProfileBundles, exportProfilePackage, importProfilePackage, type ProfilePackage } from '@godsh/profile-manager'
 import { run } from '@godsh/core'
 import { pluginAction, PLUGIN_ACTION_TIMEOUT_MS, resolveInstallArg } from '@godsh/marketplace'
@@ -29,14 +29,25 @@ function diagnoseStartFailure(logFile: string, port: number): string {
   try {
     const log = readLogTail(logFile, 200)
     const all = log || ''
+    if (/ERR_PACKAGE_PATH_NOT_EXPORTED/i.test(all)) {
+      const match = /Package subpath '([^']+)' is not defined by "exports" in (.*?package\.json)/i.exec(all)
+      const subpath = match ? match[1] : ''
+      return `官方依赖版本不匹配：未导出子路径${subpath ? ` (${subpath})` : ''}。godsh 已自动同步并更新依赖，请重新启动环境`
+    }
+    if (/does not provide an export named/i.test(all)) {
+      const match = /The requested module '([^']+)' does not provide an export named '([^']+)'/i.exec(all)
+      const mod = match ? match[1] : ''
+      const exp = match ? match[2] : ''
+      return `依赖导出不匹配：模块 ${mod} 缺少导出项 ${exp}。godsh 已自动注入向下兼容垫片，请重新启动环境`
+    }
     if (/YAMLException|bad indentation|cannot resolve profile bundle|failed to parse overlay|did not activate|pending \(waiting for service\)/i.test(all)) {
       return '环境配置（cordis.patch.yml）损坏、插件缺少 peer 依赖或 bundle 缺失。已自动修复 patch，若仍失败请检查该环境最近安装的插件是否缺少依赖（如 dsh-web-search-pro 需要 dsh-browser）'
     }
-    if (/Cannot find package|ERR_MODULE_NOT_FOUND|failed to import loader entry/i.test(all)) {
-      return 'DSH 官方依赖缓存被损坏（常见于安装插件时 pnpm 清空了 junction 目标）。已自动修复缓存，请重新启动环境'
+    if (/Cannot find package|ERR_MODULE_NOT_FOUND/i.test(all)) {
+      return 'DSH 官方依赖缓存被损坏或缺失（常见于安装插件时 pnpm 清空了 junction 目标）。已自动修复缓存，请重新启动环境'
     }
-    if (/Cannot find package|ERR_MODULE_NOT_FOUND|failed to import loader entry/i.test(all)) {
-      return '环境缺少依赖包，请到「DSH 环境」检查 dsh 安装完整性'
+    if (/failed to import loader entry/i.test(all)) {
+      return '插件加载失败：请检查该环境安装的插件与当前 DSH 版本是否兼容'
     }
     if (/ModuleNotFoundError|No module named|lingshu|aeis/i.test(all)) {
       return 'DSH 内置组件需要 Python 模块（灵枢/aeis），当前 Python 环境缺失，请联系 DSH 或安装对应模块'
@@ -132,6 +143,8 @@ export const profilesHandler: ApiHandler = async (ctx, _req, res, method, seg, b
       [...running.entries()].map(async ([profile, proc]) => {
         const alive = await isPortListening(proc.port)
         const pid = alive ? findPidByPort(proc.port) : null
+        const logFile = join(logDir, `dsh-web-${profile}-${proc.port}.log`)
+        const authUrl = proc.url ?? extractDshWebUrl(logFile) ?? `http://127.0.0.1:${proc.port}`
         return {
           profile,
           port: proc.port,
@@ -139,7 +152,7 @@ export const profilesHandler: ApiHandler = async (ctx, _req, res, method, seg, b
           status: proc.status,
           pid,
           processName: pid ? findProcessName(pid) : null,
-          url: alive ? `http://127.0.0.1:${proc.port}` : null,
+          url: alive ? authUrl : null,
         }
       }),
     )
@@ -276,15 +289,15 @@ export const profilesHandler: ApiHandler = async (ctx, _req, res, method, seg, b
       }
 
       if (existing) running.delete(name)
-      // 启动前确保该 profile 的官方 bundle 就绪（自愈 + fallback 预建，防并发冲突）
+      const dshBin = ctx.resolveDshBin(name)
+      // 启动前依赖自愈与版本校验（P1/P2 原则：传入实际目标 dshBin，保证版本强一致）
       try {
-        ensureProfileBundles(ctx.env.dshHome, name)
+        ensureProfileBundles(ctx.env.dshHome, name, dshBin)
       } catch {
         /* 自愈失败不阻断，dsh 会尽力启动 */
       }
-      // 启动前修复被 pnpm 清空的缓存包（junction 目标），防 Cannot find package
       try {
-        const integrity = ensureCacheIntegrity()
+        const integrity = ensureCacheIntegrity(dshBin)
         if (integrity.healed > 0) console.log(`[godsh] 启动前缓存自愈: ${integrity.message}`)
       } catch {
         /* 缓存修复失败不阻断，dsh 会给出具体报错 */
@@ -294,14 +307,18 @@ export const profilesHandler: ApiHandler = async (ctx, _req, res, method, seg, b
       const preferredPort = isCustom ? Number(body.port) : undefined
       const port = await ctx.findFreePort(preferredPort, isCustom)
       invalidatePortProbe(port)
+      let proc: RuntimeProc
       const { info, child } = spawnWebProfile({
         profile: name,
         port,
         logDir,
         pidDir,
-        dshBin: ctx.resolveDshBin(name),
+        dshBin,
+        onUrlCaptured: (url) => {
+          if (proc) proc.url = url
+        },
       })
-      const proc: RuntimeProc = { port, child, startedAt: Date.now(), status: 'starting' }
+      proc = { port, child, startedAt: Date.now(), status: 'starting', url: info.url }
       running.set(name, proc)
       ctx.persistRuntime()
       child.on('close', () => {
@@ -324,7 +341,7 @@ export const profilesHandler: ApiHandler = async (ctx, _req, res, method, seg, b
           }
         }
       })()
-      ctx.sendJson(res, 202, { status: 'starting', profile: name, port, pid: child.pid ?? null })
+      ctx.sendJson(res, 202, { status: 'starting', profile: name, port, pid: child.pid ?? null, url: proc.url })
     })
     return true
   }
@@ -345,11 +362,12 @@ export const profilesHandler: ApiHandler = async (ctx, _req, res, method, seg, b
       // 短暂等待 OS 释放 socket 端口
       await new Promise((r) => setTimeout(r, 400))
 
+      const dshBin = ctx.resolveDshBin(name)
       try {
-        ensureProfileBundles(ctx.env.dshHome, name)
+        ensureProfileBundles(ctx.env.dshHome, name, dshBin)
       } catch {}
       try {
-        ensureCacheIntegrity()
+        ensureCacheIntegrity(dshBin)
       } catch {}
       ctx.ensureUnifiedKernel(name)
 
@@ -357,14 +375,18 @@ export const profilesHandler: ApiHandler = async (ctx, _req, res, method, seg, b
       const preferredPort = isCustom ? Number(body.port) : (existing?.port || undefined)
       const port = await ctx.findFreePort(preferredPort, isCustom)
       invalidatePortProbe(port)
+      let proc: RuntimeProc
       const { info, child } = spawnWebProfile({
         profile: name,
         port,
         logDir,
         pidDir,
-        dshBin: ctx.resolveDshBin(name),
+        dshBin,
+        onUrlCaptured: (url) => {
+          if (proc) proc.url = url
+        },
       })
-      const proc: RuntimeProc = { port, child, startedAt: Date.now(), status: 'starting' }
+      proc = { port, child, startedAt: Date.now(), status: 'starting', url: info.url }
       running.set(name, proc)
       ctx.persistRuntime()
       child.on('close', () => {
@@ -387,7 +409,7 @@ export const profilesHandler: ApiHandler = async (ctx, _req, res, method, seg, b
           }
         }
       })()
-      ctx.sendJson(res, 202, { status: 'starting', profile: name, port, pid: child.pid ?? null })
+      ctx.sendJson(res, 202, { status: 'starting', profile: name, port, pid: child.pid ?? null, url: proc.url })
     })
     return true
   }

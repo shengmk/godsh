@@ -274,6 +274,25 @@ export default function MarketPage() {
     }
   }
 
+  // 已安装插件下至沙箱：优先本地反向收割，若无本地物理文件则从市场暂存入库
+  async function harvestOrDownloadToVault(p: MarketPlugin) {
+    const pkg = pkgName(p)
+    setVaultActing(pkg)
+    try {
+      const r = await api.vaultHarvest(profile, pkg)
+      if (r.ok) {
+        show(`📦 已成功将环境 [${profile}] 中的 ${p.name} 纳管下至沙箱仓库`)
+        await loadVault()
+      } else {
+        await downloadToVault(p)
+      }
+    } catch {
+      await downloadToVault(p)
+    } finally {
+      setVaultActing(null)
+    }
+  }
+
   // 从沙箱瞬时注入/部署到当前 Profile
   async function deployFromVault(vPlugin: VaultPlugin, display: string) {
     if (!profile) return show('请先选择目标 Profile', true)
@@ -648,6 +667,24 @@ export default function MarketPage() {
                         >
                           {isInstalling ? '更新中…' : '🔄 更新'}
                         </button>
+                        {inVault ? (
+                          <span
+                            className="badge vault"
+                            style={{ alignSelf: 'center', cursor: 'default' }}
+                            title="此插件已在本地沙箱隔离仓库中就绪"
+                          >
+                            📦 沙箱就绪
+                          </span>
+                        ) : (
+                          <button
+                            className="btn vault sm"
+                            disabled={isInstalling || isVaultActing}
+                            onClick={() => void harvestOrDownloadToVault(p)}
+                            title="将当前环境中已安装的插件纳管并下至全局沙箱仓库 (Vault)"
+                          >
+                            {isVaultActing ? '存入中…' : '📦 下至沙箱'}
+                          </button>
+                        )}
                         <button
                           className="btn danger sm"
                           disabled={isInstalling}

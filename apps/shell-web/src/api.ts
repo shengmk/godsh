@@ -22,7 +22,11 @@ import type {
   ProfilePackage,
   WorkflowTemplate,
   VaultPlugin,
+  DiskSavingsReport,
+  DeploymentSnapshot,
+  PluginAuditReport,
 } from './types'
+
 import { isTauri, tauriInvoke } from './tauri'
 
 // 非 Tauri（Web/浏览器）回退基址：默认同源 /api；也可由 VITE_API_BASE 覆盖。
@@ -118,13 +122,13 @@ export const api = {
     ).then((r) => r.statuses),
 
   startProfile: (name: string, port?: number) =>
-    req<{ status: string; port: number; pid: number | null }>(`/profiles/${encodeURIComponent(name)}/start`, {
+    req<{ status: string; port: number; pid: number | null; url?: string }>(`/profiles/${encodeURIComponent(name)}/start`, {
       method: 'POST',
       body: port ? JSON.stringify({ port }) : undefined,
     }),
 
   restartProfile: (name: string, port?: number) =>
-    req<{ status: string; port: number; pid: number | null }>(`/profiles/${encodeURIComponent(name)}/restart`, {
+    req<{ status: string; port: number; pid: number | null; url?: string }>(`/profiles/${encodeURIComponent(name)}/restart`, {
       method: 'POST',
       body: port ? JSON.stringify({ port }) : undefined,
     }),
@@ -384,6 +388,15 @@ export const api = {
   /** 仓库沙箱：获取就绪态插件列表 */
   vault: () => req<{ plugins: VaultPlugin[] }>('/vault').then((r) => r.plugins),
 
+  /** 仓库沙箱：空间节省与性能指标 */
+  vaultMetrics: () => req<DiskSavingsReport>('/vault/metrics'),
+
+  /** 仓库沙箱：获取部署与回滚历史快照 */
+  vaultHistory: (profile?: string) =>
+    req<{ snapshots: DeploymentSnapshot[] }>(`/vault/history${profile ? `?profile=${encodeURIComponent(profile)}` : ''}`).then(
+      (r) => r.snapshots,
+    ),
+
   /** 仓库沙箱：导入本地插件 */
   vaultImportLocal: (targetPath: string, category?: string) =>
     req<{ ok: boolean; plugin: VaultPlugin }>('/vault/import-local', {
@@ -398,11 +411,67 @@ export const api = {
       body: JSON.stringify(body),
     }),
 
-  /** 仓库沙箱：瞬时部署注入到目标 Profile */
-  vaultDeploy: (pluginId: string, targetProfile: string) =>
-    req<{ ok: boolean; deployed: string[]; companionAdded?: string[] }>('/vault/deploy', {
+  /** 仓库沙箱：NTFS Junction 零拷贝瞬时挂载 + 伴随自愈 */
+  vaultDeploy: (pluginId: string, targetProfile: string, version?: string) =>
+    req<{
+      ok: boolean
+      deployed: string[]
+      companionAdded?: string[]
+      isJunction?: boolean
+      shimsApplied?: number
+      conflicts?: string[]
+    }>('/vault/deploy', {
+      method: 'POST',
+      body: JSON.stringify({ pluginId, targetProfile, version }),
+    }),
+
+  /** 仓库沙箱：热拔插安全卸载 */
+  vaultUnmount: (pluginId: string, targetProfile: string) =>
+    req<{ ok: boolean; unmounted: string }>('/vault/unmount', {
       method: 'POST',
       body: JSON.stringify({ pluginId, targetProfile }),
+    }),
+
+  /** 仓库沙箱：广播式批量挂载 */
+  vaultBatchDeploy: (pluginIds: string[], targetProfiles: string[]) =>
+    req<{ ok: boolean; results: Record<string, Record<string, { ok: boolean; error?: string }>> }>('/vault/batch-deploy', {
+      method: 'POST',
+      body: JSON.stringify({ pluginIds, targetProfiles }),
+    }),
+
+  /** 仓库沙箱：多版本原子切换 */
+  vaultSwitchVersion: (pluginId: string, targetProfile: string, targetVersion: string) =>
+    req<{ ok: boolean; fromVersion: string; toVersion: string }>('/vault/switch-version', {
+      method: 'POST',
+      body: JSON.stringify({ pluginId, targetProfile, targetVersion }),
+    }),
+
+  /** 仓库沙箱：一键原子快照回滚 */
+  vaultRollback: (pluginId: string, targetProfile: string) =>
+    req<{ ok: boolean; rolledBackTo: string; previousVersion: string }>('/vault/rollback', {
+      method: 'POST',
+      body: JSON.stringify({ pluginId, targetProfile }),
+    }),
+
+  /** 仓库沙箱：静态安全审计 (AST/敏感探测) */
+  vaultAudit: (pluginId?: string) =>
+    req<{ ok: boolean; report?: PluginAuditReport; reports?: Record<string, PluginAuditReport> }>('/vault/audit', {
+      method: 'POST',
+      body: JSON.stringify({ pluginId }),
+    }),
+
+  /** 仓库沙箱：从环境反向收割纳管（单插件或全量） */
+  vaultHarvest: (profile?: string, pluginName?: string) =>
+    req<{ ok: boolean; plugin?: VaultPlugin; harvested?: VaultPlugin[]; totalProfilesScanned?: number; message?: string }>('/vault/harvest', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ profile, pluginName }),
+    }),
+
+  /** 仓库沙箱：垃圾大扫除 */
+  vaultGC: () =>
+    req<{ ok: boolean; freedBytes: number; removedDirs: string[] }>('/vault/gc', {
+      method: 'POST',
     }),
 
   /** 仓库沙箱：移除插件 */
@@ -414,5 +483,26 @@ export const api = {
     req<{ updates: { id: string; hasUpdate: boolean; latestVersion?: string }[] }>('/vault/check-updates', {
       method: 'POST',
     }),
+
+  /** 仓库沙箱：单插件下载升级至目标版本并同步挂载环境 */
+  vaultUpdatePlugin: (id: string, version?: string) =>
+    req<{ ok: boolean; plugin?: VaultPlugin; fromVersion?: string; toVersion?: string; message?: string }>('/vault/update', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ id, version }),
+    }),
+
+  /** 仓库沙箱：一键自动更新全部有新版本的沙箱插件 */
+  vaultUpdateAll: () =>
+    req<{
+      ok: boolean
+      total: number
+      updated: number
+      failed: number
+      results: { id: string; name: string; ok: boolean; fromVersion?: string; toVersion?: string; error?: string }[]
+    }>('/vault/update-all', {
+      method: 'POST',
+    }),
 }
+
 

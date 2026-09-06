@@ -45,16 +45,31 @@ export default function AllocationsPage() {
   const [drag, setDrag] = useState<DragState | null>(null)
   const [menu, setMenu] = useState<MenuState | null>(null)
   const [vaultPlugins, setVaultPlugins] = useState<VaultPlugin[]>([])
-  const [vaultExpanded, setVaultExpanded] = useState(true)
+  const [vaultExpanded, setVaultExpanded] = useState(false)
   const [importModalOpen, setImportModalOpen] = useState(false)
   const [importPath, setImportPath] = useState('')
   const [importCategory, setImportCategory] = useState('dev')
   const [deployTargetProfile, setDeployTargetProfile] = useState<Record<string, string>>({})
   const [vaultChecking, setVaultChecking] = useState(false)
 
+  // 紧凑排版与框选多选状态
+  const [compactMode, setCompactMode] = useState<boolean>(true)
+  const [selectedKeys, setSelectedKeys] = useState<Set<string>>(new Set())
+  const [marquee, setMarquee] = useState<{ startX: number; startY: number; currentX: number; currentY: number } | null>(null)
+  const marqueeRef = useRef<{ startX: number; startY: number; currentX: number; currentY: number; profile: string } | null>(null)
+
   const dragRef = useRef<DragState | null>(null)
   const { toast, show } = useToast()
   const { t } = useI18n()
+
+  // Esc 键清空选择
+  useEffect(() => {
+    function onKeyDown(e: KeyboardEvent) {
+      if (e.key === 'Escape') setSelectedKeys(new Set())
+    }
+    window.addEventListener('keydown', onKeyDown)
+    return () => window.removeEventListener('keydown', onKeyDown)
+  }, [])
 
   const loadVault = useCallback(async () => {
     try {
@@ -312,16 +327,52 @@ export default function AllocationsPage() {
     [handleDrop],
   )
 
-  const onRowPointerDown = useCallback((e: React.PointerEvent, key: string) => {
-    // 点按按钮/链接时不启动拖拽
-    const target = e.target as HTMLElement
-    if (target.closest('button') || target.closest('a')) return
+  const onGripPointerDown = useCallback((e: React.PointerEvent, key: string) => {
     e.preventDefault()
+    e.stopPropagation()
     dragRef.current = { key, startX: e.clientX, startY: e.clientY, x: e.clientX, y: e.clientY, active: false, overProfile: null, overKey: null }
+  }, [])
+
+  const onContainerPointerDown = useCallback((e: React.PointerEvent, profile: string) => {
+    const target = e.target as HTMLElement
+    if (target.closest('button, a, input, select, .drag-grip, .alloc-action-btn, .alloc-action-group')) return
+    marqueeRef.current = {
+      startX: e.clientX,
+      startY: e.clientY,
+      currentX: e.clientX,
+      currentY: e.clientY,
+      profile,
+    }
   }, [])
 
   useEffect(() => {
     function onPointerMove(e: PointerEvent) {
+      if (marqueeRef.current) {
+        marqueeRef.current.currentX = e.clientX
+        marqueeRef.current.currentY = e.clientY
+        setMarquee({ ...marqueeRef.current })
+
+        const x1 = Math.min(marqueeRef.current.startX, e.clientX)
+        const x2 = Math.max(marqueeRef.current.startX, e.clientX)
+        const y1 = Math.min(marqueeRef.current.startY, e.clientY)
+        const y2 = Math.max(marqueeRef.current.startY, e.clientY)
+
+        if (Math.hypot(e.clientX - marqueeRef.current.startX, e.clientY - marqueeRef.current.startY) > 4) {
+          const rows = document.querySelectorAll(`.alloc-row[data-profile="${marqueeRef.current.profile}"]`)
+          const nextSel = new Set(e.ctrlKey || e.shiftKey ? selectedKeys : [])
+          rows.forEach((row) => {
+            const rect = row.getBoundingClientRect()
+            const intersects = !(rect.left > x2 || rect.right < x1 || rect.top > y2 || rect.bottom < y1)
+            const key = (row as HTMLElement).dataset.key
+            if (key && intersects) {
+              nextSel.add(key)
+            }
+          })
+          setSelectedKeys(nextSel)
+        }
+        return
+      }
+
       const d = dragRef.current
       if (!d) return
       d.x = e.clientX
@@ -342,12 +393,20 @@ export default function AllocationsPage() {
       document.body.style.userSelect = 'none'
     }
     function onPointerUp() {
+      if (marqueeRef.current) {
+        marqueeRef.current = null
+        setMarquee(null)
+      }
       const d = dragRef.current
       if (!d) return
       document.body.style.userSelect = ''
       void dragEnd(d.overProfile, d.overKey)
     }
     function onPointerCancel() {
+      if (marqueeRef.current) {
+        marqueeRef.current = null
+        setMarquee(null)
+      }
       document.body.style.userSelect = ''
       dragCancel()
     }
@@ -359,7 +418,7 @@ export default function AllocationsPage() {
       window.removeEventListener('pointerup', onPointerUp)
       window.removeEventListener('pointercancel', onPointerCancel)
     }
-  }, [dragEnd, dragCancel])
+  }, [dragEnd, dragCancel, selectedKeys])
 
   // 被拖动的条目显示名（用于跟手提示）
   const dragLabel = useMemo(() => {
@@ -397,6 +456,116 @@ export default function AllocationsPage() {
     }
   }
 
+  // 单插件纳管下至沙箱
+  async function harvestToVault(profile: string, pluginId: string) {
+    try {
+      const r = await api.vaultHarvest(profile, pluginId)
+      if (r.ok) {
+        show(`已成功将 ${pluginId} 纳管下至仓库沙箱！`)
+        await loadVault()
+      } else {
+        show(r.message || '纳管下至沙箱失败', true)
+      }
+    } catch (e) {
+      show(e instanceof Error ? e.message : String(e), true)
+    }
+  }
+
+  // 批量启用 / 禁用
+  async function handleBatchToggle(enabled: boolean) {
+    const idsToToggle: string[] = []
+    for (const key of selectedKeys) {
+      if (key.startsWith(KEY_PREFIX_ALLOC)) {
+        idsToToggle.push(key.slice(KEY_PREFIX_ALLOC.length))
+      }
+    }
+    if (idsToToggle.length === 0) return
+    try {
+      for (const id of idsToToggle) {
+        await api.setEnabled(id, enabled)
+      }
+      show(`已批量${enabled ? '启用' : '禁用'} ${idsToToggle.length} 个插件`)
+      await refresh()
+    } catch (e) {
+      show(e instanceof Error ? e.message : String(e), true)
+    }
+  }
+
+  // 批量下至沙箱
+  async function handleBatchHarvest() {
+    const itemsToHarvest: { profile: string; pluginId: string }[] = []
+    for (const key of selectedKeys) {
+      const item = parseKey(key)
+      if (item) {
+        itemsToHarvest.push({ profile: item.profile, pluginId: item.id })
+      }
+    }
+    if (itemsToHarvest.length === 0) return
+    try {
+      let count = 0
+      for (const it of itemsToHarvest) {
+        await api.vaultHarvest(it.profile, it.pluginId)
+        count++
+      }
+      show(`已批量纳管 ${count} 个插件下至仓库沙箱！`)
+      await loadVault()
+      setSelectedKeys(new Set())
+    } catch (e) {
+      show(e instanceof Error ? e.message : String(e), true)
+    }
+  }
+
+  // 批量移除分配
+  async function handleBatchRemove() {
+    const allocIds: string[] = []
+    for (const key of selectedKeys) {
+      if (key.startsWith(KEY_PREFIX_ALLOC)) {
+        allocIds.push(key.slice(KEY_PREFIX_ALLOC.length))
+      }
+    }
+    if (allocIds.length === 0) return
+    if (!window.confirm(`确定从环境中批量移除选中的 ${allocIds.length} 项分配？`)) return
+    try {
+      for (const id of allocIds) {
+        await api.removeAllocation(id)
+      }
+      show(`已批量移除 ${allocIds.length} 项分配`)
+      setSelectedKeys(new Set())
+      await refresh()
+    } catch (e) {
+      show(e instanceof Error ? e.message : String(e), true)
+    }
+  }
+
+  // 批量转移/复制到目标 Profile
+  async function handleBatchMove(targetProfile: string) {
+    const items = [...selectedKeys].map((k) => parseKey(k)).filter(Boolean)
+    if (items.length === 0) return
+    try {
+      let moved = 0
+      for (const it of items) {
+        if (!it) continue
+        await api.moveWithInstall(it.id, targetProfile, it.profile)
+        moved++
+      }
+      show(`已成功将 ${moved} 个插件批量分发复制到环境 [${targetProfile}]`)
+      setSelectedKeys(new Set())
+      await refresh()
+    } catch (e) {
+      show(e instanceof Error ? e.message : String(e), true)
+    }
+  }
+
+  function toggleSelectRow(key: string, e: React.MouseEvent | React.ChangeEvent) {
+    e.stopPropagation()
+    setSelectedKeys((prev) => {
+      const next = new Set(prev)
+      if (next.has(key)) next.delete(key)
+      else next.add(key)
+      return next
+    })
+  }
+
   function onContextAlloc(a: Allocation, e: React.MouseEvent) {
     e.preventDefault()
     const list = byProfile[a.profile] ?? []
@@ -408,6 +577,7 @@ export default function AllocationsPage() {
         { label: a.enabled ? '禁用' : '启用', onClick: () => void toggle(a) },
         { label: '上移', onClick: () => void move(a, -1), disabled: idx <= 0 },
         { label: '下移', onClick: () => void move(a, 1), disabled: idx < 0 || idx >= list.length - 1 },
+        { label: '📦 下至沙箱', onClick: () => void harvestToVault(a.profile, a.pluginId) },
         { label: '更新', onClick: () => void updatePlugin(a) },
         { separator: true, label: '', onClick: () => {} },
         { label: '移除分配', onClick: () => void remove(a), danger: true },
@@ -615,8 +785,18 @@ export default function AllocationsPage() {
     setVaultChecking(true)
     try {
       const r = await api.vaultCheckUpdates()
-      const updated = r.updates.filter((x) => x.hasUpdate).length
-      show(updated > 0 ? `已比对，发现 ${updated} 个插件有新版本` : '已比对，沙箱插件均为最新版本')
+      const updated = (r.updates || []).filter((x) => x.hasUpdate).length
+      if (updated > 0) {
+        if (window.confirm(`已比对，发现 ${updated} 个沙箱插件有新版本更新！是否立即自动全量拉取升级并同步挂载环境？`)) {
+          const upRes = await api.vaultUpdateAll()
+          show(`自动升级完成：${upRes.updated} 个插件已升级并同步挂载环境！`)
+          await refresh()
+        } else {
+          show(`发现 ${updated} 个插件有新版本`)
+        }
+      } else {
+        show('已比对，沙箱插件均为最新版本')
+      }
       await loadVault()
     } catch (e) {
       show(e instanceof Error ? e.message : String(e), true)
@@ -641,11 +821,15 @@ export default function AllocationsPage() {
           共 {profiles.length} 个环境 · {totalAllocated} 条分配 · {categories.length} 个市场分类
         </span>
         <span className="spacer" />
-        <span className="muted" style={{ fontSize: 12 }}>
-          💡 拖动插件到其它环境 = 剪切并复制（自动安装到目标环境）；本环境内拖动 = 排序；⚡ 全部分配 = 按市场分类批量分配
-        </span>
+        <button
+          className={`btn sm ${compactMode ? 'primary' : ''}`}
+          onClick={() => setCompactMode(!compactMode)}
+          title="切换高密度紧凑视图或标准视图"
+        >
+          {compactMode ? '📏 紧凑视图 (开)' : '📐 舒适视图'}
+        </button>
         <button className="btn sm" onClick={() => load()}>
-          刷新
+          🔄 刷新
         </button>
       </div>
 
@@ -875,7 +1059,10 @@ export default function AllocationsPage() {
                   )}
 
                   {/* 已分配卡片（可拖动排序/转移） */}
-                  <div className="alloc-list">
+                  <div
+                    className="alloc-list"
+                    onPointerDown={(e) => onContainerPointerDown(e, p.name)}
+                  >
                     {list
                       .filter((i) => i.kind === 'alloc')
                       .map((item) => {
@@ -883,13 +1070,14 @@ export default function AllocationsPage() {
                       const a = item.kind === 'alloc' ? item.alloc : null
                       const isDragging = drag?.active && drag.key === key
                       const isDropLine = drag?.active && drag.overKey === key
+                      const isSelected = selectedKeys.has(key)
                       return (
                         <div
-                          className={`alloc-row${isDragging ? ' dragging' : ''}${isDropLine ? ' drop-line' : ''}`}
+                          className={`alloc-row ${compactMode ? 'compact' : ''}${isSelected ? ' selected' : ''}${isDragging ? ' dragging' : ''}${isDropLine ? ' drop-line' : ''}`}
                           key={key}
                           data-key={key}
+                          data-profile={p.name}
                           style={{ cursor: 'grab' }}
-                          onPointerDown={(e) => onRowPointerDown(e, key)}
                           onMouseEnter={(e) => {
                             const title = a ? a.pluginId : ''
                             // 描述：已分配卡片从同环境 available 列表按 pluginId 匹配
@@ -902,36 +1090,83 @@ export default function AllocationsPage() {
                           onMouseLeave={hideTooltip}
                           onContextMenu={(e) => (a ? onContextAlloc(a, e) : undefined)}
                         >
-                          <span className="drag-grip" title="按住拖动">⠿</span>
+                          <input
+                            type="checkbox"
+                            className="alloc-checkbox"
+                            checked={isSelected}
+                            onChange={(e) => toggleSelectRow(key, e)}
+                            onClick={(e) => e.stopPropagation()}
+                            title="勾选加入多选"
+                          />
+                          <span
+                            className="drag-grip"
+                            title="按住拖动排序 / 跨环境转移"
+                            onPointerDown={(e) => onGripPointerDown(e, key)}
+                          >
+                            ⠿
+                          </span>
                           {a && (
                             <>
-                              <span style={{ fontFamily: 'Consolas, monospace' }}>{a.pluginId}</span>
-                              <span className={`badge ${a.enabled ? 'enabled' : 'disabled'}`}>
-                                {a.enabled ? '启用' : '禁用'}
+                              <span style={{ fontFamily: 'Consolas, monospace', fontWeight: 600, fontSize: compactMode ? '0.85rem' : '0.95rem' }}>
+                                {a.pluginId}
                               </span>
-                              <span className="spacer" />
-                              <button className="btn sm" onClick={() => toggle(a)}>
-                                {a.enabled ? '禁用' : '启用'}
-                              </button>
-                              <button className="btn sm" onClick={() => move(a, -1)} disabled={(byProfile[p.name] ?? []).findIndex((x) => x.id === a.id) <= 0}>
-                                ↑
-                              </button>
                               <button
-                                className="btn sm"
-                                onClick={() => move(a, 1)}
-                                disabled={(byProfile[p.name] ?? []).findIndex((x) => x.id === a.id) >= (byProfile[p.name] ?? []).length - 1}
+                                className={`alloc-power-btn ${a.enabled ? 'on' : 'off'}`}
+                                onClick={(e) => {
+                                  e.stopPropagation()
+                                  void toggle(a)
+                                }}
+                                title={a.enabled ? '点击禁用' : '点击启用'}
                               >
-                                ↓
+                                {a.enabled ? '⏻ 启用' : '⏻ 禁用'}
                               </button>
-                              <button className="btn sm" title="更新此插件" onClick={() => updatePlugin(a)}>
-                                更新
-                              </button>
-                              <button className="btn danger sm" onClick={() => remove(a)}>
-                                移除分配
-                              </button>
-                              <button className="btn danger sm" title="卸载插件（含依赖）" onClick={() => uninstall(a)}>
-                                卸载
-                              </button>
+                              <span className="spacer" />
+                              <div className="alloc-action-group" onClick={(e) => e.stopPropagation()}>
+                                <button
+                                  className="alloc-action-btn"
+                                  onClick={() => void move(a, -1)}
+                                  disabled={(byProfile[p.name] ?? []).findIndex((x) => x.id === a.id) <= 0}
+                                  title="上移"
+                                >
+                                  ↑
+                                </button>
+                                <button
+                                  className="alloc-action-btn"
+                                  onClick={() => void move(a, 1)}
+                                  disabled={(byProfile[p.name] ?? []).findIndex((x) => x.id === a.id) >= (byProfile[p.name] ?? []).length - 1}
+                                  title="下移"
+                                >
+                                  ↓
+                                </button>
+                                <button
+                                  className="alloc-action-btn"
+                                  onClick={() => void harvestToVault(a.profile, a.pluginId)}
+                                  title="📦 纳管下至仓库沙箱 (Vault)"
+                                >
+                                  📦 沙箱
+                                </button>
+                                <button
+                                  className="alloc-action-btn"
+                                  title="更新此插件"
+                                  onClick={() => void updatePlugin(a)}
+                                >
+                                  🔄 更新
+                                </button>
+                                <button
+                                  className="alloc-action-btn"
+                                  onClick={() => void remove(a)}
+                                  title="移除分配"
+                                >
+                                  ✕ 移除
+                                </button>
+                                <button
+                                  className="alloc-action-btn danger"
+                                  title="卸载插件（含依赖）"
+                                  onClick={() => void uninstall(a)}
+                                >
+                                  🗑️
+                                </button>
+                              </div>
                             </>
                           )}
                         </div>
@@ -957,13 +1192,14 @@ export default function AllocationsPage() {
                           const key = itemKey({ kind: 'avail', avail: av })
                           const isDragging = drag?.active && drag.key === key
                           const isDropLine = drag?.active && drag.overKey === key
+                          const isSelected = selectedKeys.has(key)
                           return (
                             <div
-                              className={`alloc-row${isDragging ? ' dragging' : ''}${isDropLine ? ' drop-line' : ''}`}
+                              className={`alloc-row ${compactMode ? 'compact' : ''}${isSelected ? ' selected' : ''}${isDragging ? ' dragging' : ''}${isDropLine ? ' drop-line' : ''}`}
                               key={key}
                               data-key={key}
+                              data-profile={p.name}
                               style={{ cursor: 'pointer' }}
-                              onPointerDown={(e) => onRowPointerDown(e, key)}
                               onMouseEnter={(e) => {
                                 showTooltip(e, av.pluginId, {
                                   desc: av.description,
@@ -977,13 +1213,45 @@ export default function AllocationsPage() {
                               }}
                               onContextMenu={(e) => onContextAvail(av, e)}
                             >
-                              <span className="drag-grip" title="按住拖动">⠿</span>
-                              <span style={{ fontFamily: 'Consolas, monospace' }}>{av.pluginId}</span>
+                              <input
+                                type="checkbox"
+                                className="alloc-checkbox"
+                                checked={isSelected}
+                                onChange={(e) => toggleSelectRow(key, e)}
+                                onClick={(e) => e.stopPropagation()}
+                                title="勾选加入多选"
+                              />
+                              <span
+                                className="drag-grip"
+                                title="按住拖动转移"
+                                onPointerDown={(e) => onGripPointerDown(e, key)}
+                              >
+                                ⠿
+                              </span>
+                              <span style={{ fontFamily: 'Consolas, monospace', fontWeight: 600, fontSize: compactMode ? '0.85rem' : '0.95rem' }}>
+                                {av.pluginId}
+                              </span>
                               <span className={`badge ${av.source === 'bundle' ? 'kind' : 'stopped'}`}>
                                 {av.source === 'bundle' ? 'bundle' : '依赖'}
                               </span>
                               <span className="badge disabled">未分配 · 单击分配 / 拖动转移</span>
                               <span className="spacer" />
+                              <div className="alloc-action-group" onClick={(e) => e.stopPropagation()}>
+                                <button
+                                  className="alloc-action-btn"
+                                  onClick={() => void assignAvail(p.name, av.pluginId)}
+                                  title="分配至当前环境"
+                                >
+                                  ⚡ 分配
+                                </button>
+                                <button
+                                  className="alloc-action-btn"
+                                  onClick={() => void harvestToVault(p.name, av.pluginId)}
+                                  title="📦 纳管下至仓库沙箱 (Vault)"
+                                >
+                                  📦 下至沙箱
+                                </button>
+                              </div>
                             </div>
                           )
                         })}
@@ -995,6 +1263,69 @@ export default function AllocationsPage() {
             </div>
           )
         })
+      )}
+
+      {/* 浮动批量控制中枢 */}
+      {selectedKeys.size > 0 && (
+        <div className="batch-floating-bar">
+          <span style={{ fontSize: '0.85rem', fontWeight: 600 }}>
+            已选择 <strong>{selectedKeys.size}</strong> 项插件
+          </span>
+          <button className="btn sm" onClick={() => void handleBatchToggle(true)}>
+            ⚡ 批量启用
+          </button>
+          <button className="btn sm" onClick={() => void handleBatchToggle(false)}>
+            ⏸ 批量禁用
+          </button>
+          <button
+            className="btn sm"
+            style={{ background: 'rgba(99,102,241,0.15)', color: '#4f46e5', borderColor: '#4f46e5', fontWeight: 600 }}
+            onClick={() => void handleBatchHarvest()}
+          >
+            📦 批量下至沙箱
+          </button>
+          <button className="btn sm danger" onClick={() => void handleBatchRemove()}>
+            ✕ 批量移除
+          </button>
+          {profiles.length > 1 && (
+            <select
+              className="input sm"
+              defaultValue=""
+              onChange={(e) => {
+                if (e.target.value) {
+                  void handleBatchMove(e.target.value)
+                  e.target.value = ''
+                }
+              }}
+              style={{ width: '130px', padding: '2px 6px' }}
+            >
+              <option value="" disabled>
+                🚚 批量转移到…
+              </option>
+              {profiles.map((pr) => (
+                <option key={pr.name} value={pr.name}>
+                  → {pr.name}
+                </option>
+              ))}
+            </select>
+          )}
+          <button className="btn sm subtle" onClick={() => setSelectedKeys(new Set())}>
+            ✕ 取消选择 (Esc)
+          </button>
+        </div>
+      )}
+
+      {/* 鼠标框选多选框 */}
+      {marquee && (
+        <div
+          className="marquee-selection-box"
+          style={{
+            left: Math.min(marquee.startX, marquee.currentX),
+            top: Math.min(marquee.startY, marquee.currentY),
+            width: Math.abs(marquee.currentX - marquee.startX),
+            height: Math.abs(marquee.currentY - marquee.startY),
+          }}
+        />
       )}
 
       {/* 全部更新进度面板 */}

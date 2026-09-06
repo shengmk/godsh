@@ -1,6 +1,6 @@
 [package]
 name = "godsh"
-version = "0.5.1"
+version = "0.5.2"
 description = "dsh 环境配置启动器（Tauri 桌面壳）"
 authors = ["godsh"]
 license = ""
@@ -17,7 +17,7 @@ name = "godsh_lib"
 crate-type = ["rlib"]
 
 [build-dependencies]
-tauri-build = { version = "2.6.3" }
+tauri-build = { version = "2.6.3", features = [] }
 
 [dependencies]
 serde_json = "1.0"

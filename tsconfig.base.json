@@ -13,6 +13,10 @@
     "resolveJsonModule": true,
     "verbatimModuleSyntax": true,
     "isolatedModules": true,
-    "noEmit": true
+    "noEmit": true,
+    "paths": {
+      "@godsh/*": ["./packages/*/src/index.ts"]
+    }
   }
 }
+

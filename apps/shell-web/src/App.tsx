@@ -10,22 +10,25 @@ import { TaskCenter } from './TaskCenter'
 const ControllerConsolePage = lazy(() => import('./pages/ControllerConsolePage'))
 const ProfilesPage = lazy(() => import('./pages/ProfilesPage'))
 const MarketPage = lazy(() => import('./pages/MarketPage'))
+const VaultHubPage = lazy(() => import('./pages/VaultHubPage'))
 const AllocationsPage = lazy(() => import('./pages/AllocationsPage'))
 const KernelsPage = lazy(() => import('./pages/KernelsPage'))
 const DshEnvsPage = lazy(() => import('./pages/DshEnvsPage'))
 const SettingsPage = lazy(() => import('./pages/SettingsPage'))
 
-type PageKey = 'console' | 'profiles' | 'market' | 'allocations' | 'kernels' | 'dsh-envs' | 'settings'
+type PageKey = 'console' | 'profiles' | 'market' | 'vault' | 'allocations' | 'kernels' | 'dsh-envs' | 'settings'
 
 const NAV: { key: PageKey; labelKey: string; descKey: string }[] = [
   { key: 'console', labelKey: 'nav.console', descKey: 'nav.consoleDesc' },
   { key: 'profiles', labelKey: 'nav.profiles', descKey: 'nav.profilesDesc' },
   { key: 'market', labelKey: 'nav.market', descKey: 'nav.marketDesc' },
+  { key: 'vault', labelKey: 'nav.vault', descKey: 'nav.vaultDesc' },
   { key: 'allocations', labelKey: 'nav.allocations', descKey: 'nav.allocationsDesc' },
   { key: 'kernels', labelKey: 'nav.kernels', descKey: 'nav.kernelsDesc' },
   { key: 'dsh-envs', labelKey: 'nav.dshEnvs', descKey: 'nav.dshEnvsDesc' },
   { key: 'settings', labelKey: 'nav.settings', descKey: 'nav.settingsDesc' },
 ]
+
 
 export default function App() {
   const [page, setPage] = useState<PageKey>('console')
@@ -285,9 +288,11 @@ export default function App() {
               console: <ControllerConsolePage onNavigate={setPage} />,
               profiles: <ProfilesPage />,
               market: <MarketPage />,
+              vault: <VaultHubPage />,
               allocations: <AllocationsPage />,
               kernels: <KernelsPage />,
               'dsh-envs': <DshEnvsPage />,
+
               settings: (
                 <SettingsPage
                   locale={locale}

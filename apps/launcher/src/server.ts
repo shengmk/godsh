@@ -1,8 +1,9 @@
 import http from 'node:http'
 import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from 'node:fs'
-import { extname, join } from 'node:path'
+import { dirname, extname, join, resolve } from 'node:path'
+import { fileURLToPath } from 'node:url'
 import { gzipSync } from 'node:zlib'
-import { MONOREPO_ROOT, DATA_DIR, findPidByPort, isPortListening, readLogTail, ensureDshBundles, ensureCacheIntegrity, isPortAvailable } from '@godsh/core'
+import { MONOREPO_ROOT, DATA_DIR, findPidByPort, isPortListening, readLogTail, extractDshWebUrl, ensureDshBundles, ensureCacheIntegrity, ensureCompatibilityShims, isPortAvailable } from '@godsh/core'
 import { fetchMarketIndex } from '@godsh/marketplace'
 import { scanProfiles, ensureProfileWorkspace, ensureProfilePatches } from '@godsh/profile-manager'
 import type { CliContext } from './context.js'
@@ -99,18 +100,25 @@ export async function startApiServer(ctx: CliContext, opts: ApiServerOptions): P
   const { store, env, profilesDir, pidDir, logDir, pluginsDir, templatesDir, kernels, allocations, unifiedKernel, dshEnvs, vault, sourcePolicy } = ctx
   const config = store.readConfig()
 
-  // 启动自愈：DSH Desktop junction 断链时提取官方 bundle，保证 profile 可启动。
-  // 同步执行一次（首次约 24s，之后毫秒级；失败不阻断启动）。
+  // 启动自愈：检测官方 bundle 及依赖完整性，优先对齐活跃驱动 CLI 版本
+  const activeDshBin = config.dsh?.instances?.[config.dsh?.activeVersion || '']
   try {
-    const heal = ensureDshBundles(env.dshHome)
-    if (heal.healed > 0) console.log(`[godsh] 已修复 ${heal.healed} 个断链 bundle: ${heal.message}`)
+    const heal = ensureDshBundles(env.dshHome, activeDshBin)
+    if (heal.healed > 0) console.log(`[godsh] 已同步 ${heal.healed} 个官方依赖: ${heal.message}`)
   } catch (err) {
     console.warn(`[godsh] bundle 自愈跳过: ${err instanceof Error ? err.message : String(err)}`)
   }
-  // 缓存完整性：pnpm 安装插件可能清空 junction 目标的缓存包（commander/ws 等），
-  // 导致 dsh 启动时 Cannot find package。启动前扫描空目录包并从 asar 补回。
+  // 注入跨版本向下兼容与 loopback 授权垫片（彻底解决 web 环境 401 认证拦截）
   try {
-    const integrity = ensureCacheIntegrity()
+    const activeNm = activeDshBin ? dirname(dirname(activeDshBin)) : null
+    const shimmed = ensureCompatibilityShims(activeNm)
+    if (shimmed > 0) console.log(`[godsh] 已应用 ${shimmed} 处跨版本向下兼容与 loopback 授权垫片`)
+  } catch (err) {
+    console.warn(`[godsh] 兼容垫片注入跳过: ${err instanceof Error ? err.message : String(err)}`)
+  }
+  // 缓存完整性：扫描空目录并从活跃源或 asar 补回
+  try {
+    const integrity = ensureCacheIntegrity(activeDshBin)
     if (integrity.healed > 0) console.log(`[godsh] 缓存自愈: ${integrity.message}`)
   } catch (err) {
     console.warn(`[godsh] 缓存自愈跳过: ${err instanceof Error ? err.message : String(err)}`)
@@ -140,7 +148,9 @@ export async function startApiServer(ctx: CliContext, opts: ApiServerOptions): P
   for (const e of readRuntimeState(pidDir)) {
     if (running.has(e.profile)) continue
     if (await isPortListening(e.port)) {
-      running.set(e.profile, { port: e.port, child: null, startedAt: e.startedAt, status: 'running' })
+      const logFile = join(logDir, `dsh-web-${e.profile}-${e.port}.log`)
+      const restoredUrl = extractDshWebUrl(logFile) ?? `http://127.0.0.1:${e.port}`
+      running.set(e.profile, { port: e.port, child: null, startedAt: e.startedAt, status: 'running', url: restoredUrl })
     }
   }
 
@@ -244,6 +254,7 @@ export async function startApiServer(ctx: CliContext, opts: ApiServerOptions): P
     let port: number | null = null
     let pid: number | null = null
     let procError: string | null = null
+    let authUrl: string | null = null
     if (proc) {
       port = proc.port
       if (proc.child === null) {
@@ -256,6 +267,16 @@ export async function startApiServer(ctx: CliContext, opts: ApiServerOptions): P
         pid = proc.child.pid ?? null
         if (proc.status === 'error') procError = proc.error ?? '启动失败，请查看日志'
       }
+      authUrl = proc.url ?? null
+    }
+    if (runningState && port !== null) {
+      if (!authUrl) {
+        const logFile = join(logDir, `dsh-web-${name}-${port}.log`)
+        authUrl = extractDshWebUrl(logFile)
+      }
+      if (!authUrl) {
+        authUrl = `http://127.0.0.1:${port}`
+      }
     }
     return {
       name,
@@ -264,7 +285,7 @@ export async function startApiServer(ctx: CliContext, opts: ApiServerOptions): P
       port,
       pid,
       procError,
-      url: runningState && port !== null ? `http://127.0.0.1:${port}` : null,
+      url: runningState && port !== null ? authUrl : null,
     }
   }
 
@@ -440,7 +461,13 @@ export async function startApiServer(ctx: CliContext, opts: ApiServerOptions): P
   const staticCache = new Map<string, { raw: Buffer; gz: Buffer; mtimeMs: number; type: string }>()
 
   async function serveStatic(res: http.ServerResponse, pathname: string): Promise<void> {
-    const distDir = join(MONOREPO_ROOT, 'apps', 'shell-web', 'dist')
+    // 前端查找链：项目 dist → 与 server.mjs 同级的 shell-web/（安装/便携版打包路径）
+    let distDir = join(MONOREPO_ROOT, 'apps', 'shell-web', 'dist')
+    if (!existsSync(join(distDir, 'index.html'))) {
+      const here = dirname(fileURLToPath(import.meta.url))
+      const fallback = join(here, 'shell-web')
+      if (existsSync(join(fallback, 'index.html'))) distDir = resolve(fallback)
+    }
     let filePath = join(distDir, pathname === '/' ? 'index.html' : pathname)
     if (!existsSync(filePath) || !statSync(filePath).isFile()) {
       // SPA 回退到 index.html

@@ -192,7 +192,9 @@ export class DshEnvManager {
     })
 
     // 持久化的 base + managed（重新探测版本；npm 全局可能已更新）
-    for (const e of this.readManaged()) {
+    const managedList = this.readManaged()
+    let managedDirty = false
+    for (const e of managedList) {
       const entry = e.run && existsSync(e.run) ? e.run : e.dir ? this.packageEntry(e.dir) : null
       if (!entry) continue
       let version = e.version
@@ -200,7 +202,14 @@ export class DshEnvManager {
         const inst = detected.find((d) => d.run === entry)
         if (inst?.version) version = inst.version
       }
+      if (version && version !== e.version) {
+        e.version = version
+        managedDirty = true
+      }
       add({ id: e.id, kind: e.kind, name: e.name, dir: e.dir, run: entry, version, requested: e.requested })
+    }
+    if (managedDirty) {
+      this.saveManaged(managedList)
     }
 
     return [...out.values()]

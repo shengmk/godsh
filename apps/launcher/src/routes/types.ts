@@ -16,6 +16,8 @@ export interface RuntimeProc {
   status: 'starting' | 'running' | 'error'
   /** 启动失败时的可读诊断信息（如超时未就绪） */
   error?: string
+  /** 捕获到的含认证 token 的 URL（如 http://127.0.0.1:3200/?token=...） */
+  url?: string
 }
 
 /** 后台安装任务记录。 */

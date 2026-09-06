@@ -3,7 +3,7 @@ import assert from 'node:assert/strict'
 import { mkdtempSync, rmSync, writeFileSync, existsSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { findProcessesByProfile, killAllProfileProcesses } from './process-manager.js'
+import { findProcessesByProfile, killAllProfileProcesses, extractDshWebUrl } from './process-manager.js'
 import { ConfigStore } from './config-store.js'
 import { run } from './run.js'
 
@@ -65,6 +65,7 @@ test('ConfigStore: allowMultiPort 默认值为 false，可持久化保存', () =
 test('run: 执行命令时触发 onLog 流式输出回调', async () => {
   const chunks: string[] = []
   const res = await run(process.execPath, ['-e', 'console.log("stream-test-1"); console.log("stream-test-2")'], {
+    env: { ELECTRON_RUN_AS_NODE: '1' },
     onLog: (chunk) => chunks.push(chunk),
   })
 
@@ -74,5 +75,29 @@ test('run: 执行命令时触发 onLog 流式输出回调', async () => {
   assert.ok(res.stdout.includes('stream-test-2'))
   assert.ok(chunks.length > 0)
   assert.ok(chunks.join('').includes('stream-test-1'))
+})
+
+test('extractDshWebUrl: 从日志中提取含 token 的认证 URL', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'extract-url-test-'))
+  try {
+    const logFile = join(dir, 'test.log')
+    assert.equal(extractDshWebUrl(logFile), null)
+
+    writeFileSync(
+      logFile,
+      `[lingshu-bridge] init\ndsh web: http://127.0.0.1:3200/?token=abc123xyz (LAN: http://192.168.1.5:3200/?token=abc123xyz)\nready\n`,
+      'utf8'
+    )
+    assert.equal(extractDshWebUrl(logFile), 'http://127.0.0.1:3200/?token=abc123xyz')
+
+    writeFileSync(
+      logFile,
+      `[lingshu-bridge] init\ndsh web: http://127.0.0.1:3080\nready\n`,
+      'utf8'
+    )
+    assert.equal(extractDshWebUrl(logFile), 'http://127.0.0.1:3080')
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
 })
 
