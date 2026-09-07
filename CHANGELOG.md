@@ -1,3 +1,28 @@
+## [0.5.4] - 2026-09-08
+
+全维环境体检引擎 (godsh doctor)、毫秒级启动预检门禁、P0 级重解析点穿透隔离防御与原子级自愈闭环。
+
+### 🩺 全维环境体检与 API 落地 (godsh doctor)
+- **原生 TypeScript 六层体检流水线**：
+  - Layer 0 (全局 CLI)：验证 DSH 全局安装状态与运行时版本匹配度；
+  - Layer 1 (网络监听)：对齐系统网络端口占用与真实存活 PID；
+  - Layer 2 (HTTP 状态)：探测 Web 端口心跳与接口连通性；
+  - Layer 3 (配置与占位符)：精准识别破损占位符与非法残存死链；
+  - Layer 4 (Patch 状态)：深层校验 `cordis.patch.yml` 语法合规性；
+  - Layer 5 (Junction 软链状态)：扫描死软链并杜绝直连宿主 CLI 的高危软链。
+- **命令行与 RESTful API 双向赋能**：新增 `godsh doctor [profile] [--fix]` 命令行；暴露 `/api/doctor/diagnose`、`/api/doctor/preflight`、`/api/doctor/heal`、`/api/doctor/safe-clean` 服务端点。
+
+### ⚡ 毫秒级启动预检门禁 (Pre-flight Gatekeeper)
+- **前置阻断闪退**：在环境启动 (`/api/profiles/:name/start`) 前注入毫秒级门禁；遇占位符死链或致命配置破损前置拦截并返回结构化 `preflightBlocked` 诊断及一键自愈引导。
+
+### 🛡️ P0/P1 重解析点穿透隔离防御 (Anti-Penetration)
+- **重置隔离安全栅栏（P0 根治）**：在重置 Profile 目录前强制注入 `safePurgeProfileJunctions`，先剥离全部 Junction 再清空物理文件，彻底杜绝顺着软链清空宿主全局 CLI 依赖。
+- **环境删除隔离屏障（P0 根治）**：在 `removeProfile` 中清除环境物理目录前彻底剥离重解析指针。
+- **废除解绑递归降级（P1 根治）**：在 `safeUnlinkJunction` 中彻底废除 `rmSync(..., { recursive: true })` 降级，仅保留原子级指针解除，杜绝破坏软链源目标。
+
+### 🧪 单元测试扩充
+- 新增 `apps/launcher/src/routes/doctor.test.ts` 路由测试；扩充 `packages/core/src/dsh-heal.test.ts` 安全防穿透测试；全仓 60 项单测 100% 通过。
+
 ## [0.5.3] - 2026-09-06
 
 运行优化总方案第一阶段落地：四端安全加固、缺陷清零与现代化路由体系。

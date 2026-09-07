@@ -1,11 +1,11 @@
-# godsh v0.5.3
+# godsh v0.5.4
 
 godsh — DeepSeek Harness 图形化环境配置启动器（Anaconda Navigator 类比）。
 
 ## 下载
 
-- **godsh-0.5.3-x64-setup.exe** — Windows 官方安装器（包含完整嵌入式前端、单文件后端与 WebView2 引导）
-- **godsh-0.5.3-x64.zip** — 绿色便携版（解压即用）
+- **godsh-0.5.4-x64-setup.exe** — Windows 官方安装器（包含完整嵌入式前端、单文件后端与 WebView2 引导）
+- **godsh-0.5.4-x64.zip** — 绿色便携版（解压即用）
 
 ## 校验和 (SHA256)
 
@@ -13,32 +13,30 @@ godsh — DeepSeek Harness 图形化环境配置启动器（Anaconda Navigator �
 
 ---
 
-## ✨ v0.5.3 最新更新（运行优化总方案第一阶段、四端安全防御加固与缺陷清零）
+## ✨ v0.5.4 最新更新（全维环境体检引擎、启动预检门禁、重解析点穿透隔离防御与自愈闭环）
 
-### 🛡️ 1. 静态资源路径遍历渗透防御（P0 漏洞拦截）
-- **路径归一化与前缀断言**：`serveStatic` 全面接入 `path.normalize` 与首部 `..` 剥离，并在进入文件系统前断言目标路径必须位于 `distDir` 根目录下，任何逃逸尝试即刻拦截并响应 `403 Forbidden`。
+### 🩺 1. 全维环境体检引擎落地 (godsh doctor & /api/doctor/*)
+- **原生 TypeScript 六层体检流水线**：
+  - **Layer 0 (全局 CLI)**：检测 DSH 全局安装状态、CLI 核心包导出与运行时版本匹配度；
+  - **Layer 1 (网络监听)**：精确对齐系统网络端口占用与真实存活 PID，清理失效进程条目；
+  - **Layer 2 (HTTP 状态)**：主动探测 Web 端口心跳与接口连通性；
+  - **Layer 3 (配置与占位符)**：深度扫描识别破损占位符死链与非法残存空包；
+  - **Layer 4 (Patch 状态)**：深层校验 `cordis.patch.yml` 语法合规性，保障用户自定义配置安全；
+  - **Layer 5 (Junction 软链状态)**：扫描死软链，过滤 `.bin`/`.pnpm` 目录误报，排查直连宿主 CLI 跨目录风险。
+- **CLI 与 RESTful API 双向赋能**：新增 `godsh doctor [profile] [--fix]` 命令行；暴露 `/api/doctor/diagnose`、`/api/doctor/preflight`、`/api/doctor/heal`、`/api/doctor/safe-clean` 服务端点。
 
-### 🔒 2. CORS 白名单收敛至本地端口（P0 漏洞治理）
-- **废除泛通配符**：废除开放的 `http://localhost` 泛通配配置，严格锁定至 `5173`（前端开发态）、`4780`、`127.0.0.1:4780` 与 Tauri 协议，杜绝本地跨源嗅探漏洞。
+### ⚡ 2. 毫秒级启动预检门禁 (Pre-flight Gatekeeper)
+- **前置阻断闪退**：在环境启动 (`POST /api/profiles/:name/start`) 阶段注入毫秒级门禁；遇占位符死链或致命依赖缺失前置拦截并返回结构化 `preflightBlocked` 诊断信息，告别盲目启动闪退。
 
-### ⚡ 3. 统一日志命名彻底根除重启 401（P1 缺陷根治）
-- **前后端文件规范对齐**：全系统对齐采用 `dsh-<profile>-<port>.log` 规范，解决重启服务状态恢复时无法提取 Token 导致的 401 拦截，Token 注入恢复成功率提升至 100%。
+### 🛡️ 3. P0/P1 重解析点穿透隔离防御 (Anti-Penetration Junction Purge)
+- **重置隔离安全栅栏（P0 根治）**：在重置 Profile 目录前强制注入 `safePurgeProfileJunctions`，先剥离全部 Junction 再清空物理文件，彻底阻断顺着 Junction 穿透回杀宿主全局 CLI 的 95 个核心依赖包。
+- **环境删除隔离屏障（P0 根治）**：在 `removeProfile` 中清除环境物理目录前彻底剥离重解析指针，杜绝环境删除反噬全局环境。
+- **废除解绑递归降级（P1 根治）**：在 `safeUnlinkJunction` 中彻底废除 `rmSync(..., { recursive: true })` 降级，仅保留原子级指针解除，杜绝破坏软链源目标。
 
-### 🧹 4. 运行时僵尸进程条目自愈与清洗
-- **runtime.json 膨胀治理**：启动阶段主动对齐系统网络端口，实时清洗已停止或崩溃的失效 entry，防止元数据文件随时间无限累积膨胀。
-
-### 🛡️ 5. PatchManager 高级 YAML 语法守护与写前自动备份（BUG-01 根治）
-- **拒绝破坏性盲写**：在 `enablePlugin` / `disablePlugin` 写入前全面调用 `readPatchChecked` 校验门禁，若遇到 `!!js` 动态表达式、嵌套对象或 `$patch` 规则等不可安全逆向语法时拒绝盲目覆盖破坏；
-- **写前自动备份**：修改前自动在 `data/patches-backup/` 留存时间戳副本，保障用户手动配置绝对安全。
-
-### 🌾 6. Vault 自动清理物理失效 Profile 悬空索引（BUG-02 根治）
-- **主动排查与自动清洗**：新增 `cleanDanglingProfiles` 与对应 API，自动扫描并清除已物理删除 Profile 在沙箱中的废弃引用；
-- **同步升级状态透明**：`updatePlugin` 遍历挂载环境时严格校验环境目录存在性，并透出细粒度部署结果，不再静默吞错。
-
-### 🧭 7. UI 全站 Hash 路由持久化与工程死代码清理
-- **Hash 路由与浏览器历史**：全站实现与 `window.location.hash` 实时双向绑定的轻量路由体系，支持浏览器前进/后退、标签页直达与刷新状态保持；
-- **工程去冗余**：彻底移除未引用的 `apps/shell-web/src/cache.ts` 与废弃样式备份；
-- **测试覆盖扩充**：新增安全守护与悬空清理专项单测，全仓 53 项单元测试 100% 通过。
+### 🧪 4. 自动化测试全量扩充
+- 新增 `apps/launcher/src/routes/doctor.test.ts` 路由测试套件；
+- 扩充 `packages/core/src/dsh-heal.test.ts` 安全防穿透与占位符门禁拦截用例；
+- 全仓 60 项自动化单元测试 100% 通过（pass 60 / fail 0），TypeScript 类型检查 0 错误。
 
 ---
 
