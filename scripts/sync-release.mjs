@@ -1,12 +1,13 @@
-import { cpSync, existsSync, mkdirSync } from 'node:fs'
+import { cpSync, existsSync, mkdirSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
 
 const projectRoot = process.cwd()
 const distServer = join(projectRoot, 'apps', 'launcher', 'dist', 'server.mjs')
 const distWeb = join(projectRoot, 'apps', 'shell-web', 'dist')
+const pkg = JSON.parse(readFileSync(join(projectRoot, 'package.json'), 'utf8'))
 
 const targets = [
-  join(projectRoot, 'release', 'godsh-0.5.1-x64', 'resources'),
+  join(projectRoot, 'release', `godsh-${pkg.version}-x64`, 'resources'),
 ]
 
 const localAppData = process.env.LOCALAPPDATA

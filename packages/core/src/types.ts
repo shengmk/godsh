@@ -54,3 +54,72 @@ export interface DshInstance {
   run: string
   version: string | null
 }
+
+export type HealthSeverity = 'HEALTHY' | 'WARNING' | 'CRITICAL'
+
+export interface DoctorReport {
+  timestamp: string
+  profile: string
+  expectedPort: number
+  dshHome: string
+  overall: HealthSeverity
+  issuesFound: number
+  autoFixed: number
+  backupPath: string | null
+  layers: {
+    layer0_cli: {
+      ok: boolean
+      version: string | null
+      problems: string[]
+      fixed: number
+    }
+    layer1_network: {
+      ok: boolean
+      port: number
+      isListening: boolean
+      pid: number | null
+      isOrphan: boolean
+    }
+    layer2_http: {
+      ok: boolean
+      statusCode: number | null
+      error: string | null
+    }
+    layer3_config: {
+      ok: boolean
+      packageJsonExists: boolean
+      invalidPlaceholders: string[]
+      bundleOrderOk: boolean
+      problems: string[]
+    }
+    layer4_patch: {
+      ok: boolean
+      patchExists: boolean
+      patchLength: number
+      problems: string[]
+    }
+    layer5_junctions: {
+      ok: boolean
+      totalJunctions: number
+      deadJunctions: string[]
+      crossJunctionRisks: string[]
+      fixed: number
+    }
+  }
+}
+
+export interface PreflightResult {
+  ok: boolean
+  reason?: string
+  canAutoHeal: boolean
+  report: DoctorReport
+}
+
+export interface HealOptions {
+  unlinkDeadJunctions?: boolean
+  fixPatch?: boolean
+  restoreCli?: boolean
+  killOrphan?: boolean
+  backup?: boolean
+}
+

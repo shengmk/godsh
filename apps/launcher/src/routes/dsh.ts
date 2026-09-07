@@ -2,7 +2,7 @@ import { spawn } from 'node:child_process'
 import { existsSync, rmSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { dirname, join } from 'node:path'
-import { DATA_DIR, readLogTail, stopWeb } from '@godsh/core'
+import { DATA_DIR, readLogTail, stopWeb, safePurgeProfileJunctions } from '@godsh/core'
 import { DshEnvManager } from '@godsh/dsh-env'
 import { removeProfile, scanProfiles } from '@godsh/profile-manager'
 import type { ApiHandler } from './types.js'
@@ -193,6 +193,7 @@ export const dshHandler: ApiHandler = async (ctx, _req, res, method, seg, body, 
       const cfgBefore = store.readConfig()
       const home = cfgBefore.dsh.home || process.env.DSH_HOME || join(homedir(), '.dsh')
       try {
+        safePurgeProfileJunctions(home)
         rmSync(home, { recursive: true, force: true })
       } catch {
         /* 忽略 */

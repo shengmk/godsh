@@ -1,8 +1,10 @@
 import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
+import { safePurgeProfileJunctions } from '@godsh/core'
 import { readPatchChecked, serializePatchList } from './patch.js'
 import { findProfile, invalidateProfileCache, scanProfiles } from './scanner.js'
 import type { PatchEntry, ProfileManifest, ProfilePackage } from './types.js'
+
 
 /**
  * Profile 的 pnpm-workspace.yaml 模板：
@@ -146,6 +148,7 @@ export function removeProfile(profilesDir: string, name: string): void {
   const profile = findProfile(profilesDir, name)
   if (!profile) throw new Error(`Profile 不存在: ${name}`)
   if (!existsSync(profile.packageJsonPath)) throw new Error(`拒绝删除非 Profile 目录: ${name}`)
+  safePurgeProfileJunctions(profile.dir)
   rmSync(profile.dir, { recursive: true, force: true })
   invalidateProfileCache(profilesDir)
 }

@@ -1,11 +1,12 @@
 # J-Space Workspace Ledger
 
 ## Goal
-对齐v0.5.2代码事实与方案，审查仓库并逐项执行优化方案，维持架构与跨文件一致性
+排查关闭启动环境后无法打开(web)的根因，输出检查方案.md并设计完备备份策略
 
 ## Core
-- 仓库事实对齐 — v0.5.2已引入沙箱更新与框选紧凑化，输入文档落后于实际代码需逐项实测判别
+- 环境重启失效根因 — 涉及孤儿进程锁端口、Token认证断链与patch损坏，需对齐godsh与dshdesktop源码
 - 一致性原子落地 — 涉及core/launcher/web/dsh-plugin多包协同，每项改动必须双向同步并有单测防护
+- 仓库事实对齐 — v0.5.2已引入沙箱更新与框选紧凑化，输入文档落后于实际代码需逐项实测判别
 - 2. **全链路“下至沙箱”能力**：
 - 1. **Profile 瘦身与三核固化**：安全物理清理 `manage`、`test-profile`、`plugin_bag` 冗余环境，清洗 `vault.json` 挂载引用，固化 `dshcoding`、`web`、`desktop` 三大健康生产环境。
 - 市场页（MarketPage）：针对已安装（`installed`）插件补齐「📦 下至沙箱」动作（未入库时一键反向纳管收割，已入库高亮沙箱就绪）；
@@ -40,6 +41,9 @@
 - ✓02 运行优化总方案.md 生成落地 — verified by: automated inspection over 381 lines and full content verification in target directory
 - ✓03 serveStatic与CORS加固完成，全域安全与缺陷闭环 — verified by: unit tests across all packages — closes: ?01
 - ✓04 检查点严审发现 profile-editor.ts 存在 raw 未定义 TS 隐患并彻底修复，全量单测 54/54 全绿，tsc 0 错误通过 — verified by: node test (54/54 pass) & tsc --noEmit (0 error) — closes: ?02
+- ✓05 排查关闭重启环境后无法打开(web)的根因并输出检查方案与备份工具 — verified by: 完成web环境关闭重启打不开检查方案.md(43KB)、dsh-backup.ps1与dsh-web-doctor.ps1落地，五大根因源码级复核
+- ✓06 修复全局dsh依赖被清空问题(commander缺失)与软链穿透缺陷 — verified by: dsh --version verified 0.1.2-rc.1, 5/5 dsh-heal.test.ts passing, and dsh-web-doctor.ps1 all layers green
+- ✓07 排查并解决dsh-mnemon占位符死软链阻断CordisLoader问题，实现web环境完全就绪 — verified by: automated tests and dsh CLI execution test over all profiles
 
 ## Open
 - [x] 物理清理冗余 Profile 并同步元数据
@@ -50,4 +54,4 @@
 - [x] 继承检查点严格复核与隐患清零
 
 ## Next
-交付继承检查点详细复核报告并向远端同步最新修复提交
+深度分析10_dsh-desktop-master与godsh的进程启停及Web加载机制

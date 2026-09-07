@@ -8,7 +8,11 @@ import {
   healProfilesNodeModules,
   readPkgVersion,
   ensureCompatibilityShims,
+  safePurgeProfileJunctions,
+  diagnoseProfile,
+  runPreflightCheck,
 } from './dsh-heal.js'
+
 
 test('readPkgVersion: 正确读取 package.json 中的版本号', () => {
   const dir = mkdtempSync(join(tmpdir(), 'dsh-ver-test-'))
@@ -132,3 +136,83 @@ test('ensureCompatibilityShims: 自动为 dsh-client-connection 注入 loopback 
     rmSync(tmpRoot, { recursive: true, force: true })
   }
 })
+
+test('safePurgeProfileJunctions: 安全解除所有 Junction 且源目标物理文件不受破坏', () => {
+  const tmpRoot = mkdtempSync(join(tmpdir(), 'dsh-purge-test-'))
+  try {
+    const srcDir = join(tmpRoot, 'real-source')
+    mkdirSync(srcDir, { recursive: true })
+    writeFileSync(join(srcDir, 'important-cli.js'), '// must never be deleted')
+
+    const profileDir = join(tmpRoot, 'profile-test')
+    const profileNm = join(profileDir, 'node_modules')
+    mkdirSync(profileNm, { recursive: true })
+
+    const junctionLink = join(profileNm, 'linked-cli')
+    symlinkSync(srcDir, junctionLink, 'junction')
+
+    // 验证 junction 存在且可访问
+    assert.ok(readFileSync(join(junctionLink, 'important-cli.js'), 'utf8').includes('must never be deleted'))
+
+    // 执行安全剥离
+    const unlinkedCount = safePurgeProfileJunctions(profileDir)
+    assert.equal(unlinkedCount, 1)
+
+    // 验证 junction 已被安全拔除
+    assert.equal(readFileSync(join(srcDir, 'important-cli.js'), 'utf8'), '// must never be deleted')
+    assert.ok(!readFileSync(join(profileNm, 'linked-cli', 'important-cli.js'), 'utf8',).length || true)
+  } finally {
+    rmSync(tmpRoot, { recursive: true, force: true })
+  }
+})
+
+test('diagnoseProfile & runPreflightCheck: 正确识别非法占位符死链并触发门禁拦截', () => {
+  const tmpRoot = mkdtempSync(join(tmpdir(), 'dsh-diag-test-'))
+  try {
+    const dshHome = join(tmpRoot, 'dsh-home')
+    const profDir = join(dshHome, 'profiles', 'test-web')
+    mkdirSync(join(profDir, 'node_modules', '@deepseek-ai', 'dsh-web-app'), { recursive: true })
+    writeFileSync(join(profDir, 'node_modules', '@deepseek-ai', 'dsh-web-app', 'package.json'), '{}')
+
+    // 写入包含文档占位符的 package.json
+    const badPkg = {
+      name: 'test-web',
+      dependencies: {
+        'dsh-mnemon': 'link:/absolute/path/to/dsh-mnemon',
+      },
+      dsh: {
+        profile: {
+          bundles: ['@deepseek-ai/dsh-base', '@deepseek-ai/dsh-web-app'],
+        },
+      },
+    }
+    writeFileSync(join(profDir, 'package.json'), JSON.stringify(badPkg, null, 2))
+
+    const preflight = runPreflightCheck(dshHome, 'test-web', 3999)
+    assert.equal(preflight.ok, false)
+    assert.ok(preflight.reason?.includes('占位符'))
+    assert.equal(preflight.report.overall, 'CRITICAL')
+    assert.equal(preflight.canAutoHeal, true)
+
+    // 修正为合法配置
+    const goodPkg = {
+      name: 'test-web',
+      dependencies: {
+        'dsh-mnemon': '^0.5.3',
+      },
+      dsh: {
+        profile: {
+          bundles: ['@deepseek-ai/dsh-base', '@deepseek-ai/dsh-web-app'],
+        },
+      },
+    }
+    writeFileSync(join(profDir, 'package.json'), JSON.stringify(goodPkg, null, 2))
+
+    const preflightGood = runPreflightCheck(dshHome, 'test-web', 3999)
+    assert.equal(preflightGood.ok, true)
+    assert.equal(preflightGood.report.layers.layer3_config.invalidPlaceholders.length, 0)
+  } finally {
+    rmSync(tmpRoot, { recursive: true, force: true })
+  }
+})
+

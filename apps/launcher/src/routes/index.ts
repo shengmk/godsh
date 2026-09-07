@@ -7,9 +7,11 @@ import { dshHandler } from './dsh.js'
 import { settingsHandler } from './settings.js'
 import { workflowsHandler } from './workflows.js'
 import { vaultHandler } from './vault.js'
+import { doctorHandler } from './doctor.js'
 
 /** 所有 API 路由处理器（按声明顺序逐个尝试；第一个返回 true 即视为已处理）。 */
 export const routeHandlers: ApiHandler[] = [
+  doctorHandler,
   profilesHandler,
   allocationsHandler,
   vaultHandler,
@@ -20,3 +22,4 @@ export const routeHandlers: ApiHandler[] = [
   settingsHandler,
   workflowsHandler,
 ]
+

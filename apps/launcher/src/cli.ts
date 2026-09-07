@@ -6,6 +6,8 @@ import {
   getPortStatus,
   startWeb,
   stopWeb,
+  diagnoseProfile,
+  healProfile,
   type EnvInfo,
 } from '@godsh/core'
 import {
@@ -583,6 +585,33 @@ async function main(): Promise<void> {
       if (Object.keys(cfg.dsh.byProfile ?? {}).length) {
         console.log('=== Profile 指定版本 ===')
         for (const [p, v] of Object.entries(cfg.dsh.byProfile ?? {})) console.log(`- ${p}: ${v}`)
+      }
+      break
+    }
+
+    case 'doctor': {
+      const profile = parsed.positionals[0] || 'web'
+      const port = optNum(parsed.options, 'port') ?? 3080
+      const autoFix = Boolean(parsed.options.fix)
+      console.log(`\n=== Godsh 环境体检 (${profile}) ===`)
+      if (autoFix) {
+        console.log('正在执行安全自愈...')
+        const dshBin = resolveDshBin(profile)
+        const healed = healProfile(ctx.env.dshHome, profile, {}, dshBin)
+        console.log(`自愈完成，已修复 ${healed.healed} 项`)
+      }
+      const report = diagnoseProfile(ctx.env.dshHome, profile, port)
+      console.log(`整体评级: ${report.overall}`)
+      console.log(`Layer 0 (全局 CLI): ${report.layers.layer0_cli.ok ? '√' : 'X'} (版本: ${report.layers.layer0_cli.version ?? '未知'})`)
+      console.log(`Layer 1 (网络监听): ${report.layers.layer1_network.ok ? '√' : '!'} (监听中: ${report.layers.layer1_network.isListening}, PID: ${report.layers.layer1_network.pid ?? '-'})`)
+      console.log(`Layer 2 (HTTP状态): ${report.layers.layer2_http.ok ? '√' : 'X'}`)
+      console.log(`Layer 3 (配置与占位符): ${report.layers.layer3_config.ok ? '√' : 'X'} (占位符死链: ${report.layers.layer3_config.invalidPlaceholders.length})`)
+      console.log(`Layer 4 (Patch状态): ${report.layers.layer4_patch.ok ? '√' : 'X'} (${report.layers.layer4_patch.patchLength} 字节)`)
+      console.log(`Layer 5 (Junction状态): ${report.layers.layer5_junctions.ok ? '√' : 'X'} (死链: ${report.layers.layer5_junctions.deadJunctions.length}, 跨目录风险: ${report.layers.layer5_junctions.crossJunctionRisks.length})`)
+      if (report.issuesFound > 0) {
+        console.log(`\n发现 ${report.issuesFound} 个隐患。可执行 \`godsh doctor ${profile} --fix\` 尝试一键自愈。`)
+      } else {
+        console.log('\n环境完好，可安全启动！')
       }
       break
     }

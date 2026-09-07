@@ -18,13 +18,19 @@ Write-Host "CI:   $env:CI"
 # PATH 自适应：合并 npm 全局 / rustup 工具链 / msys2 / cargo（存在才加，缺失不报错）
 $candidates = @(
   "$env:APPDATA\npm",
+  "C:\Users\Shengmingkai\.rustup\toolchains\stable-x86_64-pc-windows-gnu\bin",
   "$env:USERPROFILE\.rustup\toolchains\stable-x86_64-pc-windows-gnu\bin",
+  "C:\Users\Shengmingkai\.cargo\bin",
   "$env:USERPROFILE\.cargo\bin",
   "D:\mingw64\bin",
   "C:\msys64\mingw64\bin",
   "C:\msys64\msys64\mingw64\bin",
   "C:\x86_64-8.1.0-release-posix-seh-rt_v6-rev0\mingw64\bin"
 )
+if (Test-Path "C:\Users\Shengmingkai\.rustup") {
+  $env:RUSTUP_HOME = "C:\Users\Shengmingkai\.rustup"
+  $env:CARGO_HOME = "C:\Users\Shengmingkai\.cargo"
+}
 $env:Path = ((($candidates | Where-Object { Test-Path $_ }) -join ';') + ';' + $env:Path)
 Write-Host "cargo: $(cargo --version 2>&1) / rustc: $(rustc --version 2>&1)"
 
@@ -76,8 +82,14 @@ $dllSrc = if (Test-Path (Join-Path $srcRelease "WebView2Loader.dll")) {
 }
 if ($dllSrc) {
   Copy-Item $dllSrc $stage -Force
-  Copy-Item $dllSrc (Join-Path $srcRelease "WebView2Loader.dll") -Force
-  Copy-Item $dllSrc (Join-Path $releaseDir "WebView2Loader.dll") -Force
+  $dllDst1 = Join-Path $srcRelease "WebView2Loader.dll"
+  if ((Resolve-Path $dllSrc -ErrorAction SilentlyContinue).Path -ne (Resolve-Path $dllDst1 -ErrorAction SilentlyContinue).Path) {
+    Copy-Item $dllSrc $dllDst1 -Force
+  }
+  $dllDst2 = Join-Path $releaseDir "WebView2Loader.dll"
+  if ((Resolve-Path $dllSrc -ErrorAction SilentlyContinue).Path -ne (Resolve-Path $dllDst2 -ErrorAction SilentlyContinue).Path) {
+    Copy-Item $dllSrc $dllDst2 -Force
+  }
 }
 
 if (Test-Path (Join-Path $srcRelease "resources")) {

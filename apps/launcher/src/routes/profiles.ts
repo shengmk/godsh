@@ -1,6 +1,6 @@
 import { join } from 'node:path'
 import { mkdirSync, readFileSync, writeFileSync, existsSync } from 'node:fs'
-import { readLogTail, extractDshWebUrl, spawnWebProfile, stopWeb, waitForPort, isPortListening, findPidByPort, findProcessName, invalidatePortProbe, ensureProfileBundles, ensureCacheIntegrity, killAllProfileProcesses, verifyProfileDeps } from '@godsh/core'
+import { readLogTail, extractDshWebUrl, spawnWebProfile, stopWeb, waitForPort, isPortListening, findPidByPort, findProcessName, invalidatePortProbe, ensureProfileBundles, ensureCacheIntegrity, killAllProfileProcesses, verifyProfileDeps, runPreflightCheck } from '@godsh/core'
 import { createProfile, removeProfile, scanProfiles, setProfileBundles, exportProfilePackage, importProfilePackage, type ProfilePackage } from '@godsh/profile-manager'
 import { run } from '@godsh/core'
 import { pluginAction, PLUGIN_ACTION_TIMEOUT_MS, resolveInstallArg } from '@godsh/marketplace'
@@ -305,6 +305,20 @@ export const profilesHandler: ApiHandler = async (ctx, _req, res, method, seg, b
       ctx.ensureUnifiedKernel(name)
       const isCustom = Boolean(body.port && Number(body.port) > 0)
       const preferredPort = isCustom ? Number(body.port) : undefined
+
+      // 启动前 Pre-flight 毫秒级门禁拦截（拦截死软链、非法占位符、CLI损坏等致命隐患）
+      const preflight = runPreflightCheck(ctx.env.dshHome, name, preferredPort ?? 3080)
+      if (!preflight.ok && body.force !== true) {
+        ctx.sendJson(res, 400, {
+          error: `环境启动被安全拦截：${preflight.reason}。请使用 Godsh 医生一键自愈。`,
+          preflightBlocked: true,
+          reason: preflight.reason,
+          report: preflight.report,
+          canAutoHeal: preflight.canAutoHeal,
+        })
+        return
+      }
+
       const port = await ctx.findFreePort(preferredPort, isCustom)
       invalidatePortProbe(port)
       let proc: RuntimeProc

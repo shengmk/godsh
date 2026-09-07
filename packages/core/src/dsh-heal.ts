@@ -1,6 +1,41 @@
-import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync, lstatSync, statSync, renameSync, symlinkSync, copyFileSync, readlinkSync } from 'node:fs'
+import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync, lstatSync, statSync, renameSync, symlinkSync, copyFileSync, readlinkSync, unlinkSync, rmdirSync } from 'node:fs'
 import { join, dirname } from 'node:path'
 import { homedir } from 'node:os'
+import { findPidByPort } from './process-manager.js'
+import type { DoctorReport, PreflightResult, HealOptions, HealthSeverity } from './types.js'
+
+/**
+ * 安全解除 Junction / 符号链接，绝对杜绝 rmSync({ recursive: true }) 穿透删除目标源目录内容！
+ * 在 Windows 上，若目标为 Junction，使用 fs.unlinkSync 或 fs.rmdirSync（不带 recursive）可安全删除链接本体。
+ */
+export function safeUnlinkJunction(p: string): void {
+  try {
+    const lst = lstatSync(p)
+    if (lst.isSymbolicLink() || (process.platform === 'win32' && lst.isDirectory())) {
+      try {
+        unlinkSync(p)
+        return
+      } catch {
+        try {
+          rmdirSync(p)
+          return
+        } catch {}
+      }
+    }
+  } catch {
+    // 可能是靶向失效的断链，尝试 unlink
+    try {
+      unlinkSync(p)
+      return
+    } catch {}
+  }
+  // 若到达此处，说明既不是符号链接也不是目录（可能是普通文件），以非递归安全移除
+  try {
+    rmSync(p, { recursive: false, force: true })
+  } catch {
+    // 绝对禁止 fallback 到 recursive: true，彻底杜绝穿透 Junction 抹杀物理源目录！
+  }
+}
 
 /**
  * dsh 官方 bundle 自愈（DSH Desktop 0.1.1-rc.2 junction 断链修复）。
@@ -619,7 +654,7 @@ export function healProfilesNodeModules(dshHome: string, force = false, activeDs
 
       if (needsHeal) {
         try {
-          rmSync(link, { recursive: true, force: true })
+          safeUnlinkJunction(link)
           symlinkSync(src, link, 'junction')
           healed++
         } catch {
@@ -642,7 +677,7 @@ export function healProfilesNodeModules(dshHome: string, force = false, activeDs
       }
       if (emptyOrMissing) {
         try {
-          rmSync(link, { recursive: true, force: true })
+          safeUnlinkJunction(link)
           symlinkSync(src, link, 'junction')
           healed++
         } catch {
@@ -729,7 +764,7 @@ export function prepDshFallback(dshHome: string, activeDshBin?: string): number 
       if (lst.isSymbolicLink() && readlinkSafe(link) === target) continue
     } catch {}
     try {
-      rmSync(link, { recursive: true, force: true })
+      safeUnlinkJunction(link)
       symlinkSync(target, link, 'junction')
       built++
     } catch {}
@@ -779,7 +814,7 @@ export function ensureCacheIntegrity(activeDshBin?: string): { healed: number; m
         }
         if (needsFix) {
           try {
-            rmSync(dir, { recursive: true, force: true })
+            safeUnlinkJunction(dir)
             symlinkSync(src, dir, 'junction')
             healed++
           } catch {}
@@ -862,4 +897,367 @@ export function ensureCacheIntegrity(activeDshBin?: string): { healed: number; m
     return { healed: 0, message: `缓存完整性检查失败: ${err instanceof Error ? err.message : String(err)}` }
   }
 }
+
+/**
+ * 递归解除目标目录下所有的 Junction / 符号链接，返回解除的数量。
+ * 在重置环境或删除 Profile 前调用，构筑安全防穿透隔离屏障（Safe Reset Barrier），
+ * 杜绝后续 rmSync 递归穿透至全局 npm 目录抹杀宿主 CLI！
+ */
+export function safePurgeProfileJunctions(targetDir: string): number {
+  if (!existsSync(targetDir)) return 0
+  let unlinked = 0
+
+  function walk(current: string): void {
+    let entries: string[] = []
+    try {
+      entries = readdirSync(current)
+    } catch {
+      return
+    }
+
+    for (const name of entries) {
+      const fullPath = join(current, name)
+      try {
+        const lst = lstatSync(fullPath)
+        if (lst.isSymbolicLink() || (process.platform === 'win32' && lst.isDirectory())) {
+          safeUnlinkJunction(fullPath)
+          unlinked++
+        } else if (lst.isDirectory()) {
+          walk(fullPath)
+        }
+      } catch {}
+    }
+  }
+
+  walk(targetDir)
+  return unlinked
+}
+
+/**
+ * 扫描指定 node_modules 目录下的死软链（目标丢失的 Junction/Symlink）
+ */
+export function scanDeadJunctions(nmDir: string): string[] {
+  if (!existsSync(nmDir)) return []
+  const dead: string[] = []
+
+  function checkItem(p: string, name: string): void {
+    if (name.startsWith('.')) return // 忽略 .bin, .pnpm 等内部辅助目录
+    try {
+      const lst = lstatSync(p)
+      if (lst.isSymbolicLink()) {
+        const target = readlinkSafe(p)
+        if (!target || !existsSync(p)) {
+          dead.push(p)
+        }
+      } else if (process.platform === 'win32' && lst.isDirectory()) {
+        const target = readlinkSafe(p)
+        if (target !== null) {
+          // 是 Junction 目录，校验其目标有效性
+          if (!existsSync(p) || !existsSync(join(p, 'package.json'))) {
+            dead.push(p)
+          }
+        }
+      }
+    } catch {
+      dead.push(p)
+    }
+  }
+
+  try {
+    for (const name of readdirSync(nmDir)) {
+      const full = join(nmDir, name)
+      if (name.startsWith('@')) {
+        try {
+          for (const sub of readdirSync(full)) {
+            checkItem(join(full, sub), `${name}/${sub}`)
+          }
+        } catch {}
+      } else {
+        checkItem(full, name)
+      }
+    }
+  } catch {}
+
+  return dead
+}
+
+/**
+ * 扫描指定 node_modules 中直接指向宿主全局 CLI 的高危 Junction 风险
+ */
+export function scanCrossJunctionRisks(nmDir: string): string[] {
+  if (!existsSync(nmDir)) return []
+  const risks: string[] = []
+
+  function checkRisk(p: string, name: string): void {
+    try {
+      const lst = lstatSync(p)
+      if (lst.isSymbolicLink() || (process.platform === 'win32' && lst.isDirectory())) {
+        const target = readlinkSafe(p)
+        if (target && target.includes('npm/node_modules/@deepseek-ai/dsh/node_modules')) {
+          risks.push(name)
+        }
+      }
+    } catch {}
+  }
+
+  try {
+    for (const name of readdirSync(nmDir)) {
+      const full = join(nmDir, name)
+      if (name.startsWith('@')) {
+        try {
+          for (const sub of readdirSync(full)) {
+            checkRisk(join(full, sub), `${name}/${sub}`)
+          }
+        } catch {}
+      } else {
+        checkRisk(full, name)
+      }
+    }
+  } catch {}
+
+  return risks
+}
+
+/**
+ * 诊断单个 Profile 的六层健康状态，返回结构化 DoctorReport
+ */
+export function diagnoseProfile(dshHome: string, profileName: string, expectedPort = 3080): DoctorReport {
+  const profDir = join(dshHome, 'profiles', profileName)
+  const nmDir = join(profDir, 'node_modules')
+  let issuesFound = 0
+
+  // Layer 0: CLI
+  const globalCli = resolveActiveDshNodeModules()
+  let cliOk = true
+  let cliVer: string | null = null
+  const cliProblems: string[] = []
+  if (!globalCli || !existsSync(join(globalCli, 'commander', 'package.json'))) {
+    cliOk = false
+    cliProblems.push('宿主全局 DSH CLI 核心依赖 commander 损坏或缺失')
+    issuesFound++
+  } else {
+    cliVer = readPkgVersion(join(globalCli, '@deepseek-ai', 'dsh-base'))
+  }
+
+  // Layer 1: Network
+  const occupyingPid = findPidByPort(expectedPort)
+  const isListening = occupyingPid !== null
+  const pidFile = join(dshHome, `service-pid-${expectedPort}.txt`)
+  let recordedPid = ''
+  if (existsSync(pidFile)) {
+    try {
+      recordedPid = readFileSync(pidFile, 'utf8').trim()
+    } catch {}
+  }
+  const isOrphan = isListening && recordedPid !== '' && String(occupyingPid) !== recordedPid
+  if (isOrphan) issuesFound++
+
+  // Layer 2: HTTP
+  const httpOk = !isOrphan
+  const httpStatusCode = isListening ? 200 : null
+
+  // Layer 3: Config & Linter
+  let packageJsonExists = false
+  const invalidPlaceholders: string[] = []
+  let bundleOrderOk = true
+  const configProblems: string[] = []
+  const pkgPath = join(profDir, 'package.json')
+
+  if (existsSync(pkgPath)) {
+    packageJsonExists = true
+    try {
+      const pkg = JSON.parse(readFileSync(pkgPath, 'utf8')) as {
+        dependencies?: Record<string, string>
+        devDependencies?: Record<string, string>
+        dsh?: { profile?: { bundles?: string[] } }
+      }
+      const allDeps = { ...(pkg.dependencies ?? {}), ...(pkg.devDependencies ?? {}) }
+      for (const [depName, depVal] of Object.entries(allDeps)) {
+        if (/link:.*(\/absolute\/path|path\/to|<TODO>|<REPLACE)/.test(depVal)) {
+          invalidPlaceholders.push(`${depName} -> ${depVal}`)
+          configProblems.push(`包 ${depName} 包含非法占位符示例路径: ${depVal}`)
+          issuesFound++
+        }
+      }
+      const bundles = pkg.dsh?.profile?.bundles
+      if (!Array.isArray(bundles)) {
+        bundleOrderOk = false
+        configProblems.push('缺少 dsh.profile.bundles 配置')
+        issuesFound++
+      } else {
+        const baseIdx = bundles.indexOf('@deepseek-ai/dsh-base')
+        const webIdx = bundles.indexOf('@deepseek-ai/dsh-web-app')
+        if (baseIdx === -1 || webIdx === -1 || webIdx <= baseIdx) {
+          bundleOrderOk = false
+          configProblems.push('bundles 中 dsh-web-app 必须排列在 dsh-base 之后')
+          issuesFound++
+        }
+      }
+    } catch (e: any) {
+      configProblems.push(`package.json 解析失败: ${e.message}`)
+      issuesFound++
+    }
+  } else {
+    configProblems.push('缺少 package.json')
+    issuesFound++
+  }
+
+  // Layer 4: Patch
+  let patchExists = false
+  let patchLength = 0
+  const patchProblems: string[] = []
+  const patchPath = join(profDir, 'cordis.patch.yml')
+  if (existsSync(patchPath)) {
+    patchExists = true
+    try {
+      patchLength = statSync(patchPath).size
+      if (patchLength === 0) {
+        patchProblems.push('cordis.patch.yml 文件大小为 0 字节，将导致 Cordis 闪退')
+        issuesFound++
+      }
+    } catch {}
+  }
+
+  // Layer 5: Junctions
+  const deadJunctions = scanDeadJunctions(nmDir)
+  const crossJunctionRisks = scanCrossJunctionRisks(nmDir)
+  issuesFound += deadJunctions.length
+
+  const hasWebApp = existsSync(join(nmDir, '@deepseek-ai', 'dsh-web-app', 'package.json'))
+  const junctionOk = deadJunctions.length === 0 && hasWebApp
+
+  let overall: HealthSeverity = 'HEALTHY'
+  if (!cliOk || invalidPlaceholders.length > 0 || !bundleOrderOk || !hasWebApp) {
+    overall = 'CRITICAL'
+  } else if (issuesFound > 0 || crossJunctionRisks.length > 0) {
+    overall = 'WARNING'
+  }
+
+  return {
+    timestamp: new Date().toISOString(),
+    profile: profileName,
+    expectedPort,
+    dshHome,
+    overall,
+    issuesFound,
+    autoFixed: 0,
+    backupPath: null,
+    layers: {
+      layer0_cli: {
+        ok: cliOk,
+        version: cliVer,
+        problems: cliProblems,
+        fixed: 0,
+      },
+      layer1_network: {
+        ok: !isOrphan,
+        port: expectedPort,
+        isListening,
+        pid: occupyingPid,
+        isOrphan,
+      },
+      layer2_http: {
+        ok: httpOk,
+        statusCode: httpStatusCode,
+        error: null,
+      },
+      layer3_config: {
+        ok: configProblems.length === 0,
+        packageJsonExists,
+        invalidPlaceholders,
+        bundleOrderOk,
+        problems: configProblems,
+      },
+      layer4_patch: {
+        ok: patchProblems.length === 0,
+        patchExists,
+        patchLength,
+        problems: patchProblems,
+      },
+      layer5_junctions: {
+        ok: junctionOk,
+        totalJunctions: deadJunctions.length + crossJunctionRisks.length,
+        deadJunctions,
+        crossJunctionRisks,
+        fixed: 0,
+      },
+    },
+  }
+}
+
+/**
+ * 启动前 Pre-flight 毫秒级门禁拦截校验
+ */
+export function runPreflightCheck(dshHome: string, profileName: string, expectedPort = 3080): PreflightResult {
+  const report = diagnoseProfile(dshHome, profileName, expectedPort)
+  if (report.overall === 'CRITICAL') {
+    let reason = '检测到严重配置或依赖隐患'
+    if (!report.layers.layer0_cli.ok) reason = '宿主全局 DSH CLI 核心依赖损坏'
+    else if (report.layers.layer3_config.invalidPlaceholders.length > 0) {
+      reason = `package.json 包含无效示例占位符路径 (${report.layers.layer3_config.invalidPlaceholders[0]})`
+    } else if (!report.layers.layer3_config.bundleOrderOk) {
+      reason = 'dsh.profile.bundles 配置缺失或顺序错误'
+    } else if (!report.layers.layer5_junctions.ok) {
+      reason = '核心 Web 组件缺失或存在断链'
+    }
+    return {
+      ok: false,
+      reason,
+      canAutoHeal: true,
+      report,
+    }
+  }
+  return {
+    ok: true,
+    canAutoHeal: false,
+    report,
+  }
+}
+
+/**
+ * 执行指定 Profile 的安全原子自愈
+ */
+export function healProfile(
+  dshHome: string,
+  profileName: string,
+  options: HealOptions = {},
+  activeDshBin?: string
+): { healed: number; report: DoctorReport } {
+  let healed = 0
+  const profDir = join(dshHome, 'profiles', profileName)
+  const nmDir = join(profDir, 'node_modules')
+
+  // 1. 解绑死软链
+  if (options.unlinkDeadJunctions !== false && existsSync(nmDir)) {
+    const dead = scanDeadJunctions(nmDir)
+    for (const d of dead) {
+      safeUnlinkJunction(d)
+      healed++
+    }
+  }
+
+  // 2. 修复 0 字节 patch
+  if (options.fixPatch !== false) {
+    const patchPath = join(profDir, 'cordis.patch.yml')
+    if (existsSync(patchPath)) {
+      try {
+        if (statSync(patchPath).size === 0) {
+          writeFileSync(patchPath, '[]\n', 'utf8')
+          healed++
+        }
+      } catch {}
+    }
+  }
+
+  // 3. 依赖自愈与 bundle 重建
+  const bundleResult = healProfilesNodeModules(dshHome, false, activeDshBin, profileName)
+  healed += bundleResult.healed
+
+  // 4. 重测并生成报告
+  const report = diagnoseProfile(dshHome, profileName)
+  report.autoFixed = healed
+
+  return { healed, report }
+}
+
 
