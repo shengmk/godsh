@@ -171,6 +171,15 @@ test('diagnoseProfile & runPreflightCheck: 正确识别非法占位符死链并�
   try {
     const dshHome = join(tmpRoot, 'dsh-home')
     const profDir = join(dshHome, 'profiles', 'test-web')
+    const mockGlobalCli = join(tmpRoot, 'mock-global')
+    mkdirSync(join(mockGlobalCli, 'node_modules', '@deepseek-ai', 'dsh-base'), { recursive: true })
+    writeFileSync(join(mockGlobalCli, 'node_modules', '@deepseek-ai', 'dsh-base', 'package.json'), JSON.stringify({ name: '@deepseek-ai/dsh-base', version: '0.1.2-rc.1' }))
+    mkdirSync(join(mockGlobalCli, 'node_modules', 'commander'), { recursive: true })
+    writeFileSync(join(mockGlobalCli, 'node_modules', 'commander', 'package.json'), JSON.stringify({ name: 'commander', version: '11.0.0' }))
+    const mockBin = join(mockGlobalCli, 'lib', 'bin.js')
+    mkdirSync(join(mockGlobalCli, 'lib'), { recursive: true })
+    writeFileSync(mockBin, '// mock bin')
+
     mkdirSync(join(profDir, 'node_modules', '@deepseek-ai', 'dsh-web-app'), { recursive: true })
     writeFileSync(join(profDir, 'node_modules', '@deepseek-ai', 'dsh-web-app', 'package.json'), '{}')
 
@@ -188,7 +197,7 @@ test('diagnoseProfile & runPreflightCheck: 正确识别非法占位符死链并�
     }
     writeFileSync(join(profDir, 'package.json'), JSON.stringify(badPkg, null, 2))
 
-    const preflight = runPreflightCheck(dshHome, 'test-web', 3999)
+    const preflight = runPreflightCheck(dshHome, 'test-web', 3999, mockBin)
     assert.equal(preflight.ok, false)
     assert.ok(preflight.reason?.includes('占位符'))
     assert.equal(preflight.report.overall, 'CRITICAL')
@@ -208,7 +217,7 @@ test('diagnoseProfile & runPreflightCheck: 正确识别非法占位符死链并�
     }
     writeFileSync(join(profDir, 'package.json'), JSON.stringify(goodPkg, null, 2))
 
-    const preflightGood = runPreflightCheck(dshHome, 'test-web', 3999)
+    const preflightGood = runPreflightCheck(dshHome, 'test-web', 3999, mockBin)
     assert.equal(preflightGood.ok, true)
     assert.equal(preflightGood.report.layers.layer3_config.invalidPlaceholders.length, 0)
   } finally {

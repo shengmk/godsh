@@ -1021,13 +1021,18 @@ export function scanCrossJunctionRisks(nmDir: string): string[] {
 /**
  * 诊断单个 Profile 的六层健康状态，返回结构化 DoctorReport
  */
-export function diagnoseProfile(dshHome: string, profileName: string, expectedPort = 3080): DoctorReport {
+export function diagnoseProfile(
+  dshHome: string,
+  profileName: string,
+  expectedPort = 3080,
+  activeDshBin?: string
+): DoctorReport {
   const profDir = join(dshHome, 'profiles', profileName)
   const nmDir = join(profDir, 'node_modules')
   let issuesFound = 0
 
   // Layer 0: CLI
-  const globalCli = resolveActiveDshNodeModules()
+  const globalCli = resolveActiveDshNodeModules(activeDshBin)
   let cliOk = true
   let cliVer: string | null = null
   const cliProblems: string[] = []
@@ -1188,13 +1193,19 @@ export function diagnoseProfile(dshHome: string, profileName: string, expectedPo
 /**
  * 启动前 Pre-flight 毫秒级门禁拦截校验
  */
-export function runPreflightCheck(dshHome: string, profileName: string, expectedPort = 3080): PreflightResult {
-  const report = diagnoseProfile(dshHome, profileName, expectedPort)
+export function runPreflightCheck(
+  dshHome: string,
+  profileName: string,
+  expectedPort = 3080,
+  activeDshBin?: string
+): PreflightResult {
+  const report = diagnoseProfile(dshHome, profileName, expectedPort, activeDshBin)
   if (report.overall === 'CRITICAL') {
     let reason = '检测到严重配置或依赖隐患'
-    if (!report.layers.layer0_cli.ok) reason = '宿主全局 DSH CLI 核心依赖损坏'
-    else if (report.layers.layer3_config.invalidPlaceholders.length > 0) {
+    if (report.layers.layer3_config.invalidPlaceholders.length > 0) {
       reason = `package.json 包含无效示例占位符路径 (${report.layers.layer3_config.invalidPlaceholders[0]})`
+    } else if (!report.layers.layer0_cli.ok) {
+      reason = '宿主全局 DSH CLI 核心依赖损坏'
     } else if (!report.layers.layer3_config.bundleOrderOk) {
       reason = 'dsh.profile.bundles 配置缺失或顺序错误'
     } else if (!report.layers.layer5_junctions.ok) {

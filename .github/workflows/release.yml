@@ -67,14 +67,4 @@ jobs:
           draft: false
           overwrite: true
           fail_on_unmatched_files: false
-          body: |
-            ## godsh v${{ github.ref_name }} — 自动云端编译版
-
-            本 Release 由 GitHub Actions 在云端完整编译生成（真正的新版桌面程序）。
-
-            ### 📦 下载
-            - `godsh-*-x64-setup.exe` — Windows 安装程序
-            - `godsh-*-x64.zip` — 便携版（解压即用）
-            - `SHA256SUMS.txt` — SHA256 校验和
-
-            ### 更新内容详见仓库 docs/方案/
+          body_path: release/RELEASE_NOTES.md
