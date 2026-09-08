@@ -1,4 +1,16 @@
 import { useEffect, useRef, useState } from 'react'
+import {
+  RefreshCw,
+  CheckCircle2,
+  AlertCircle,
+  AlertTriangle,
+  Copy,
+  Trash2,
+  Plus,
+  Sparkles,
+  Check,
+  ArrowUpCircle,
+} from 'lucide-react'
 import { api } from '../api'
 import type { DshEnv, DshEnvsInfo, DshStatus, ProfileView } from '../types'
 import { Toast } from '../components'
@@ -37,7 +49,7 @@ export default function DshEnvsPage() {
     try {
       await api.dshRefresh()
       await load()
-      show('✅ 已刷新 DSH 环境与版本探测缓存')
+      show('已刷新 DSH 环境与版本探测缓存')
     } catch (err) {
       show(err instanceof Error ? err.message : String(err), true)
     } finally {
@@ -77,8 +89,8 @@ export default function DshEnvsPage() {
       for (const t of info.tasks) {
         const prev = prevTasks.current.find((x) => x.key === t.key)
         if (prev && prev.status === 'running' && t.status !== 'running') {
-          if (t.status === 'done') show(`✅ ${t.key} 已完成`)
-          else show(`❌ ${t.key} 失败${t.message ? `：${t.message}` : ''}`, true)
+          if (t.status === 'done') show(`${t.key} 已完成`)
+          else show(`${t.key} 失败${t.message ? `：${t.message}` : ''}`, true)
         }
       }
     }
@@ -178,8 +190,10 @@ export default function DshEnvsPage() {
             className={`btn ${refreshing ? 'loading' : ''}`}
             disabled={refreshing}
             onClick={() => void handleRefresh()}
+            style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}
           >
-            {refreshing ? '🔄 刷新中…' : '🔄 刷新'}
+            <RefreshCw size={13} className={refreshing ? 'animate-spin' : ''} />
+            {refreshing ? '刷新中…' : '刷新'}
           </button>
         </div>
       </div>
@@ -210,8 +224,22 @@ export default function DshEnvsPage() {
                       ? 'success'
                       : 'stopped'
                 }`}
+                style={{ display: 'inline-flex', alignItems: 'center', gap: 5 }}
               >
-                {latestTask.status === 'running' ? '⏳ 执行中…' : latestTask.status === 'done' ? '✅ 已完成' : '❌ 失败'}
+                {latestTask.status === 'running' ? (
+                  <>
+                    <span className="pulse-dot active" style={{ width: 6, height: 6, display: 'inline-block' }} />
+                    执行中…
+                  </>
+                ) : latestTask.status === 'done' ? (
+                  <>
+                    <CheckCircle2 size={12} /> 已完成
+                  </>
+                ) : (
+                  <>
+                    <AlertCircle size={12} /> 失败
+                  </>
+                )}
               </span>
             </div>
             <div className="row" style={{ gap: 8 }}>
@@ -222,8 +250,9 @@ export default function DshEnvsPage() {
                     void navigator.clipboard.writeText(latestTask.log)
                     show('已复制日志到剪贴板')
                   }}
+                  style={{ display: 'inline-flex', alignItems: 'center', gap: 5 }}
                 >
-                  📋 复制日志
+                  <Copy size={11} /> 复制日志
                 </button>
               )}
               <button className="btn sm" onClick={() => void handleClearTasks()}>
@@ -232,8 +261,8 @@ export default function DshEnvsPage() {
             </div>
           </div>
           {latestTask.status === 'error' && latestTask.message && (
-            <div style={{ marginTop: 8, color: 'var(--err)', fontSize: 13, fontWeight: 500 }}>
-              ⚠ 错误原因：{latestTask.message}
+            <div style={{ marginTop: 8, color: 'var(--err)', fontSize: 13, fontWeight: 500, display: 'flex', alignItems: 'center', gap: 6 }}>
+              <AlertTriangle size={14} /> 错误原因：{latestTask.message}
             </div>
           )}
           <pre
@@ -256,7 +285,9 @@ export default function DshEnvsPage() {
       {/* 未安装引导 */}
       {envs.length === 0 && (
         <div className="card" style={{ marginBottom: 16 }}>
-          <div className="card-title">⚠ 未检测到 dsh</div>
+          <div className="card-title" style={{ display: 'flex', alignItems: 'center', gap: 6, color: 'var(--warn)' }}>
+            <AlertTriangle size={16} /> 未检测到 dsh
+          </div>
           <p className="card-sub">一键安装官方 dsh 并建立 base 主环境（类比 Anaconda base），随后可添加并列环境。</p>
           <div className="row" style={{ marginTop: 8 }}>
             <button className="btn primary" onClick={() => void installBase()}>
@@ -302,18 +333,18 @@ export default function DshEnvsPage() {
               </div>
               <span className="spacer" />
               {activeId !== e.id && (
-                <button className="btn sm" onClick={() => void activate(e)}>
-                  {t('btn.setDefault')}
+                <button className="btn sm" onClick={() => void activate(e)} style={{ display: 'inline-flex', alignItems: 'center', gap: 5 }}>
+                  <Check size={11} /> {t('btn.setDefault')}
                 </button>
               )}
               {e.kind === 'managed' && (
-                <button className="btn danger sm" onClick={() => void removeEnv(e)}>
-                  删除
+                <button className="btn danger sm" onClick={() => void removeEnv(e)} style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+                  <Trash2 size={11} /> 删除
                 </button>
               )}
               {e.kind === 'base' && (
-                <button className="btn sm" onClick={() => void updateBase()}>
-                  更新到最新
+                <button className="btn sm" onClick={() => void updateBase()} style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+                  <ArrowUpCircle size={11} /> 更新到最新
                 </button>
               )}
             </div>
@@ -341,8 +372,8 @@ export default function DshEnvsPage() {
               ))
             )}
           </select>
-          <button className="btn primary" onClick={() => void addEnv()}>
-            添加
+          <button className="btn primary" onClick={() => void addEnv()} style={{ display: 'inline-flex', alignItems: 'center', gap: 5 }}>
+            <Plus size={13} /> 添加
           </button>
         </div>
         {tasks.length > 0 && (
@@ -384,8 +415,8 @@ export default function DshEnvsPage() {
         <div className="card-title">DSH_HOME / 官方模板</div>
         <p className="card-sub">初始化 DSH_HOME 与官方默认 web 模板（base + web-app bundles）。</p>
         <div className="row" style={{ marginTop: 8 }}>
-          <button className="btn" onClick={() => void initHome()}>
-            初始化官方默认模板
+          <button className="btn" onClick={() => void initHome()} style={{ display: 'inline-flex', alignItems: 'center', gap: 5 }}>
+            <Sparkles size={13} /> 初始化官方默认模板
           </button>
         </div>
       </div>

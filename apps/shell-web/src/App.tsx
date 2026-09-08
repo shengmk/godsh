@@ -94,7 +94,7 @@ export default function App() {
     '检查程序版本…',
     '加载环境配置…',
     '预热插件市场…',
-    '准备就绪 ✨',
+    '准备就绪',
   ]
   useEffect(() => {
     let cancelled = false

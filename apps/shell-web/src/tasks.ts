@@ -187,7 +187,7 @@ class TaskManager {
         title: res.title,
         profile,
         status: 'running',
-        log: '⚡ 工作流已启动，正在准备执行环境…\n',
+        log: '工作流已启动，正在准备执行环境…\n',
         progress: 10,
       })
 
@@ -250,9 +250,9 @@ class TaskManager {
       this.addTask({
         id: taskId,
         type: 'vault-update-all',
-        title: '📦 沙箱插件全量自动更新',
+        title: '沙箱插件全量自动更新',
         status: 'running',
-        log: '⚡ 任务已启动，正在比对版本并准备下载…\n',
+        log: '任务已启动，正在比对版本并准备下载…\n',
         progress: 10,
       })
 
@@ -291,7 +291,7 @@ class TaskManager {
             this.activePolls.delete(taskId)
             const success = p.status === 'done'
             sendDesktopNotice(
-              success ? '沙箱插件全量更新已完成 ✅' : '沙箱插件更新异常 ❌',
+              success ? '沙箱插件全量更新已完成' : '沙箱插件更新异常',
               success ? '已成功解包并同步至各挂载环境' : (p.message || '部分插件更新过程中出现错误')
             )
             onDone?.(success)
@@ -328,9 +328,9 @@ class TaskManager {
       this.addTask({
         id: taskId,
         type: 'vault-update',
-        title: `📦 升级沙箱插件 ${pluginTitle}${version ? ` (v${version})` : ''}`,
+        title: `升级沙箱插件 ${pluginTitle}${version ? ` (v${version})` : ''}`,
         status: 'running',
-        log: `⚡ 准备拉取升级 ${pluginTitle} 至 ${version || '最新版本'}…\n`,
+        log: `准备拉取升级 ${pluginTitle} 至 ${version || '最新版本'}…\n`,
         progress: 15,
       })
 
@@ -360,7 +360,7 @@ class TaskManager {
             this.activePolls.delete(taskId)
             const success = p.status === 'done'
             sendDesktopNotice(
-              success ? `插件 ${pluginTitle} 升级成功 ✅` : `插件 ${pluginTitle} 升级失败 ❌`,
+              success ? `插件 ${pluginTitle} 升级成功` : `插件 ${pluginTitle} 升级失败`,
               success ? `已升级至 ${version || '最新版本'} 并刷新挂载软链` : (p.message || '更新过程中出现错误')
             )
             onDone?.(success)

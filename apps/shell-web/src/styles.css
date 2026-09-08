@@ -307,21 +307,23 @@ body {
 }
 
 .card {
-  background: var(--card);
-  border: 1px solid var(--card-border);
+  background: rgba(13, 13, 20, 0.72);
+  backdrop-filter: blur(16px);
+  border: 1px solid var(--border-hairline);
   border-radius: var(--radius);
-  box-shadow: var(--shadow);
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.35);
   padding: 16px 18px;
-  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+  transition: all 150ms cubic-bezier(0.16, 1, 0.3, 1);
 }
 
 .card:hover {
-  border-color: #c9d3e0;
-  box-shadow: var(--shadow-strong);
+  border-color: rgba(94, 106, 210, 0.35);
+  box-shadow: 0 8px 28px rgba(0, 0, 0, 0.5), 0 0 16px rgba(94, 106, 210, 0.12);
+  transform: translateY(-1px);
 }
 
 [data-theme='dark'] .card:hover {
-  border-color: #3a4a63;
+  border-color: rgba(94, 106, 210, 0.45);
 }
 
 .card-title {
@@ -336,9 +338,79 @@ body {
 
 .card-sub {
   font-size: 12px;
-  color: var(--text-dim);
+  color: var(--text-secondary);
   margin: 0 0 12px;
   line-height: 1.6;
+}
+
+/* ---------- 呼吸灯与状态药丸 ---------- */
+.pulse-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--text-muted);
+  display: inline-block;
+  position: relative;
+  flex-shrink: 0;
+}
+
+.pulse-dot.active {
+  background: #10b981;
+  box-shadow: 0 0 8px #10b981;
+}
+
+.pulse-dot.active::after {
+  content: '';
+  position: absolute;
+  inset: -3px;
+  border-radius: 50%;
+  background: #10b981;
+  opacity: 0.6;
+  animation: pulse-ring 1.8s cubic-bezier(0.24, 0, 0.38, 1) infinite;
+}
+
+@keyframes pulse-ring {
+  0% {
+    transform: scale(0.9);
+    opacity: 0.8;
+  }
+  100% {
+    transform: scale(2.4);
+    opacity: 0;
+  }
+}
+
+/* ---------- 极光辉光按钮 ---------- */
+.btn-glow-primary {
+  background: linear-gradient(135deg, rgba(94, 106, 210, 0.28) 0%, rgba(94, 106, 210, 0.12) 100%);
+  border: 1px solid rgba(94, 106, 210, 0.45);
+  color: #fff;
+  box-shadow: 0 0 12px rgba(94, 106, 210, 0.22);
+  transition: all 120ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.btn-glow-primary:hover:not(:disabled) {
+  background: linear-gradient(135deg, rgba(94, 106, 210, 0.42) 0%, rgba(94, 106, 210, 0.22) 100%);
+  border-color: rgba(94, 106, 210, 0.7);
+  box-shadow: 0 0 18px rgba(94, 106, 210, 0.4);
+  color: #fff;
+  transform: translateY(-1px);
+}
+
+.btn-glow-accent {
+  background: linear-gradient(135deg, rgba(139, 92, 246, 0.28) 0%, rgba(139, 92, 246, 0.12) 100%);
+  border: 1px solid rgba(139, 92, 246, 0.45);
+  color: #fff;
+  box-shadow: 0 0 12px rgba(139, 92, 246, 0.22);
+  transition: all 120ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.btn-glow-accent:hover:not(:disabled) {
+  background: linear-gradient(135deg, rgba(139, 92, 246, 0.42) 0%, rgba(139, 92, 246, 0.22) 100%);
+  border-color: rgba(139, 92, 246, 0.7);
+  box-shadow: 0 0 18px rgba(139, 92, 246, 0.4);
+  color: #fff;
+  transform: translateY(-1px);
 }
 
 /* ---------- 徽标（低饱和、克制） ---------- */
@@ -922,24 +994,26 @@ body {
   background: rgba(220, 38, 38, 0.12);
 }
 
-/* ---------- 确认对话框（需输入文字） ---------- */
+/* ---------- 确认对话框与模态框 ---------- */
 .modal-overlay {
   position: fixed;
   inset: 0;
-  z-index: 200;
-  background: rgba(15, 23, 42, 0.5);
+  z-index: 999;
+  background: rgba(2, 2, 3, 0.8);
+  backdrop-filter: blur(16px);
   display: grid;
   place-items: center;
   animation: fade-slide 0.16s ease;
 }
 
 .modal.glass {
-  width: min(420px, calc(100vw - 48px));
-  background: var(--surface-menu);
-  border: 1px solid var(--surface-border);
-  border-radius: 14px;
-  box-shadow: var(--shadow-strong);
-  padding: 22px 24px;
+  width: min(520px, calc(100vw - 48px));
+  background: rgba(13, 13, 20, 0.94);
+  backdrop-filter: blur(24px);
+  border: 1px solid var(--border-hairline);
+  border-radius: var(--radius);
+  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.7);
+  padding: 24px;
 }
 
 .modal-title {

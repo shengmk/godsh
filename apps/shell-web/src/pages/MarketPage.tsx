@@ -1,4 +1,18 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
+import {
+  Package,
+  CheckCircle2,
+  Download,
+  Zap,
+  RefreshCw,
+  Trash2,
+  Rocket,
+  Star,
+  Check,
+  Plus,
+  Clock,
+  AlertCircle,
+} from 'lucide-react'
 import { api } from '../api'
 import type { MarketPlugin, ProfileView, VaultPlugin } from '../types'
 import { ErrorText, Loading, Toast } from '../components'
@@ -238,7 +252,7 @@ export default function MarketPage() {
     try {
       const r = await api.installPlugin(profile, 'add', pkg, marketName)
       if (r.ok) {
-        show(`✅ 已成功安装 ${display} → ${profile}`)
+        show(`已成功安装 ${display} → ${profile}`)
         await refreshInstalled()
       } else {
         show(errorLabel(r), true)
@@ -262,7 +276,7 @@ export default function MarketPage() {
         category: typeof p.category === 'string' ? p.category : undefined,
       })
       if (r.ok) {
-        show(`📦 已将 ${p.name} 成功下载保存至沙箱仓库`)
+        show(`已将 ${p.name} 成功下载保存至沙箱仓库`)
         await loadVault()
       } else {
         show('暂存沙箱失败', true)
@@ -281,7 +295,7 @@ export default function MarketPage() {
     try {
       const r = await api.vaultHarvest(profile, pkg)
       if (r.ok) {
-        show(`📦 已成功将环境 [${profile}] 中的 ${p.name} 纳管下至沙箱仓库`)
+        show(`已成功将环境 [${profile}] 中的 ${p.name} 纳管下至沙箱仓库`)
         await loadVault()
       } else {
         await downloadToVault(p)
@@ -300,7 +314,7 @@ export default function MarketPage() {
     try {
       const r = await api.vaultDeploy(vPlugin.id, profile)
       if (r.ok) {
-        show(`🚀 已从沙箱成功挂载部署 ${display} → ${profile}`)
+        show(`已从沙箱成功挂载部署 ${display} → ${profile}`)
         await refreshInstalled()
         await loadVault()
       } else {
@@ -524,7 +538,7 @@ export default function MarketPage() {
         <input
           className="input"
           style={{ flex: 1, minWidth: 200 }}
-          placeholder="🔍 搜索插件名、npm 标识或功能描述…"
+          placeholder="搜索插件名、npm 标识或功能描述…"
           value={query}
           onChange={(e) => setQuery(e.target.value)}
         />
@@ -550,15 +564,19 @@ export default function MarketPage() {
             className={`segmented-btn ${statusFilter === 'vault' ? 'active' : ''}`}
             onClick={() => setStatusFilter('vault')}
             title="查看已下载至沙箱隔离仓库的插件"
+            style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}
           >
-            📦 沙箱就绪 ({vaultCount})
+            <Package size={12} />
+            <span>沙箱就绪 ({vaultCount})</span>
           </button>
           <button
             className={`segmented-btn ${statusFilter === 'installed' ? 'active' : ''}`}
             onClick={() => setStatusFilter('installed')}
             title={`查看已安装至当前 [${profile}] 环境的插件`}
+            style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}
           >
-            🟢 当前已装 ({installedCount})
+            <CheckCircle2 size={12} />
+            <span>当前已装 ({installedCount})</span>
           </button>
           <button
             className={`segmented-btn ${statusFilter === 'uninstalled' ? 'active' : ''}`}
@@ -570,8 +588,8 @@ export default function MarketPage() {
 
         <select className="select" value={sortBy} onChange={(e) => setSortBy(e.target.value as SortBy)} title="排序方式">
           <option value="default">默认推荐</option>
-          <option value="hot">🔥 热门度 (下载与 Star)</option>
-          <option value="latest">🆕 最新发布</option>
+          <option value="hot">热门度 (下载与 Star)</option>
+          <option value="latest">最新发布</option>
         </select>
       </div>
 
@@ -579,17 +597,18 @@ export default function MarketPage() {
       {selectedCount > 0 && (
         <div className="batch-action-bar">
           <div className="row" style={{ alignItems: 'center', gap: 10 }}>
-            <span className="badge vault" style={{ fontSize: 13, padding: '4px 10px' }}>
-              已选择 {selectedCount} 项
+            <span className="badge vault" style={{ fontSize: 13, padding: '4px 10px', display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+              <Package size={12} />
+              <span>已选择 {selectedCount} 项</span>
             </span>
-            <button className="btn primary" onClick={() => void batchInstall()}>
-              ⚡ 批量安装到 [{profile}]
+            <button className="btn primary" onClick={() => void batchInstall()} style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+              <Zap size={13} /> 批量安装到 [{profile}]
             </button>
-            <button className="btn vault" onClick={() => void batchDownloadVault()}>
-              📦 批量下载到沙箱 (Vault)
+            <button className="btn vault" onClick={() => void batchDownloadVault()} style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+              <Package size={13} /> 批量下载到沙箱 (Vault)
             </button>
-            <button className="btn sm subtle" onClick={() => setSelected(new Set())}>
-              清空选择
+            <button className="btn sm subtle" onClick={() => setSelected(new Set())} style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+              <Trash2 size={12} /> 清空选择
             </button>
           </div>
         </div>
@@ -636,8 +655,16 @@ export default function MarketPage() {
                     <span className="plugin-name" title={p.name}>{p.name}</span>
 
                     {p.version && <span className="badge kind">v{p.version}</span>}
-                    {installed && <span className="badge enabled">已装入 [{profile}]</span>}
-                    {inVault && <span className="badge vault" title="此插件已在本地沙箱隔离仓库中就绪">📦 沙箱就绪</span>}
+                    {installed && (
+                      <span className="badge enabled" style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+                        <CheckCircle2 size={11} /> 已装入 [{profile}]
+                      </span>
+                    )}
+                    {inVault && (
+                      <span className="badge vault" style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }} title="此插件已在本地沙箱隔离仓库中就绪">
+                        <Package size={11} /> 沙箱就绪
+                      </span>
+                    )}
                   </div>
 
                   {p.npm && p.npm !== p.name && (
@@ -650,9 +677,15 @@ export default function MarketPage() {
 
                   <div className="row" style={{ marginTop: 'auto', gap: 6, alignItems: 'center' }}>
                     {categoryLabel(p) && <span className="badge">{categoryLabel(p)}</span>}
-                    {fmtCount(p.stars) && <span className="muted stat-tag">★ {fmtCount(p.stars)}</span>}
+                    {fmtCount(p.stars) && (
+                      <span className="muted stat-tag" style={{ display: 'inline-flex', alignItems: 'center', gap: 3 }}>
+                        <Star size={11} style={{ fill: 'currentColor' }} /> {fmtCount(p.stars)}
+                      </span>
+                    )}
                     {fmtCount(p.downloads ?? p.downloadCount) && (
-                      <span className="muted stat-tag">↓ {fmtCount(p.downloads ?? p.downloadCount)}</span>
+                      <span className="muted stat-tag" style={{ display: 'inline-flex', alignItems: 'center', gap: 3 }}>
+                        <Download size={11} /> {fmtCount(p.downloads ?? p.downloadCount)}
+                      </span>
                     )}
                   </div>
 
@@ -665,15 +698,15 @@ export default function MarketPage() {
                           onClick={() => update(pkg, p.name, p.name)}
                           title="从官方源检查并更新此插件"
                         >
-                          {isInstalling ? '更新中…' : '🔄 更新'}
+                          {isInstalling ? '更新中…' : <><RefreshCw size={12} /> 更新</>}
                         </button>
                         {inVault ? (
                           <span
                             className="badge vault"
-                            style={{ alignSelf: 'center', cursor: 'default' }}
+                            style={{ alignSelf: 'center', cursor: 'default', display: 'inline-flex', alignItems: 'center', gap: 4 }}
                             title="此插件已在本地沙箱隔离仓库中就绪"
                           >
-                            📦 沙箱就绪
+                            <Package size={11} /> 沙箱就绪
                           </span>
                         ) : (
                           <button
@@ -682,7 +715,7 @@ export default function MarketPage() {
                             onClick={() => void harvestOrDownloadToVault(p)}
                             title="将当前环境中已安装的插件纳管并下至全局沙箱仓库 (Vault)"
                           >
-                            {isVaultActing ? '存入中…' : '📦 下至沙箱'}
+                            {isVaultActing ? '存入中…' : <><Package size={12} /> 下至沙箱</>}
                           </button>
                         )}
                         <button
@@ -690,7 +723,7 @@ export default function MarketPage() {
                           disabled={isInstalling}
                           onClick={() => remove(pkg, p.name)}
                         >
-                          🗑️ 卸载
+                          <Trash2 size={12} /> 卸载
                         </button>
                       </>
                     ) : (
@@ -702,7 +735,7 @@ export default function MarketPage() {
                           onClick={() => installToProfile(pkg, p.name, p.name)}
                           title={`直接安装并配置到当前运行环境 [${profile}]`}
                         >
-                          {isInstalling ? '安装中…' : `⚡ 安装到 ${profile}`}
+                          {isInstalling ? '安装中…' : <><Zap size={12} /> 安装到 {profile}</>}
                         </button>
 
                         {/* 沙箱操作双轨 */}
@@ -713,7 +746,7 @@ export default function MarketPage() {
                             onClick={() => deployFromVault(vPlugin!, p.name)}
                             title="从沙箱秒级挂载注入到当前环境（无需重新下载）"
                           >
-                            {isVaultActing ? '注入中…' : '🚀 瞬时注入'}
+                            {isVaultActing ? '注入中…' : <><Rocket size={12} /> 瞬时注入</>}
                           </button>
                         ) : (
                           <button
@@ -722,7 +755,7 @@ export default function MarketPage() {
                             onClick={() => downloadToVault(p)}
                             title="下载并隔离暂存到沙箱仓库，不污染生产环境"
                           >
-                            {isVaultActing ? '下载中…' : '📦 下至沙箱'}
+                            {isVaultActing ? '下载中…' : <><Package size={12} /> 下至沙箱</>}
                           </button>
                         )}
 
@@ -730,8 +763,9 @@ export default function MarketPage() {
                           className={`btn sm subtle ${isSelected ? 'active' : ''}`}
                           onClick={() => toggleSelect(p.name)}
                           title="加入/移除批量操作队列"
+                          style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}
                         >
-                          {isSelected ? '✓ 取消' : '+ 队列'}
+                          {isSelected ? <><Check size={11} /> 取消</> : <><Plus size={11} /> 队列</>}
                         </button>
                       </>
                     )}
@@ -763,17 +797,19 @@ export default function MarketPage() {
                     完成并关闭
                   </button>
                 ) : (
-                  <span className="badge running">处理中…</span>
+                  <span className="badge running" style={{ display: 'inline-flex', alignItems: 'center', gap: 5 }}>
+                    <span className="pulse-dot active" style={{ width: 6, height: 6, display: 'inline-block' }} /> 处理中…
+                  </span>
                 )}
               </div>
               <div className="queue-list" style={{ marginTop: 10 }}>
                 {queue.map((q, i) => (
                   <div className={`queue-item ${q.status}`} key={i}>
-                    <span className="queue-status">
-                      {q.status === 'pending' && '⏳'}
-                      {q.status === 'installing' && '🔄'}
-                      {q.status === 'done' && '✅'}
-                      {q.status === 'error' && '❌'}
+                    <span className="queue-status" style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}>
+                      {q.status === 'pending' && <Clock size={12} />}
+                      {q.status === 'installing' && <RefreshCw size={12} className="animate-spin" />}
+                      {q.status === 'done' && <CheckCircle2 size={12} style={{ color: 'var(--success)' }} />}
+                      {q.status === 'error' && <AlertCircle size={12} style={{ color: 'var(--err)' }} />}
                     </span>
                     <span className="queue-name">{q.displayName}</span>
                     <span className="muted mono-tag" style={{ fontSize: 11 }}>{q.pkg}</span>

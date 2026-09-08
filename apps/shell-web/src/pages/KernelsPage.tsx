@@ -1,4 +1,16 @@
 import { useEffect, useState } from 'react'
+import {
+  Play,
+  Square,
+  Trash2,
+  ArrowUp,
+  ArrowDown,
+  Plus,
+  FileText,
+  AlertTriangle,
+  Check,
+  RotateCcw,
+} from 'lucide-react'
 import { api } from '../api'
 import type { KernelInstance, KernelTemplate, ProfileView, UnifiedKernelConfig } from '../types'
 import { Toast } from '../components'
@@ -205,11 +217,11 @@ export default function KernelsPage() {
               <span>启用统一内核</span>
             </label>
             <span className="spacer" />
-            <button className="btn sm" onClick={() => void applyUnified()}>
-              应用到所有环境
+            <button className="btn sm" onClick={() => void applyUnified()} style={{ display: 'inline-flex', alignItems: 'center', gap: 5 }}>
+              <Check size={12} /> 应用到所有环境
             </button>
-            <button className="btn danger sm" onClick={() => void revertUnified()}>
-              还原（移除本工具添加项）
+            <button className="btn danger sm" onClick={() => void revertUnified()} style={{ display: 'inline-flex', alignItems: 'center', gap: 5 }}>
+              <RotateCcw size={12} /> 还原（移除本工具添加项）
             </button>
           </div>
           {unified.plugins.map((p, i) => (
@@ -218,17 +230,17 @@ export default function KernelsPage() {
               <span style={{ fontFamily: 'Consolas, monospace' }}>{p.id}</span>
               {p.name && p.name !== p.id && <span className="muted">{p.name}</span>}
               <span className="spacer" />
-              <button className="btn sm" onClick={() => ukMove(p.id, -1)} disabled={i === 0}>
-                ↑
+              <button className="btn sm" onClick={() => ukMove(p.id, -1)} disabled={i === 0} title="上移">
+                <ArrowUp size={12} />
               </button>
-              <button className="btn sm" onClick={() => ukMove(p.id, 1)} disabled={i >= unified.plugins.length - 1}>
-                ↓
+              <button className="btn sm" onClick={() => ukMove(p.id, 1)} disabled={i >= unified.plugins.length - 1} title="下移">
+                <ArrowDown size={12} />
               </button>
               <button className="btn sm" onClick={() => ukToggle(p.id, !p.disabled)}>
                 {p.disabled ? '启用' : '禁用'}
               </button>
-              <button className="btn danger sm" onClick={() => ukRemove(p.id)}>
-                移除
+              <button className="btn danger sm" onClick={() => ukRemove(p.id)} style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+                <Trash2 size={11} /> 移除
               </button>
             </div>
           ))}
@@ -236,8 +248,8 @@ export default function KernelsPage() {
           <div className="row" style={{ marginTop: 10 }}>
             <input className="input" placeholder="插件 ID（如 dshmarket）" value={ukId} onChange={(e) => setUkId(e.target.value)} />
             <input className="input" placeholder="插件名（可选）" value={ukName} onChange={(e) => setUkName(e.target.value)} />
-            <button className="btn primary" onClick={ukAdd}>
-              添加
+            <button className="btn primary" onClick={ukAdd} style={{ display: 'inline-flex', alignItems: 'center', gap: 5 }}>
+              <Plus size={13} /> 添加
             </button>
           </div>
 
@@ -297,8 +309,8 @@ export default function KernelsPage() {
           </select>
           <input className="input" placeholder="端口（可选）" value={port} onChange={(e) => setPort(e.target.value)} />
           <input className="input" placeholder="实例名（可选）" value={name} onChange={(e) => setName(e.target.value)} />
-          <button className="btn primary" onClick={create}>
-            新建
+          <button className="btn primary" onClick={create} style={{ display: 'inline-flex', alignItems: 'center', gap: 5 }}>
+            <Plus size={13} /> 新建
           </button>
         </div>
       </div>
@@ -312,29 +324,36 @@ export default function KernelsPage() {
             <div className="card" key={k.id}>
               <div className="card-title">
                 {k.name}
-                <span className={`badge ${k.status === 'running' ? 'running' : 'stopped'}`}>{k.status}</span>
+                <span className={`badge ${k.status === 'running' ? 'running' : 'stopped'}`} style={{ display: 'inline-flex', alignItems: 'center', gap: 5 }}>
+                  {k.status === 'running' && <span className="pulse-dot active" style={{ width: 6, height: 6, display: 'inline-block' }} />}
+                  {k.status}
+                </span>
               </div>
               <p className="card-sub">
                 {k.templateId} · profile={k.profile ?? '-'} · port={k.port ?? '-'}
               </p>
               <div className="row">
                 {k.status === 'running' ? (
-                  <button className="btn danger sm" onClick={() => action(k.id, 'stop')}>
-                    停止
+                  <button className="btn danger sm" onClick={() => action(k.id, 'stop')} style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+                    <Square size={11} /> 停止
                   </button>
                 ) : (
-                  <button className="btn primary sm" onClick={() => action(k.id, 'start')}>
-                    启动
+                  <button className="btn primary sm" onClick={() => action(k.id, 'start')} style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+                    <Play size={11} /> 启动
                   </button>
                 )}
-                <button className="btn sm" disabled={!k.profile || !k.port} onClick={() => toggleKernelLog(k.id)}>
-                  {kernelLogFor === k.id ? '收起日志' : '日志'}
+                <button className="btn sm" disabled={!k.profile || !k.port} onClick={() => toggleKernelLog(k.id)} style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+                  <FileText size={11} /> {kernelLogFor === k.id ? '收起日志' : '日志'}
                 </button>
-                <button className="btn sm" disabled={k.status !== 'stopped'} onClick={() => remove(k.id)}>
-                  删除
+                <button className="btn sm" disabled={k.status !== 'stopped'} onClick={() => remove(k.id)} style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+                  <Trash2 size={11} /> 删除
                 </button>
               </div>
-              {k.error && <p className="muted" style={{ marginTop: 8 }}>⚠ {k.error}</p>}
+              {k.error && (
+                <p className="muted" style={{ marginTop: 8, color: 'var(--err)', display: 'flex', alignItems: 'center', gap: 5 }}>
+                  <AlertTriangle size={13} /> {k.error}
+                </p>
+              )}
               {kernelLogFor === k.id && (
                 <div className="row" style={{ marginTop: 10 }}>
                   <span className="muted">每 3s 自动刷新</span>

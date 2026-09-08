@@ -1,4 +1,14 @@
 import { useEffect, useRef, useState } from 'react'
+import {
+  CheckCircle2,
+  AlertCircle,
+  RefreshCw,
+  Trash2,
+  Copy,
+  Terminal,
+  ListTodo,
+  FileText,
+} from 'lucide-react'
 import { api } from '../api'
 import type { SystemTaskItem, JournalEntryItem } from '../types'
 
@@ -117,14 +127,18 @@ export default function SystemTasksPage() {
             <button
               className={`pill-btn ${activeTab === 'tasks' ? 'active' : ''}`}
               onClick={() => setActiveTab('tasks')}
+              style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}
             >
-              运行任务 ({tasks.length})
+              <ListTodo size={14} />
+              <span>运行任务 ({tasks.length})</span>
             </button>
             <button
               className={`pill-btn ${activeTab === 'journal' ? 'active' : ''}`}
               onClick={() => setActiveTab('journal')}
+              style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}
             >
-              审计日记 ({journal.length})
+              <FileText size={14} />
+              <span>审计日记 ({journal.length})</span>
             </button>
           </div>
           <button
@@ -135,16 +149,28 @@ export default function SystemTasksPage() {
               setTimeout(() => setRefreshing(false), 500)
             }}
             disabled={refreshing}
+            style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}
           >
-            {refreshing ? '刷新中…' : '刷新'}
+            <RefreshCw size={13} className={refreshing ? 'animate-spin' : ''} />
+            <span>{refreshing ? '刷新中…' : '刷新'}</span>
           </button>
           {activeTab === 'tasks' ? (
-            <button className="btn btn-danger-outline" onClick={handleClearTasks}>
-              清理历史
+            <button
+              className="btn btn-danger-outline"
+              onClick={handleClearTasks}
+              style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}
+            >
+              <Trash2 size={13} />
+              <span>清理历史</span>
             </button>
           ) : (
-            <button className="btn btn-danger-outline" onClick={handleClearJournal}>
-              清空日记
+            <button
+              className="btn btn-danger-outline"
+              onClick={handleClearJournal}
+              style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}
+            >
+              <Trash2 size={13} />
+              <span>清空日记</span>
             </button>
           )}
         </div>
@@ -184,10 +210,25 @@ export default function SystemTasksPage() {
                     >
                       <div className="task-card-header flex-between">
                         <span className={`task-badge ${b.color}`}>{b.label}</span>
-                        <span className={`status-pill status-${t.status}`}>
-                          {t.status === 'running' && '● 运行中'}
-                          {t.status === 'done' && '✓ 完成'}
-                          {t.status === 'error' && '✗ 失败'}
+                        <span className={`status-pill status-${t.status}`} style={{ display: 'inline-flex', alignItems: 'center', gap: 5 }}>
+                          {t.status === 'running' && (
+                            <>
+                              <span className="pulse-dot active" />
+                              <span>运行中</span>
+                            </>
+                          )}
+                          {t.status === 'done' && (
+                            <>
+                              <CheckCircle2 size={12} />
+                              <span>完成</span>
+                            </>
+                          )}
+                          {t.status === 'error' && (
+                            <>
+                              <AlertCircle size={12} />
+                              <span>失败</span>
+                            </>
+                          )}
                         </span>
                       </div>
                       <div className="task-card-title" title={t.key}>
@@ -208,6 +249,7 @@ export default function SystemTasksPage() {
                 <span className="terminal-dot red" />
                 <span className="terminal-dot yellow" />
                 <span className="terminal-dot green" />
+                <Terminal size={14} style={{ color: 'var(--brand-primary)', marginLeft: 8, marginRight: 4 }} />
                 <span className="terminal-title">
                   {selectedTaskKey ? `终端输出: ${selectedTaskKey}` : '终端日志'}
                 </span>
@@ -229,8 +271,10 @@ export default function SystemTasksPage() {
                     }
                   }}
                   disabled={!taskDetail?.log}
+                  style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}
                 >
-                  复制
+                  <Copy size={12} />
+                  <span>复制</span>
                 </button>
               </div>
             </div>

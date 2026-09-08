@@ -1,4 +1,26 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
+import {
+  Play,
+  Square,
+  RotateCw,
+  Trash2,
+  Upload,
+  Zap,
+  Network,
+  Globe,
+  Monitor,
+  History,
+  Stethoscope,
+  X,
+  AlertTriangle,
+  Plus,
+  RefreshCw,
+  FileText,
+  Lock,
+  Unlock,
+  RotateCcw,
+  Loader2,
+} from 'lucide-react'
 import { api } from '../api'
 import type { DshInstance, Health, PortInfo, ProfileView, WorkflowTemplate, ProfilePackage, SnapshotItem } from '../types'
 import { ConfirmDialog, ContextMenu, ErrorText, Loading, Toast, type MenuState } from '../components'
@@ -441,7 +463,7 @@ export default function ProfilesPage() {
         p.port ? { label: `复制端口 ${p.port}`, onClick: () => void copy(String(p.port), '端口') } : { label: '复制端口', disabled: true, onClick: () => {} },
         p.url ? { label: '复制地址', onClick: () => void copy(p.url!, '地址') } : { label: '复制地址', disabled: true, onClick: () => {} },
         { separator: true, label: '', onClick: () => {} },
-        { label: '📤 导出环境包 (JSON)', onClick: () => void exportEnv(p.name) },
+        { label: '导出环境包 (JSON)', onClick: () => void exportEnv(p.name) },
         { separator: true, label: '', onClick: () => {} },
         { label: '删除环境', onClick: () => setDeleteTarget({ name: p.name }), danger: true, disabled: p.running },
       ],
@@ -632,7 +654,7 @@ export default function ProfilesPage() {
               title="批量启动所选环境"
               onClick={() => void batchStart(selectedNames)}
             >
-              ▶ 批量启动
+              <Play size={12} /> 批量启动
             </button>
             <button
               className="btn sm"
@@ -640,7 +662,7 @@ export default function ProfilesPage() {
               title="批量停止所选环境"
               onClick={() => void batchStop(selectedNames)}
             >
-              ⏹ 批量停止
+              <Square size={12} /> 批量停止
             </button>
             <button
               className="btn danger sm"
@@ -648,29 +670,29 @@ export default function ProfilesPage() {
               title={runningSelected.length > 0 ? `请先停止运行中的环境：${runningSelected.map((p) => p.name).join('、')}` : '批量删除所选环境'}
               onClick={() => setDeleteTarget({ names: selectedNames })}
             >
-              🗑️ 批量删除
+              <Trash2 size={12} /> 批量删除
             </button>
           </>
         )}
         <button className="btn sm" onClick={() => void load()}>
-          {t('btn.refresh')}
+          <RefreshCw size={12} /> {t('btn.refresh')}
         </button>
         <button
           className="btn sm"
           onClick={() => importInputRef.current?.click()}
           title="从 JSON 环境配置包一键导入新环境"
         >
-          📥 导入环境包
+          <Upload size={12} /> 导入环境包
         </button>
         <button
           className="btn sm"
           onClick={() => void openWorkflowsModal()}
           title="打开配置化工作流与批量规则面板"
         >
-          ⚡ 工作流 / 规则
+          <Zap size={12} /> 工作流 / 规则
         </button>
         <button className="btn sm" onClick={() => void togglePorts()} title="查看当前运行端口与占用进程">
-          🖧 端口
+          <Network size={12} /> 端口
         </button>
         <input
           type="file"
@@ -688,7 +710,8 @@ export default function ProfilesPage() {
       {showPorts && (
         <div className="card" style={{ marginBottom: 18 }}>
           <div className="card-title">
-            🖧 运行端口
+            <Network size={15} style={{ color: 'var(--brand-primary)' }} />
+            <span>运行端口</span>
             <span className="spacer" />
             <button className="btn sm" onClick={() => void togglePorts()}>
               收起
@@ -702,7 +725,7 @@ export default function ProfilesPage() {
             <div className="queue-list">
               {ports.map((p) => (
                 <div className="queue-item done" key={p.profile}>
-                  <span className="queue-status">🖧</span>
+                  <Network size={13} style={{ color: 'var(--brand-primary)', flexShrink: 0 }} />
                   <span className="queue-name">{p.profile}</span>
                   <span className="badge running">端口 {p.port}</span>
                   <span className="muted">
@@ -712,10 +735,10 @@ export default function ProfilesPage() {
                   {p.url && (
                     <button
                       className="btn sm"
-                      title='浏览器应用窗口打开（网址应用化，独立窗口）'
+                      title="浏览器应用窗口打开（网址应用化，独立窗口）"
                       onClick={() => void openDsh(p)}
                     >
-                      打开 ↗
+                      <Globe size={12} /> 打开 ↗
                     </button>
                   )}
                 </div>
@@ -738,24 +761,41 @@ export default function ProfilesPage() {
                   <input type="checkbox" checked={selected.has(p.name)} onChange={() => toggleSelect(p.name)} title="勾选后可用于批量删除" />
                   <span className="checkbox-label">{selected.has(p.name) ? '已选' : '选择'}</span>
                 </label>
-                {p.name}
+                <span style={{ fontWeight: 700, fontSize: 15 }}>{p.name}</span>
                 <span
                   className={`badge ${p.running ? 'running' : p.starting ? 'starting' : p.procError ? 'error' : 'stopped'}`}
                 >
-                  {p.running ? '运行中' : p.starting ? '启动中…' : p.procError ? '启动失败' : '已停止'}
+                  {p.running ? (
+                    <>
+                      <span className="pulse-dot active" />
+                      <span>运行中</span>
+                    </>
+                  ) : p.starting ? (
+                    <>
+                      <Loader2 size={12} className="animate-spin" />
+                      <span>启动中…</span>
+                    </>
+                  ) : p.procError ? (
+                    <>
+                      <AlertTriangle size={12} />
+                      <span>启动失败</span>
+                    </>
+                  ) : (
+                    <span>已停止</span>
+                  )}
                 </span>
               </div>
               {p.starting && <p className="muted">启动阶段：spawn 进程 → 端口就绪检测（60s 超时）…</p>}
               {p.procError && (
                 <div className="card" style={{ marginTop: 10, border: '1px solid rgba(239, 68, 68, 0.4)' }}>
                   <div className="card-title" style={{ color: 'var(--err)' }}>
-                    ⚠ {p.procError}
+                    <AlertTriangle size={14} /> {p.procError}
                   </div>
                   <p className="muted">
                     常见原因：插件树加载失败（依赖缺失 / cordis.patch.yml 格式错误）、端口被占用、DSH 配置错误。请查看日志尾部：
                   </p>
                   <button className="btn sm" onClick={() => viewLog(p.name)}>
-                    {logFor === p.name ? '收起日志' : '查看日志'}
+                    <FileText size={12} /> {logFor === p.name ? '收起日志' : '查看日志'}
                   </button>
                 </div>
               )}
@@ -764,7 +804,7 @@ export default function ProfilesPage() {
                 {p.port ? ` · 端口 ${p.port}` : ''}
               </p>
               {p.url && <p className="muted">地址：{p.url}</p>}
-              {p.error && <p className="muted">⚠ {p.error}</p>}
+              {p.error && <p className="muted"><AlertTriangle size={12} style={{ verticalAlign: 'middle' }} /> {p.error}</p>}
               {dshInstances.length > 0 && (
                 <div className="row" style={{ marginTop: 8 }}>
                   <span className="muted">dsh 版本</span>
@@ -787,7 +827,7 @@ export default function ProfilesPage() {
                 {p.running ? (
                   <>
                     <button className="btn danger sm" disabled={busy === p.name} onClick={() => stop(p.name)}>
-                      停止
+                      <Square size={12} /> 停止
                     </button>
                     <button
                       className="btn sm"
@@ -795,7 +835,7 @@ export default function ProfilesPage() {
                       title="重启该环境（释放并重新监听端口）"
                       onClick={() => void restart(p.name)}
                     >
-                      🔄 重启
+                      <RotateCw size={12} /> 重启
                     </button>
                   </>
                 ) : (
@@ -805,7 +845,7 @@ export default function ProfilesPage() {
                       disabled={busy === p.name || p.starting || !p.exists}
                       onClick={() => start(p.name)}
                     >
-                      {p.starting ? '启动中…' : '启动'}
+                      {p.starting ? <><Loader2 size={12} className="animate-spin" /> 启动中…</> : <><Play size={12} /> 启动</>}
                     </button>
                     <input
                       className="input"
@@ -817,31 +857,31 @@ export default function ProfilesPage() {
                     />
                   </>
                 )}
-                <button className="btn sm" onClick={() => viewLog(p.name)}>
-                  {logFor === p.name ? '收起日志' : '日志'}
-                </button>
                 {p.running && p.url && (
                   <button
-                    className="btn sm"
-                    title='浏览器应用窗口打开（网址应用化，独立窗口）'
+                    className="btn btn-glow-primary sm"
+                    title="浏览器应用窗口打开（网址应用化，独立窗口）"
                     onClick={() => void openDsh(p)}
                   >
-                    打开 ↗
+                    <Globe size={13} /> Web 版
                   </button>
                 )}
                 <button
-                  className="btn sm"
+                  className="btn btn-glow-accent sm"
                   title={desktopInstalled ? '以 DSH Desktop 官方桌面端打开该环境' : '尝试唤醒 DSH Desktop 官方客户端'}
                   onClick={() => void handleOpenDesktop(p.name)}
                 >
-                  🖥️ 桌面版
+                  <Monitor size={13} /> 桌面版
+                </button>
+                <button className="btn sm" onClick={() => viewLog(p.name)}>
+                  <FileText size={12} /> {logFor === p.name ? '收起' : '日志'}
                 </button>
                 <button
                   className="btn sm"
                   title="环境快照时光机：多版本配置快照与一键回滚"
                   onClick={() => void openSnapshotModal(p.name)}
                 >
-                  ⏱️ 快照
+                  <History size={12} /> 快照
                 </button>
                 <button
                   className="btn sm"
@@ -849,7 +889,7 @@ export default function ProfilesPage() {
                   disabled={repairingProfile === p.name}
                   onClick={() => void handleRepair(p.name)}
                 >
-                  {repairingProfile === p.name ? '修复中…' : '🩺 自愈'}
+                  {repairingProfile === p.name ? <><Loader2 size={12} className="animate-spin" /> 修复中…</> : <><Stethoscope size={12} /> 自愈</>}
                 </button>
                 <span className="spacer" />
                 <button
@@ -858,7 +898,7 @@ export default function ProfilesPage() {
                   title={p.running || p.starting ? '请先停止环境再删除' : '删除环境（需输入环境名确认）'}
                   onClick={() => setDeleteTarget({ name: p.name })}
                 >
-                  🗑️
+                  <Trash2 size={12} />
                 </button>
               </div>
               {logFor === p.name && (
@@ -882,7 +922,7 @@ export default function ProfilesPage() {
 
       {deleteTarget?.name && (
         <ConfirmDialog
-          title={`⚠️ 删除环境 ${deleteTarget.name}`}
+          title={`删除环境 ${deleteTarget.name}`}
           message={`确定要删除环境 ${deleteTarget.name} 吗？其目录将被整体移除，此操作不可撤销！`}
           danger
           requireText={deleteTarget.name}
@@ -896,7 +936,7 @@ export default function ProfilesPage() {
 
       {deleteTarget?.names && (
         <ConfirmDialog
-          title={`⚠️ 批量删除 ${deleteTarget.names.length} 个环境`}
+          title={`批量删除 ${deleteTarget.names.length} 个环境`}
           message={`确定要删除以下环境吗？其目录将被整体移除，此操作不可撤销！\n${deleteTarget.names.join('、')}`}
           danger
           requireText="DELETE"
@@ -913,8 +953,13 @@ export default function ProfilesPage() {
         <div className="modal-overlay" onClick={() => setWorkflowsModalOpen(false)}>
           <div className="modal glass" style={{ maxWidth: 520 }} onClick={(e) => e.stopPropagation()}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 14 }}>
-              <h3 className="modal-title" style={{ margin: 0 }}>⚡ 工作流与批量规则</h3>
-              <button className="btn sm" onClick={() => setWorkflowsModalOpen(false)}>✕</button>
+              <h3 className="modal-title" style={{ margin: 0, display: 'flex', alignItems: 'center', gap: 6 }}>
+                <Zap size={16} style={{ color: 'var(--brand-primary)' }} />
+                <span>工作流与批量规则</span>
+              </h3>
+              <button className="btn sm" onClick={() => setWorkflowsModalOpen(false)}>
+                <X size={14} />
+              </button>
             </div>
 
             <div style={{ display: 'flex', gap: 8, marginBottom: 16 }}>
@@ -972,7 +1017,7 @@ export default function ProfilesPage() {
                     disabled={wfSubmitting}
                     onClick={() => void handleRunWorkflow()}
                   >
-                    {wfSubmitting ? '启动中…' : '▶ 执行工作流'}
+                    {wfSubmitting ? '启动中…' : <><Play size={12} /> 执行工作流</>}
                   </button>
                 </div>
               </div>
@@ -1012,7 +1057,7 @@ export default function ProfilesPage() {
                     disabled={wfSubmitting || !syncFromProfile || !syncToProfile || syncFromProfile === syncToProfile}
                     onClick={() => void handleBatchSync()}
                   >
-                    {wfSubmitting ? '同步中…' : '⚡ 开始同步克隆'}
+                    {wfSubmitting ? '同步中…' : <><Zap size={12} /> 开始同步克隆</>}
                   </button>
                 </div>
               </div>
@@ -1026,8 +1071,13 @@ export default function ProfilesPage() {
         <div className="modal-overlay" onClick={() => setSnapshotModalProfile(null)}>
           <div className="modal glass snapshot-modal" style={{ maxWidth: 680, width: '92%' }} onClick={(e) => e.stopPropagation()}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
-              <h3 className="modal-title" style={{ margin: 0 }}>⏱️ 环境快照时光机 — {snapshotModalProfile}</h3>
-              <button className="btn sm" onClick={() => setSnapshotModalProfile(null)}>✕</button>
+              <h3 className="modal-title" style={{ margin: 0, display: 'flex', alignItems: 'center', gap: 8 }}>
+                <History size={16} style={{ color: 'var(--brand-primary)' }} />
+                <span>环境快照时光机 — {snapshotModalProfile}</span>
+              </h3>
+              <button className="btn sm" onClick={() => setSnapshotModalProfile(null)}>
+                <X size={14} />
+              </button>
             </div>
             <p className="modal-desc muted" style={{ fontSize: 13, marginBottom: 12 }}>
               原子捕获 package.json、依赖树与 cordis.patch.yml 完整状态，支持锁定保护与秒级一键回滚。
@@ -1044,7 +1094,7 @@ export default function ProfilesPage() {
                 onKeyDown={(e) => { if (e.key === 'Enter') void handleCreateSnapshot() }}
               />
               <button className="btn primary" onClick={() => void handleCreateSnapshot()}>
-                创建快照
+                <Plus size={12} /> 创建快照
               </button>
             </div>
 
@@ -1072,7 +1122,11 @@ export default function ProfilesPage() {
                         <span className={`status-pill trigger-${snap.trigger || 'manual'}`} style={{ fontSize: 10 }}>
                           {snap.trigger === 'manual' ? '手动' : snap.trigger === 'repair-workflow' ? '自愈暂存' : '自动'}
                         </span>
-                        {snap.isLocked && <span className="status-pill status-running" style={{ fontSize: 10 }}>🔒 已锁定</span>}
+                        {snap.isLocked && (
+                          <span className="status-pill status-running" style={{ fontSize: 10, display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+                            <Lock size={10} /> 已锁定
+                          </span>
+                        )}
                       </div>
                       <div className="muted" style={{ fontSize: 11, marginTop: 4 }}>
                         {new Date(snap.timestamp).toLocaleString()} · {snap.bundles?.length || 0} bundles · {Object.keys(snap.dependencies || {}).length} deps · ID: <code style={{ opacity: 0.7 }}>{snap.id}</code>
@@ -1084,21 +1138,21 @@ export default function ProfilesPage() {
                         onClick={() => void handleToggleLock(snap.id, snap.isLocked)}
                         title={snap.isLocked ? '已锁定（免淘汰），点击解锁' : '未锁定，点击锁定保护'}
                       >
-                        {snap.isLocked ? '🔓 解锁' : '🔒 锁定'}
+                        {snap.isLocked ? <><Unlock size={12} /> 解锁</> : <><Lock size={12} /> 锁定</>}
                       </button>
                       <button
                         className="btn sm primary"
                         onClick={() => void handleRestoreSnapshot(snap.id)}
                         title="原子回滚此快照"
                       >
-                        ↺ 回滚
+                        <RotateCcw size={12} /> 回滚
                       </button>
                       <button
                         className="btn sm danger"
                         onClick={() => void handleDeleteSnapshot(snap.id)}
                         title="删除此快照"
                       >
-                        ✕
+                        <Trash2 size={12} />
                       </button>
                     </div>
                   </div>

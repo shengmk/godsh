@@ -1,4 +1,14 @@
 import { useEffect, useState } from 'react'
+import {
+  Box,
+  Download,
+  Upload,
+  RotateCcw,
+  Trash2,
+  Save,
+  RefreshCw,
+  Info,
+} from 'lucide-react'
 import { api } from '../api'
 import type { LauncherConfig, SettingsInfo } from '../types'
 import { Loading, Toast } from '../components'
@@ -169,8 +179,8 @@ export default function SettingsPage({ locale, changeLocale, theme, changeTheme,
         <div className="card-title">DSH 环境 / 运行时</div>
         <p className="card-sub">dsh 版本检测、base 主环境与并列环境管理、自动安装、每环境版本分配已移至「DSH 环境」页。</p>
         <div className="row" style={{ marginTop: 8 }}>
-          <button className="btn" onClick={() => onNavigate('dsh-envs')}>
-            前往 DSH 环境页
+          <button className="btn" onClick={() => onNavigate('dsh-envs')} style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+            <Box size={13} /> 前往 DSH 环境页
           </button>
         </div>
       </div>
@@ -237,8 +247,9 @@ export default function SettingsPage({ locale, changeLocale, theme, changeTheme,
             <span>允许自定义多端口并发（同一环境在不同端口同时运行）</span>
           </label>
         </div>
-        <p className="muted" style={{ marginTop: 6, fontSize: 12 }}>
-          💡 默认关闭（推荐）：严格单环境单端口互斥。当启动新端口或重启环境时，自动终止并释放该环境的所有旧端口与旧进程，彻底避免端口污染与多进程写冲突。
+        <p className="muted" style={{ marginTop: 6, fontSize: 12, display: 'flex', alignItems: 'center', gap: 5 }}>
+          <Info size={13} style={{ flexShrink: 0 }} />
+          <span>默认关闭（推荐）：严格单环境单端口互斥。当启动新端口或重启环境时，自动终止并释放该环境的所有旧端口与旧进程，彻底避免端口污染与多进程写冲突。</span>
         </p>
       </div>
 
@@ -263,12 +274,12 @@ export default function SettingsPage({ locale, changeLocale, theme, changeTheme,
       <div className="card" style={{ marginBottom: 16 }}>
         <div className="card-title">数据备份</div>
         <p className="card-sub">导出 / 导入 Launcher 数据（config / kernels / allocations / unified-kernel）</p>
-        <div className="row" style={{ marginTop: 8 }}>
-          <button className="btn" onClick={() => void exportBackup()}>
-            导出备份
+        <div className="row" style={{ marginTop: 8, gap: 8 }}>
+          <button className="btn" onClick={() => void exportBackup()} style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+            <Download size={13} /> 导出备份
           </button>
-          <label className="btn" style={{ cursor: 'pointer' }}>
-            导入备份
+          <label className="btn" style={{ cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+            <Upload size={13} /> 导入备份
             <input
               type="file"
               accept=".json,application/json"
@@ -308,8 +319,8 @@ export default function SettingsPage({ locale, changeLocale, theme, changeTheme,
             />
             <span style={{ color: 'var(--err)', fontWeight: 700 }}>dsh 全删除（卸载 dsh + 删除整个 DSH_HOME + 全部数据）</span>
           </label>
-          <button className="btn danger" onClick={() => void doReset()}>
-            执行重置
+          <button className="btn danger" onClick={() => void doReset()} style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+            <RotateCcw size={13} /> 执行重置
           </button>
         </div>
       </div>
@@ -322,18 +333,18 @@ export default function SettingsPage({ locale, changeLocale, theme, changeTheme,
             godsh v{config.launcher.version} · DSH 环境管理请前往「DSH 环境」页
           </span>
           <span className="spacer" />
-          <button className="btn danger" onClick={() => void doUninstall()}>
-            卸载 Launcher（调用 uninstall.exe）
+          <button className="btn danger" onClick={() => void doUninstall()} style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+            <Trash2 size={13} /> 卸载 Launcher（调用 uninstall.exe）
           </button>
         </div>
       </div>
 
-      <div className="row">
-        <button className="btn primary" disabled={saving} onClick={() => void save()}>
-          {saving ? '…' : t('btn.save')}
+      <div className="row" style={{ gap: 8 }}>
+        <button className="btn primary" disabled={saving} onClick={() => void save()} style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+          <Save size={13} /> {saving ? '…' : t('btn.save')}
         </button>
-        <button className="btn" onClick={() => void load()}>
-          {t('btn.refresh')}
+        <button className="btn" onClick={() => void load()} style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+          <RefreshCw size={13} /> {t('btn.refresh')}
         </button>
       </div>
 

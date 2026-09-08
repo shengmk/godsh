@@ -1,4 +1,23 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import {
+  ArrowUp,
+  ArrowDown,
+  Package,
+  RefreshCw,
+  Trash2,
+  Folder,
+  Zap,
+  Power,
+  Play,
+  Square,
+  X,
+  SlidersHorizontal,
+  ChevronDown,
+  ChevronRight,
+  Upload,
+  CheckCircle2,
+  AlertCircle,
+} from 'lucide-react'
 import { api } from '../api'
 import type { Allocation, AvailablePlugin, MarketCategory, ProfileView, VaultPlugin } from '../types'
 import { ContextMenu, Toast, type MenuState } from '../components'
@@ -577,7 +596,7 @@ export default function AllocationsPage() {
         { label: a.enabled ? '禁用' : '启用', onClick: () => void toggle(a) },
         { label: '上移', onClick: () => void move(a, -1), disabled: idx <= 0 },
         { label: '下移', onClick: () => void move(a, 1), disabled: idx < 0 || idx >= list.length - 1 },
-        { label: '📦 下至沙箱', onClick: () => void harvestToVault(a.profile, a.pluginId) },
+        { label: '下至沙箱', onClick: () => void harvestToVault(a.profile, a.pluginId) },
         { label: '更新', onClick: () => void updatePlugin(a) },
         { separator: true, label: '', onClick: () => {} },
         { label: '移除分配', onClick: () => void remove(a), danger: true },
@@ -741,7 +760,7 @@ export default function AllocationsPage() {
     if (!importPath.trim()) return
     try {
       const r = await api.vaultImportLocal(importPath.trim(), importCategory)
-      show(`✅ 已导入本地插件: ${r.plugin.name} (v${r.plugin.version})`)
+      show(`已导入本地插件: ${r.plugin.name} (v${r.plugin.version})`)
       setImportModalOpen(false)
       setImportPath('')
       await loadVault()
@@ -759,9 +778,9 @@ export default function AllocationsPage() {
     try {
       const r = await api.vaultDeploy(plugin.id, target)
       if (r.companionAdded && r.companionAdded.length > 0) {
-        show(`✅ 已秒级分发到 ${target}，并自动补齐伴随驱动: ${r.companionAdded.join(', ')}`)
+        show(`已秒级分发到 ${target}，并自动补齐伴随驱动: ${r.companionAdded.join(', ')}`)
       } else {
-        show(`✅ 已秒级分发 ${plugin.name} 到 ${target}`)
+        show(`已秒级分发 ${plugin.name} 到 ${target}`)
       }
       await refresh()
       await loadVault()
@@ -821,7 +840,7 @@ export default function AllocationsPage() {
       <div className="page-head">
         <h1 className="page-title">{t('page.allocations.title')}</h1>
         <p className="page-desc">
-          {t('page.allocations.desc')} · 变更自动写回 cordis.patch.yml · 可添加插件按 dshmarket 市场分类分组，⚡ 一键全部分配
+          {t('page.allocations.desc')} · 变更自动写回 cordis.patch.yml · 可添加插件按 dshmarket 市场分类分组，一键全部分配
         </p>
       </div>
 
@@ -835,24 +854,27 @@ export default function AllocationsPage() {
           onClick={() => setCompactMode(!compactMode)}
           title="切换高密度紧凑视图或标准视图"
         >
-          {compactMode ? '📏 紧凑视图 (开)' : '📐 舒适视图'}
+          <SlidersHorizontal size={12} /> {compactMode ? '紧凑视图 (开)' : '舒适视图'}
         </button>
         <button className="btn sm" onClick={() => load()}>
-          🔄 刷新
+          <RefreshCw size={12} /> 刷新
         </button>
       </div>
 
-      {/* 📦 仓库沙箱中枢 (Plugin Vault) */}
-      <div className="card" style={{ marginBottom: 16, border: '1px solid rgba(59, 130, 246, 0.4)' }}>
+      {/* 插件仓库沙箱中枢 (Plugin Vault) */}
+      <div className="card" style={{ marginBottom: 16, border: '1px solid rgba(94, 106, 210, 0.3)' }}>
         <div
           className="row"
           style={{ justifyContent: 'space-between', alignItems: 'center', cursor: 'pointer' }}
           onClick={() => setVaultExpanded(!vaultExpanded)}
         >
           <div className="row" style={{ gap: 8, alignItems: 'center' }}>
-            <span style={{ fontSize: 16 }}>{vaultExpanded ? '▼' : '▶'}</span>
-            <div className="card-title" style={{ margin: 0, color: 'var(--brand-2, #3b82f6)' }}>
-              📦 插件仓库沙箱中枢 (Plugin Vault)
+            <span style={{ display: 'inline-flex', alignItems: 'center' }}>
+              {vaultExpanded ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
+            </span>
+            <div className="card-title" style={{ margin: 0, color: 'var(--brand-primary)', display: 'flex', alignItems: 'center', gap: 6 }}>
+              <Package size={16} />
+              <span>插件仓库沙箱中枢 (Plugin Vault)</span>
             </div>
             <span className="badge info">{vaultPlugins.length} 个就绪插件</span>
             <span className="muted" style={{ fontSize: 12 }}>
@@ -861,14 +883,14 @@ export default function AllocationsPage() {
           </div>
           <div className="row" style={{ gap: 8 }} onClick={(e) => e.stopPropagation()}>
             <button className="btn sm primary" onClick={() => setImportModalOpen(true)}>
-              📥 导入本地插件
+              <Upload size={12} /> 导入本地插件
             </button>
             <button
               className={`btn sm ${vaultChecking ? 'loading' : ''}`}
               disabled={vaultChecking}
               onClick={() => void handleCheckVaultUpdates()}
             >
-              {vaultChecking ? '🔄 检测中…' : '🔄 检查沙箱更新'}
+              <RefreshCw size={12} className={vaultChecking ? 'animate-spin' : ''} /> {vaultChecking ? '检测中…' : '检查沙箱更新'}
             </button>
           </div>
         </div>
@@ -877,7 +899,7 @@ export default function AllocationsPage() {
           <div style={{ marginTop: 14 }}>
             {vaultPlugins.length === 0 ? (
               <div className="empty" style={{ padding: '16px 0' }}>
-                沙箱为空。可点击「📥 导入本地插件」导入本地开发包或从市场暂存。
+                沙箱为空。可点击「导入本地插件」导入本地开发包或从市场暂存。
               </div>
             ) : (
               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(320px, 1fr))', gap: 12 }}>
@@ -927,17 +949,18 @@ export default function AllocationsPage() {
                           className="btn sm primary"
                           title="秒级部署至目标环境"
                           onClick={() => void handleDeployVault(vp)}
+                          style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}
                         >
-                          ⚡ 分发
+                          <Zap size={11} /> 分发
                         </button>
                       </div>
                       <button
                         className="btn sm danger"
-                        style={{ padding: '2px 8px' }}
+                        style={{ padding: '2px 8px', display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}
                         title="从沙箱移出"
                         onClick={() => void handleRemoveVault(vp.id)}
                       >
-                        🗑
+                        <Trash2 size={12} />
                       </button>
                     </div>
                   </div>
@@ -967,8 +990,8 @@ export default function AllocationsPage() {
             style={{ width: 460, maxWidth: '90vw', padding: 20 }}
             onClick={(e) => e.stopPropagation()}
           >
-            <div className="card-title" style={{ marginBottom: 8 }}>
-              📥 导入本地插件至仓库沙箱
+            <div className="card-title" style={{ marginBottom: 8, display: 'flex', alignItems: 'center', gap: 6 }}>
+              <Upload size={16} /> 导入本地插件至仓库沙箱
             </div>
             <p className="card-sub" style={{ marginBottom: 14 }}>
               支持输入本地插件解压包或源码文件夹路径，系统将自动读取 package.json 并标记为就绪态。
@@ -1052,7 +1075,7 @@ export default function AllocationsPage() {
                     void updateAll(p.name)
                   }}
                 >
-                  🔄 全部更新
+                  <RefreshCw size={12} /> 全部更新
                 </button>
                 <span className="muted" style={{ fontSize: 12 }}>
                   {p.exists ? `${p.bundles.length} bundle · ${Object.keys(p.dependencies).length} 依赖` : '（目录缺失）'}
@@ -1127,7 +1150,7 @@ export default function AllocationsPage() {
                                 }}
                                 title={a.enabled ? '点击禁用' : '点击启用'}
                               >
-                                {a.enabled ? '⏻ 启用' : '⏻ 禁用'}
+                                <Power size={11} /> {a.enabled ? '启用' : '禁用'}
                               </button>
                               <span className="spacer" />
                               <div className="alloc-action-group" onClick={(e) => e.stopPropagation()}>
@@ -1137,7 +1160,7 @@ export default function AllocationsPage() {
                                   disabled={(byProfile[p.name] ?? []).findIndex((x) => x.id === a.id) <= 0}
                                   title="上移"
                                 >
-                                  ↑
+                                  <ArrowUp size={12} />
                                 </button>
                                 <button
                                   className="alloc-action-btn"
@@ -1145,35 +1168,35 @@ export default function AllocationsPage() {
                                   disabled={(byProfile[p.name] ?? []).findIndex((x) => x.id === a.id) >= (byProfile[p.name] ?? []).length - 1}
                                   title="下移"
                                 >
-                                  ↓
+                                  <ArrowDown size={12} />
                                 </button>
                                 <button
                                   className="alloc-action-btn"
                                   onClick={() => void harvestToVault(a.profile, a.pluginId)}
-                                  title="📦 纳管下至仓库沙箱 (Vault)"
+                                  title="纳管下至仓库沙箱 (Vault)"
                                 >
-                                  📦 沙箱
+                                  <Package size={12} /> 沙箱
                                 </button>
                                 <button
                                   className="alloc-action-btn"
                                   title="更新此插件"
                                   onClick={() => void updatePlugin(a)}
                                 >
-                                  🔄 更新
+                                  <RefreshCw size={12} /> 更新
                                 </button>
                                 <button
                                   className="alloc-action-btn"
                                   onClick={() => void remove(a)}
                                   title="移除分配"
                                 >
-                                  ✕ 移除
+                                  <X size={12} /> 移除
                                 </button>
                                 <button
                                   className="alloc-action-btn danger"
                                   title="卸载插件（含依赖）"
                                   onClick={() => void uninstall(a)}
                                 >
-                                  🗑️
+                                  <Trash2 size={12} />
                                 </button>
                               </div>
                             </>
@@ -1186,7 +1209,10 @@ export default function AllocationsPage() {
                     {(addableByCategory[p.name] ?? []).map((group) => (
                       <div key={group.category} className="alloc-group">
                         <div className="alloc-group-head">
-                          <span className="alloc-group-title">📂 {group.zh}</span>
+                          <span className="alloc-group-title" style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+                            <Folder size={14} style={{ color: 'var(--brand-primary)' }} />
+                            <span>{group.zh}</span>
+                          </span>
                           <span className="badge">{group.items.length} 个可添加</span>
                           <span className="spacer" />
                           <button
@@ -1194,7 +1220,7 @@ export default function AllocationsPage() {
                             title={`把 ${group.zh} 分类全部 ${group.items.length} 个插件分配到 ${p.name}`}
                             onClick={() => void assignCategory(p.name, group.category, group.zh)}
                           >
-                            ⚡ 全部分配
+                            <Zap size={12} /> 全部分配
                           </button>
                         </div>
                         {group.items.map((av) => {
@@ -1214,7 +1240,7 @@ export default function AllocationsPage() {
                                   desc: av.description,
                                   version: av.version,
                                   source: av.source === 'bundle' ? 'bundle' : '依赖',
-                                })
+                                });
                               }}
                               onMouseLeave={hideTooltip}
                               onClick={(e) => {
@@ -1251,14 +1277,14 @@ export default function AllocationsPage() {
                                   onClick={() => void assignAvail(p.name, av.pluginId)}
                                   title="分配至当前环境"
                                 >
-                                  ⚡ 分配
+                                  <Zap size={12} /> 分配
                                 </button>
                                 <button
                                   className="alloc-action-btn"
                                   onClick={() => void harvestToVault(p.name, av.pluginId)}
-                                  title="📦 纳管下至仓库沙箱 (Vault)"
+                                  title="纳管下至仓库沙箱 (Vault)"
                                 >
-                                  📦 下至沙箱
+                                  <Package size={12} /> 下至沙箱
                                 </button>
                               </div>
                             </div>
@@ -1281,20 +1307,20 @@ export default function AllocationsPage() {
             已选择 <strong>{selectedKeys.size}</strong> 项插件
           </span>
           <button className="btn sm" onClick={() => void handleBatchToggle(true)}>
-            ⚡ 批量启用
+            <Play size={12} /> 批量启用
           </button>
           <button className="btn sm" onClick={() => void handleBatchToggle(false)}>
-            ⏸ 批量禁用
+            <Square size={12} /> 批量禁用
           </button>
           <button
             className="btn sm"
             style={{ background: 'rgba(99,102,241,0.15)', color: '#4f46e5', borderColor: '#4f46e5', fontWeight: 600 }}
             onClick={() => void handleBatchHarvest()}
           >
-            📦 批量下至沙箱
+            <Package size={12} /> 批量下至沙箱
           </button>
           <button className="btn sm danger" onClick={() => void handleBatchRemove()}>
-            ✕ 批量移除
+            <Trash2 size={12} /> 批量移除
           </button>
           {profiles.length > 1 && (
             <select
@@ -1309,7 +1335,7 @@ export default function AllocationsPage() {
               style={{ width: '130px', padding: '2px 6px' }}
             >
               <option value="" disabled>
-                🚚 批量转移到…
+                批量转移到…
               </option>
               {profiles.map((pr) => (
                 <option key={pr.name} value={pr.name}>
@@ -1318,8 +1344,8 @@ export default function AllocationsPage() {
               ))}
             </select>
           )}
-          <button className="btn sm subtle" onClick={() => setSelectedKeys(new Set())}>
-            ✕ 取消选择 (Esc)
+          <button className="btn sm subtle" onClick={() => setSelectedKeys(new Set())} style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+            <X size={12} /> 取消选择 (Esc)
           </button>
         </div>
       )}
@@ -1341,9 +1367,11 @@ export default function AllocationsPage() {
       {updatingProfile && (
         <div className="progress-panel">
           <div className="progress-head">
-            <span>🔄 正在更新环境 {updatingProfile}</span>
-            <button className="btn sm" onClick={closeUpdatePanel} title="关闭">
-              ✕
+            <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+              <RefreshCw size={13} className="animate-spin" /> 正在更新环境 {updatingProfile}
+            </span>
+            <button className="btn sm" onClick={closeUpdatePanel} title="关闭" style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}>
+              <X size={12} />
             </button>
           </div>
           <div className="progress-bar">
@@ -1354,13 +1382,17 @@ export default function AllocationsPage() {
           </div>
           <div className="progress-status">
             {updateStatus === 'running' ? (
-              <>
-                <span className="splash-spinner">🌀</span> 更新中…
-              </>
+              <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+                <RefreshCw size={13} className="animate-spin" /> 更新中…
+              </span>
             ) : updateStatus === 'done' ? (
-              '✅ 全部完成'
+              <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, color: 'var(--success)' }}>
+                <CheckCircle2 size={13} /> 全部完成
+              </span>
             ) : (
-              '❌ 更新出错'
+              <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, color: 'var(--err)' }}>
+                <AlertCircle size={13} /> 更新出错
+              </span>
             )}
           </div>
           <pre className="progress-log">{updateLog || '准备中…'}</pre>

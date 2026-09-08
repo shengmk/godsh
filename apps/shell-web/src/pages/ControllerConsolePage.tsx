@@ -1,4 +1,15 @@
 import { useEffect, useRef, useState } from 'react'
+import {
+  AlertTriangle,
+  CheckCircle2,
+  Zap,
+  ExternalLink,
+  Box,
+  Layers,
+  ShoppingBag,
+  Binary,
+  Settings,
+} from 'lucide-react'
 import { api } from '../api'
 import type { Allocation, DshStatus, KernelInstance, KernelTemplate, LocalPlugin, ProfileView } from '../types'
 import { Toast } from '../components'
@@ -110,8 +121,8 @@ export default function ControllerConsolePage({ onNavigate }: { onNavigate: (p: 
 
       {status && !status.found && (
         <div className="card" style={{ marginBottom: 16, border: '1px solid rgba(245, 158, 11, 0.5)' }}>
-          <div className="card-title" style={{ color: 'var(--warn)' }}>
-            ⚠ {t('console.noDsh')}
+          <div className="card-title" style={{ color: 'var(--warn)', display: 'flex', alignItems: 'center', gap: 8 }}>
+            <AlertTriangle size={16} /> {t('console.noDsh')}
           </div>
           <p className="muted">{t('console.noDshHint')}</p>
         </div>
@@ -121,29 +132,30 @@ export default function ControllerConsolePage({ onNavigate }: { onNavigate: (p: 
         <div className="card-title">{t('console.quickStart')}</div>
         <p className="card-sub">{t('console.quickStartHint')}</p>
         {phase !== 'idle' && phase !== 'done' && (
-          <p className="muted" style={{ marginBottom: 8 }}>
+          <p className="muted" style={{ marginBottom: 8, display: 'flex', alignItems: 'center', gap: 6 }}>
+            <span className="pulse-dot active" style={{ width: 6, height: 6, display: 'inline-block' }} />
             {phase === 'installing' ? '① ' : phase === 'initing' ? '② ' : '③ '}
             {phaseMsg}
             {hasInstallTask ? '（安装进行中…）' : ''}
           </p>
         )}
         {phase === 'done' && startedUrl && (
-          <p className="muted" style={{ marginBottom: 8 }}>
-            ✅ {t('console.ready')}：{startedUrl}
+          <p className="muted" style={{ marginBottom: 8, display: 'flex', alignItems: 'center', gap: 6 }}>
+            <CheckCircle2 size={15} style={{ color: 'var(--success)' }} /> {t('console.ready')}：{startedUrl}
           </p>
         )}
         {phase === 'error' && (
-          <p className="muted" style={{ marginBottom: 8, color: 'var(--err)' }}>
-            ⚠ {phaseMsg}
+          <p className="muted" style={{ marginBottom: 8, color: 'var(--err)', display: 'flex', alignItems: 'center', gap: 6 }}>
+            <AlertTriangle size={15} /> {phaseMsg}
           </p>
         )}
         <div className="row" style={{ marginTop: 8 }}>
-          <button className="btn primary" disabled={busy} onClick={() => void quickStart()}>
-            {busy ? '…' : t('console.quickStartBtn')}
+          <button className="btn primary btn-glow-primary" disabled={busy} onClick={() => void quickStart()} style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+            <Zap size={13} /> {busy ? '…' : t('console.quickStartBtn')}
           </button>
           {startedUrl && (
-            <button className="btn" onClick={() => void openDshWeb(startedUrl)}>
-              {t('console.open')} ↗
+            <button className="btn" onClick={() => void openDshWeb(startedUrl)} style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+              {t('console.open')} <ExternalLink size={12} />
             </button>
           )}
         </div>
@@ -201,16 +213,25 @@ export default function ControllerConsolePage({ onNavigate }: { onNavigate: (p: 
         <div className="card-title">{t('dash.quick')}</div>
         <div className="row" style={{ marginTop: 10 }}>
           {[
-            { label: t('console.goEnvs'), key: 'dsh-envs' as PageKey },
-            { label: t('dash.quickProfiles'), key: 'profiles' as PageKey },
-            { label: t('dash.quickMarket'), key: 'market' as PageKey },
-            { label: t('dash.quickKernels'), key: 'kernels' as PageKey },
-            { label: t('dash.quickSettings'), key: 'settings' as PageKey },
-          ].map((q) => (
-            <button key={q.key} className="btn" onClick={() => onNavigate(q.key)}>
-              {q.label}
-            </button>
-          ))}
+            { label: t('console.goEnvs'), key: 'dsh-envs' as PageKey, icon: Box },
+            { label: t('dash.quickProfiles'), key: 'profiles' as PageKey, icon: Layers },
+            { label: t('dash.quickMarket'), key: 'market' as PageKey, icon: ShoppingBag },
+            { label: t('dash.quickKernels'), key: 'kernels' as PageKey, icon: Binary },
+            { label: t('dash.quickSettings'), key: 'settings' as PageKey, icon: Settings },
+          ].map((q) => {
+            const Icon = q.icon
+            return (
+              <button
+                key={q.key}
+                className="btn"
+                onClick={() => onNavigate(q.key)}
+                style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}
+              >
+                <Icon size={13} />
+                {q.label}
+              </button>
+            )
+          })}
         </div>
       </div>
 

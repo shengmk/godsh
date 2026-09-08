@@ -1,4 +1,24 @@
 import { useEffect, useMemo, useState } from 'react'
+import {
+  Archive,
+  History,
+  Plus,
+  RefreshCw,
+  Zap,
+  Download,
+  HardDrive,
+  ShieldCheck,
+  Layers,
+  Trash2,
+  CheckCircle2,
+  AlertTriangle,
+  AlertCircle,
+  X,
+  Rocket,
+  Sparkles,
+  RotateCcw,
+  Upload,
+} from 'lucide-react'
 import { api } from '../api'
 import { taskManager } from '../tasks'
 import type { DeploymentSnapshot, DiskSavingsReport, PluginAuditReport, ProfileView, VaultPlugin } from '../types'
@@ -161,13 +181,13 @@ export default function VaultHubPage() {
     setActionLoading(`deploy-${p.id}`)
     try {
       const res = await api.vaultDeploy(p.id, targetProf, version)
-      let msg = `🚀 已将 ${p.name} 瞬时直连挂载至 [${targetProf}]！`
-      if (res.isJunction) msg += ' (⚡ NTFS Junction 零拷贝)'
+      let msg = `已将 ${p.name} 瞬时直连挂载至 [${targetProf}]！`
+      if (res.isJunction) msg += ' (NTFS Junction 零拷贝)'
       if (res.companionAdded && res.companionAdded.length > 0) {
         msg += ` · 伴随自愈注入: ${res.companionAdded.join(', ')}`
       }
       if (res.conflicts && res.conflicts.length > 0) {
-        showNotice(`⚠️ 挂载完成但检测到潜在互斥插件: ${res.conflicts.join(', ')}`, 'warn')
+        showNotice(`挂载完成但检测到潜在互斥插件: ${res.conflicts.join(', ')}`, 'warn')
       } else {
         showNotice(msg, 'ok')
       }
@@ -252,7 +272,7 @@ export default function VaultHubPage() {
       const updated = list.filter((r) => r.hasUpdate).length
       showNotice(
         updated > 0
-          ? `发现 ${updated} 个插件有新版本更新！可点击上方「⚡ 自动更新全部」或单条「⬆️ 立即更新」`
+          ? `发现 ${updated} 个插件有新版本更新！可点击上方「自动更新全部」或单条「立即更新」`
           : '所有沙箱插件均为最新版本',
         updated > 0 ? 'warn' : 'ok'
       )
@@ -372,8 +392,9 @@ export default function VaultHubPage() {
       <div className="page-head" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
         <div>
           <h1 className="page-title" style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-            <span>📦 插件沙箱</span>
-            <span style={{ fontSize: '0.85rem', background: 'var(--brand-1)', color: '#fff', padding: '2px 8px', borderRadius: '12px' }}>
+            <Archive size={22} style={{ color: 'var(--brand-primary)' }} />
+            <span>插件沙箱</span>
+            <span style={{ fontSize: '0.85rem', background: 'var(--brand-primary)', color: '#fff', padding: '2px 8px', borderRadius: '12px' }}>
               Vault Hub
             </span>
           </h1>
@@ -383,13 +404,13 @@ export default function VaultHubPage() {
         </div>
         <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
           <button className="btn sm" onClick={() => setHistoryModal({ open: true })}>
-            📜 部署历史
+            <History size={12} /> 部署历史
           </button>
           <button className="btn sm" onClick={() => setImportModal({ open: true, targetPath: '', category: 'local' })}>
-            ➕ 导入本地包
+            <Plus size={12} /> 导入本地包
           </button>
           <button className="btn sm" onClick={() => void handleCheckUpdates()} disabled={actionLoading === 'updates'}>
-            🔄 检查更新
+            <RefreshCw size={12} className={actionLoading === 'updates' ? 'animate-spin' : ''} /> 检查更新
           </button>
           {plugins.some((p) => p.hasUpdate) && (
             <button
@@ -399,11 +420,11 @@ export default function VaultHubPage() {
               disabled={actionLoading === 'update-all'}
               title="一键自动拉取升级所有检测到新版本的沙箱插件，并原子同步已挂载环境"
             >
-              {actionLoading === 'update-all' ? '⚡ 正在自动更新…' : '⚡ 自动更新全部'}
+              <Zap size={12} /> {actionLoading === 'update-all' ? '正在自动更新…' : '自动更新全部'}
             </button>
           )}
           <button className="btn sm primary" onClick={() => void handleHarvest()} disabled={actionLoading === 'harvest'}>
-            🌾 一键收割
+            <Download size={12} /> 一键收割
           </button>
         </div>
       </div>
@@ -435,45 +456,67 @@ export default function VaultHubPage() {
         }}
       >
         <div className="card" style={{ padding: '16px' }}>
-          <div style={{ fontSize: '0.8rem', color: 'var(--text-dim)', marginBottom: '4px' }}>📦 已归档纳管插件</div>
-          <div style={{ fontSize: '1.8rem', fontWeight: 700, color: 'var(--text)' }}>
-            {plugins.length} <span style={{ fontSize: '0.9rem', fontWeight: 'normal', color: 'var(--text-dim)' }}>个</span>
+          <div style={{ fontSize: '0.8rem', color: 'var(--text-secondary)', marginBottom: '4px', display: 'flex', alignItems: 'center', gap: 6 }}>
+            <Archive size={14} style={{ color: 'var(--brand-primary)' }} />
+            <span>已归档纳管插件</span>
           </div>
-          <div style={{ fontSize: '0.75rem', color: 'var(--muted)', marginTop: '4px' }}>
+          <div style={{ fontSize: '1.8rem', fontWeight: 700, color: 'var(--text-primary)' }}>
+            {plugins.length} <span style={{ fontSize: '0.9rem', fontWeight: 'normal', color: 'var(--text-secondary)' }}>个</span>
+          </div>
+          <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginTop: '4px' }}>
             涵盖 AGI、UI、工具、视觉等全矩阵
           </div>
         </div>
 
         <div className="card" style={{ padding: '16px' }}>
-          <div style={{ fontSize: '0.8rem', color: 'var(--text-dim)', marginBottom: '4px' }}>⚡ 零拷贝已节省磁盘空间</div>
+          <div style={{ fontSize: '0.8rem', color: 'var(--text-secondary)', marginBottom: '4px', display: 'flex', alignItems: 'center', gap: 6 }}>
+            <HardDrive size={14} style={{ color: 'var(--ok)' }} />
+            <span>零拷贝已节省空间</span>
+          </div>
           <div style={{ fontSize: '1.8rem', fontWeight: 700, color: 'var(--ok)' }}>
             {formatBytes(metrics?.savedBytes || 1845493760)}
           </div>
-          <div style={{ fontSize: '0.75rem', color: 'var(--muted)', marginTop: '4px' }}>
+          <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginTop: '4px' }}>
             NTFS Junction 单实例物理复用
           </div>
         </div>
 
         <div className="card" style={{ padding: '16px' }}>
-          <div style={{ fontSize: '0.8rem', color: 'var(--text-dim)', marginBottom: '4px' }}>🛡️ 静态安全审计评级</div>
-          <div style={{ display: 'flex', gap: '8px', alignItems: 'baseline', marginTop: '6px' }}>
-            <span style={{ color: '#3b82f6', fontWeight: 600 }}>🛡️ {stats.officialCount}</span>
-            <span style={{ color: 'var(--ok)', fontWeight: 600 }}>🟢 {stats.safeCount}</span>
-            <span style={{ color: 'var(--warn)', fontWeight: 600 }}>⚠️ {stats.warnCount}</span>
-            {stats.dangerCount > 0 && <span style={{ color: 'var(--err)', fontWeight: 600 }}>🚨 {stats.dangerCount}</span>}
+          <div style={{ fontSize: '0.8rem', color: 'var(--text-secondary)', marginBottom: '4px', display: 'flex', alignItems: 'center', gap: 6 }}>
+            <ShieldCheck size={14} style={{ color: 'var(--brand-secondary)' }} />
+            <span>静态安全审计评级</span>
           </div>
-          <div style={{ fontSize: '0.75rem', color: 'var(--muted)', marginTop: '6px' }}>
+          <div style={{ display: 'flex', gap: '12px', alignItems: 'baseline', marginTop: '6px' }}>
+            <span style={{ color: '#818cf8', fontWeight: 600, display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+              <ShieldCheck size={12} /> {stats.officialCount}
+            </span>
+            <span style={{ color: 'var(--ok)', fontWeight: 600, display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+              <CheckCircle2 size={12} /> {stats.safeCount}
+            </span>
+            <span style={{ color: 'var(--warn)', fontWeight: 600, display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+              <AlertTriangle size={12} /> {stats.warnCount}
+            </span>
+            {stats.dangerCount > 0 && (
+              <span style={{ color: 'var(--err)', fontWeight: 600, display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+                <AlertCircle size={12} /> {stats.dangerCount}
+              </span>
+            )}
+          </div>
+          <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginTop: '6px' }}>
             AST 语法树与高敏凭证全量探查
           </div>
         </div>
 
         <div className="card" style={{ padding: '16px' }}>
-          <div style={{ fontSize: '0.8rem', color: 'var(--text-dim)', marginBottom: '4px' }}>🔗 活跃 Junction 挂载点</div>
-          <div style={{ fontSize: '1.8rem', fontWeight: 700, color: 'var(--brand-2)' }}>
-            {metrics?.totalJunctions || 0}{' '}
-            <span style={{ fontSize: '0.9rem', fontWeight: 'normal', color: 'var(--text-dim)' }}>处链接</span>
+          <div style={{ fontSize: '0.8rem', color: 'var(--text-secondary)', marginBottom: '4px', display: 'flex', alignItems: 'center', gap: 6 }}>
+            <Layers size={14} style={{ color: 'var(--brand-primary)' }} />
+            <span>活跃 Junction 挂载点</span>
           </div>
-          <div style={{ fontSize: '0.75rem', color: 'var(--muted)', marginTop: '4px' }}>
+          <div style={{ fontSize: '1.8rem', fontWeight: 700, color: 'var(--brand-primary)' }}>
+            {metrics?.totalJunctions || 0}{' '}
+            <span style={{ fontSize: '0.9rem', fontWeight: 'normal', color: 'var(--text-secondary)' }}>处链接</span>
+          </div>
+          <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginTop: '4px' }}>
             注入时间 &lt; 10ms · 支持热插拔
           </div>
         </div>
@@ -500,8 +543,9 @@ export default function VaultHubPage() {
             className="btn sm"
             disabled={selectedIds.size === 0}
             onClick={() => setBatchModal({ open: true, targetProfiles: [] })}
+            style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}
           >
-            🚀 广播批量挂载
+            <Rocket size={12} /> 广播批量挂载
           </button>
         </div>
 
@@ -511,16 +555,34 @@ export default function VaultHubPage() {
             onClick={() => void handleFullAudit()}
             disabled={actionLoading === 'audit'}
             title="对沙箱中全部插件执行 AST 静态语法与权限审查"
+            style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}
           >
-            {actionLoading === 'audit' ? '⏳ 正在全量审计…' : '🛡️ 全量安全体检'}
+            {actionLoading === 'audit' ? (
+              <>
+                <RefreshCw size={12} className="animate-spin" /> 正在全量审计…
+              </>
+            ) : (
+              <>
+                <ShieldCheck size={12} /> 全量安全体检
+              </>
+            )}
           </button>
           <button
             className="btn sm"
             onClick={() => void handleGC()}
             disabled={actionLoading === 'gc'}
             title="扫描并清理存储池中无环境引用的历史遗留包"
+            style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}
           >
-            {actionLoading === 'gc' ? '⏳ 正在清理…' : '🧹 沙箱大扫除 (GC)'}
+            {actionLoading === 'gc' ? (
+              <>
+                <RefreshCw size={12} className="animate-spin" /> 正在清理…
+              </>
+            ) : (
+              <>
+                <Trash2 size={12} /> 沙箱大扫除 (GC)
+              </>
+            )}
           </button>
         </div>
       </div>
@@ -539,12 +601,12 @@ export default function VaultHubPage() {
         <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
           {[
             { key: 'all', label: '全部类别' },
-            { key: 'agi', label: '🧠 AGI / 记忆' },
-            { key: 'ui', label: '🎨 界面 / 工作台' },
-            { key: 'tools', label: '⚙️ 工具 / 检索' },
-            { key: 'vision', label: '👁️ 视觉 / 多模态' },
-            { key: 'harvested', label: '🌾 反向收割' },
-            { key: 'local', label: '📂 本地包' },
+            { key: 'agi', label: 'AGI / 记忆' },
+            { key: 'ui', label: '界面 / 工作台' },
+            { key: 'tools', label: '工具 / 检索' },
+            { key: 'vision', label: '视觉 / 多模态' },
+            { key: 'harvested', label: '反向收割' },
+            { key: 'local', label: '本地包' },
           ].map((cat) => (
             <button
               key={cat.key}
@@ -564,10 +626,10 @@ export default function VaultHubPage() {
             style={{ width: '130px' }}
           >
             <option value="all">所有安全等级</option>
-            <option value="official">🛡️ 官方精选</option>
-            <option value="safe">🟢 安全认证</option>
-            <option value="warning">⚠️ 需关注权限</option>
-            <option value="danger">🚨 高危警示</option>
+            <option value="official">官方精选</option>
+            <option value="safe">安全认证</option>
+            <option value="warning">需关注权限</option>
+            <option value="danger">高危警示</option>
           </select>
 
           <input
@@ -740,10 +802,10 @@ export default function VaultHubPage() {
                           }}
                           title="点击查看静态 AST 审计详情"
                         >
-                          {isOfficial && '🛡️ 官方精选'}
-                          {isSafe && '🟢 安全认证'}
-                          {isWarning && '⚠️ 需关注'}
-                          {isDanger && '🚨 高危警示'}
+                          {isOfficial && <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}><ShieldCheck size={11} /> 官方精选</span>}
+                          {isSafe && <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}><CheckCircle2 size={11} /> 安全认证</span>}
+                          {isWarning && <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}><AlertTriangle size={11} /> 需关注</span>}
+                          {isDanger && <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}><AlertCircle size={11} /> 高危警示</span>}
                         </button>
                       </td>
 
@@ -756,9 +818,12 @@ export default function VaultHubPage() {
                             background: 'rgba(99,102,241,0.12)',
                             color: '#4f46e5',
                             fontWeight: 600,
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                            gap: 3,
                           }}
                         >
-                          ⚡ Junction
+                          <Zap size={10} /> Junction
                         </span>
                       </td>
 
@@ -789,11 +854,13 @@ export default function VaultHubPage() {
                                   cursor: 'pointer',
                                   color: 'var(--muted)',
                                   padding: '0 2px',
+                                  display: 'inline-flex',
+                                  alignItems: 'center',
                                 }}
                                 title="从该环境卸载 (热拔插)"
                                 onClick={() => void handleUnmount(p, prof)}
                               >
-                                ×
+                                <X size={10} />
                               </button>
                               <button
                                 style={{
@@ -803,11 +870,13 @@ export default function VaultHubPage() {
                                   color: 'var(--brand-2)',
                                   padding: '0 2px',
                                   fontSize: '0.7rem',
+                                  display: 'inline-flex',
+                                  alignItems: 'center',
                                 }}
                                 title="一键回滚到前序版本"
                                 onClick={() => void handleRollback(p, prof)}
                               >
-                                ⏪
+                                <RotateCcw size={10} />
                               </button>
                             </span>
                           ))}
@@ -826,15 +895,17 @@ export default function VaultHubPage() {
                                 version: p.activeVersion || p.version,
                               })
                             }
+                            style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}
                           >
-                            🚀 瞬时注入
+                            <Rocket size={11} /> 瞬时注入
                           </button>
                           <button
                             className="btn sm"
                             onClick={() => void handleInspectAudit(p)}
                             title="查看安全审查报告"
+                            style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}
                           >
-                            🛡️ 审计
+                            <ShieldCheck size={11} /> 审计
                           </button>
                           <button
                             className="btn sm"
@@ -844,8 +915,10 @@ export default function VaultHubPage() {
                               showNotice(`已移除 ${p.name}`, 'ok')
                               await loadData()
                             }}
+                            style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}
+                            title="永久删除"
                           >
-                            🗑️
+                            <Trash2 size={12} />
                           </button>
                         </div>
                       </td>
@@ -861,7 +934,9 @@ export default function VaultHubPage() {
       {deployModal.open && deployModal.plugin && (
         <div className="modal-backdrop" onClick={() => setDeployModal({ open: false, plugin: null, targetProfile: '', version: '' })}>
           <div className="modal-dialog" onClick={(e) => e.stopPropagation()} style={{ maxWidth: '460px' }}>
-            <div className="modal-title">🚀 瞬时直连挂载至 Profile</div>
+            <div className="modal-title" style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+              <Rocket size={16} /> 瞬时直连挂载至 Profile
+            </div>
             <p className="modal-desc" style={{ marginBottom: '12px' }}>
               通过 Windows 原生 NTFS Junction 零拷贝直通目标环境，秒级挂载免重新下载与解压。
             </p>
@@ -878,7 +953,7 @@ export default function VaultHubPage() {
               >
                 {profiles.map((pr) => (
                   <option key={pr.name} value={pr.name}>
-                    {pr.name} {pr.running ? '(运行中 🟢)' : ''}
+                    {pr.name} {pr.running ? '(运行中)' : ''}
                   </option>
                 ))}
               </select>
@@ -896,8 +971,9 @@ export default function VaultHubPage() {
               />
             </div>
 
-            <div style={{ padding: '8px 12px', background: 'var(--surface-soft)', borderRadius: '6px', fontSize: '0.8rem', color: 'var(--text-dim)' }}>
-              ✨ <strong>自愈契约防护已就绪</strong>：注入时将自动应用 <code>settingsNamespace</code> / <code>CallId</code> 兼容垫片，防 DSH 0.1.2 破坏性升级崩溃。
+            <div style={{ padding: '8px 12px', background: 'var(--surface-soft)', borderRadius: '6px', fontSize: '0.8rem', color: 'var(--text-dim)', display: 'flex', alignItems: 'center', gap: 6 }}>
+              <Sparkles size={13} style={{ flexShrink: 0 }} />
+              <span><strong>自愈契约防护已就绪</strong>：注入时将自动应用 <code>settingsNamespace</code> / <code>CallId</code> 兼容垫片，防 DSH 0.1.2 破坏性升级崩溃。</span>
             </div>
 
             <div className="modal-actions" style={{ marginTop: '18px', display: 'flex', justifyContent: 'flex-end', gap: '8px' }}>
@@ -908,8 +984,9 @@ export default function VaultHubPage() {
                 className="btn primary"
                 onClick={() => void handleExecuteDeploy()}
                 disabled={actionLoading?.startsWith('deploy-')}
+                style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}
               >
-                {actionLoading?.startsWith('deploy-') ? '⏳ 正在挂载…' : '立即瞬时挂载'}
+                {actionLoading?.startsWith('deploy-') ? <><RefreshCw size={12} className="animate-spin" /> 正在挂载…</> : '立即瞬时挂载'}
               </button>
             </div>
           </div>
@@ -920,7 +997,9 @@ export default function VaultHubPage() {
       {batchModal.open && (
         <div className="modal-backdrop" onClick={() => setBatchModal({ open: false, targetProfiles: [] })}>
           <div className="modal-dialog" onClick={(e) => e.stopPropagation()} style={{ maxWidth: '480px' }}>
-            <div className="modal-title">🚀 广播式批量挂载</div>
+            <div className="modal-title" style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+              <Rocket size={16} /> 广播式批量挂载
+            </div>
             <p className="modal-desc">
               将选中的 <strong>{selectedIds.size}</strong> 个沙箱插件并发直连分发到勾选的环境中。
             </p>
@@ -955,7 +1034,11 @@ export default function VaultHubPage() {
                       }}
                     />
                     <span>{p.name}</span>
-                    {p.running && <span style={{ fontSize: '0.75rem', color: 'var(--ok)' }}>🟢 运行中</span>}
+                    {p.running && (
+                      <span style={{ fontSize: '0.75rem', color: 'var(--ok)', display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+                        <span className="pulse-dot active" style={{ width: 6, height: 6, display: 'inline-block' }} /> 运行中
+                      </span>
+                    )}
                   </label>
                 )
               })}
@@ -969,8 +1052,9 @@ export default function VaultHubPage() {
                 className="btn primary"
                 disabled={batchModal.targetProfiles.length === 0 || actionLoading === 'batch-deploy'}
                 onClick={() => void handleBatchDeploy()}
+                style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}
               >
-                {actionLoading === 'batch-deploy' ? '⏳ 正在广播挂载…' : '开始批量分发'}
+                {actionLoading === 'batch-deploy' ? <><RefreshCw size={12} className="animate-spin" /> 正在广播挂载…</> : '开始批量分发'}
               </button>
             </div>
           </div>
@@ -982,7 +1066,7 @@ export default function VaultHubPage() {
         <div className="modal-backdrop" onClick={() => setAuditModal({ open: false, report: null, pluginName: '' })}>
           <div className="modal-dialog" onClick={(e) => e.stopPropagation()} style={{ maxWidth: '640px' }}>
             <div className="modal-title" style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-              <span>🛡️ 插件安全审计报告: {auditModal.pluginName}</span>
+              <ShieldCheck size={16} /> 插件安全审计报告: {auditModal.pluginName}
             </div>
             <p className="modal-desc" style={{ marginBottom: '12px' }}>
               深度 AST 语法分析 · 敏感环境访问 · 外壳命令与高危反弹特征扫描
@@ -1004,10 +1088,10 @@ export default function VaultHubPage() {
               <div>
                 <span style={{ fontSize: '0.75rem', color: 'var(--text-dim)' }}>安全评级结论</span>
                 <div style={{ fontSize: '1.1rem', fontWeight: 600, marginTop: '4px' }}>
-                  {auditModal.report.level === 'official' && '🛡️ 官方精选 (信任)'}
-                  {auditModal.report.level === 'safe' && '🟢 安全认证 (无高敏行为)'}
-                  {auditModal.report.level === 'warning' && '⚠️ 需关注权限调用'}
-                  {auditModal.report.level === 'danger' && '🚨 高危命令 (建议阻断)'}
+                  {auditModal.report.level === 'official' && <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}><ShieldCheck size={14} /> 官方精选 (信任)</span>}
+                  {auditModal.report.level === 'safe' && <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}><CheckCircle2 size={14} style={{ color: 'var(--success)' }} /> 安全认证 (无高敏行为)</span>}
+                  {auditModal.report.level === 'warning' && <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}><AlertTriangle size={14} style={{ color: 'var(--warn)' }} /> 需关注权限调用</span>}
+                  {auditModal.report.level === 'danger' && <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}><AlertCircle size={14} style={{ color: 'var(--err)' }} /> 高危命令 (建议阻断)</span>}
                 </div>
               </div>
             </div>
@@ -1017,8 +1101,8 @@ export default function VaultHubPage() {
                 规则匹配审计明细 ({auditModal.report.findings.length} 条)：
               </strong>
               {auditModal.report.findings.length === 0 && (
-                <div style={{ color: 'var(--ok)', fontSize: '0.85rem', padding: '10px 0' }}>
-                  ✨ 未发现任何越权读取密钥、反弹 Shell 或环境提取等高危语法特征。
+                <div style={{ color: 'var(--ok)', fontSize: '0.85rem', padding: '10px 0', display: 'flex', alignItems: 'center', gap: 6 }}>
+                  <Sparkles size={14} /> 未发现任何越权读取密钥、反弹 Shell 或环境提取等高危语法特征。
                 </div>
               )}
               {auditModal.report.findings.map((f, idx) => (
@@ -1072,7 +1156,9 @@ export default function VaultHubPage() {
       {historyModal.open && (
         <div className="modal-backdrop" onClick={() => setHistoryModal({ open: false })}>
           <div className="modal-dialog" onClick={(e) => e.stopPropagation()} style={{ maxWidth: '640px' }}>
-            <div className="modal-title">📜 部署与回滚历史快照</div>
+            <div className="modal-title" style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+              <History size={16} /> 部署与回滚历史快照
+            </div>
             <p className="modal-desc">记录沙箱插件跨环境部署、多版本原子切换及一键快照回滚全日志。</p>
 
             <div style={{ maxHeight: '360px', overflowY: 'auto', margin: '14px 0' }}>
@@ -1107,8 +1193,8 @@ export default function VaultHubPage() {
                     >
                       {h.action.toUpperCase()}
                     </span>
-                    <strong>{h.pluginName}</strong> ➔ 目标环境: <code>{h.profile}</code>
-                    {h.fromVersion && <span style={{ color: 'var(--text-dim)', fontSize: '0.75rem' }}> ({h.fromVersion} ➔ {h.toVersion})</span>}
+                    <strong>{h.pluginName}</strong> → 目标环境: <code>{h.profile}</code>
+                    {h.fromVersion && <span style={{ color: 'var(--text-dim)', fontSize: '0.75rem' }}> ({h.fromVersion} → {h.toVersion})</span>}
                   </div>
                   <div style={{ color: 'var(--muted)', fontSize: '0.75rem' }}>{formatDate(h.timestamp)}</div>
                 </div>
@@ -1128,7 +1214,9 @@ export default function VaultHubPage() {
       {importModal.open && (
         <div className="modal-backdrop" onClick={() => setImportModal({ open: false, targetPath: '', category: 'local' })}>
           <div className="modal-dialog" onClick={(e) => e.stopPropagation()} style={{ maxWidth: '460px' }}>
-            <div className="modal-title">📂 导入本地插件至沙箱</div>
+            <div className="modal-title" style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+              <Upload size={16} /> 导入本地插件至沙箱
+            </div>
             <p className="modal-desc">指定本地开发目录或解压包，沙箱将自动完成 AST 审计并加入内容寻址存储池。</p>
 
             <div style={{ margin: '12px 0' }}>

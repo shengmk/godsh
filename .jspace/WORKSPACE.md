@@ -51,10 +51,11 @@ godsh 全局 UI 电影级翻新与无控制台启动优化（v0.6.0，四大阶�
 - ✓20 GitHub Release v0.5.5 上传并发布完成，CI 裸机环境单测隔离修复 — verified by: GitHub Release tag v0.5.5 (3 assets uploaded, online URL confirmed)
 - ✓21 全局 UI/UX 翻新总方案与四大升级阶段分步实施方案已完备输出至 09_输入文档/UI_UX_全面重构方案/ — verified by: 5 comprehensive markdown scheme docs in 09_输入文档/UI_UX_全面重构方案/
 - ✓22 阶段一（基础 UI 框架重构）全量落地：Rust CREATE_NO_WINDOW 消除黑窗、Cinematic Dark & Glassmorphism 全局设计令牌、顶栏与侧栏骨架翻新、Lucide 矢量图标系统替换 Raw Emoji — verified by: pnpm typecheck (0 errors), pnpm test (69/69 pass), pnpm build:web (0 errors)
+- ✓23 阶段二（基础功能性 UI 填充）全量落地：7 大业务页面（ProfilesPage, AllocationsPage, VaultHubPage, SystemTasksPage, MarketPage, ControllerConsolePage, KernelsPage, DshEnvsPage, SettingsPage）看板与表格全面翻新，全站 100% 消除 Raw Emoji，全量覆盖 Lucide 矢量图标系统，双轨启动与微光拟态生效 — verified by: pnpm typecheck (0 errors), pnpm test (69/69 pass), pnpm build:web (0 errors)
 
 ## Open
 - ?01 确认是否需要将默认字体 Inter 与 JetBrains Mono 嵌入前端包本地离线加载
 - ?02 评估是否提供全局暗黑/亮色切换，抑或作为专精极客工具强制锁定 Cinematic Dark
 
 ## Next
-等待用户确认并推进「阶段二：基础功能性 UI 填充（7 大业务页面看板、指标卡片与表格全面翻新，沉浸式玻璃拟态与高密度看板）」！
+推进「阶段三：功能性 UI 查漏补缺和实用性检查（空状态骨架屏深度打磨、极端报错边界防护、最小 44px 触控热区达标、快捷键与实用性全量验收）」！
