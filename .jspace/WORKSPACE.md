@@ -1,15 +1,20 @@
 # J-Space Workspace Ledger
 
 ## Goal
-godsh 升级为“环境可靠性中心” (Environment Reliability & Control Center, v0.5.5) 全量落地与发布
+godsh 全局 UI 电影级翻新与无控制台启动优化（v0.6.0，四大阶段全量推进）
 
 ## Core
-- **沙箱自动更新与物理连通性感知**：在 `vault.updatePlugin` 中加入 pre-flight 验证与悬空 profile 清理，返回颗粒化同步结果，杜绝静默挂死与无效重试。
-- **软件备份与时光机回退 (Backup & Rollback System)**：实现快照生命周期管理、防误删锁定、智能过期淘汰策略（Retention Policy）与安全前置备份（Safety Snapshot）。
-- **操作审计日记 (godsh-journal)**：实现原子级 JSONL 结构化日记与可读审计流，全量记录快照、回滚、自愈与更新事件。
-- **7-Phase 自愈工作流引擎 (Repair Agent)**：`Inspection` -> `Quarantine` -> `Checkpoint` -> `Restore` -> `DependencyHeal` -> `Verify` -> `BootAndReport` 闭环自愈。
-- **系统任务监控中心与实时终端 (`/tasks`)**：统一多模块后台异步任务，集成 Glassmorphism 实时日志终端与审计历史。
-- **DSH 官方桌面版 (DSH Desktop) 深度兼容**：双轨启动（Web vs 桌面版）、状态无缝穿透同步（`%APPDATA%\DSH Desktop\profile-selection\state.json`）、Profile Bundles 规范净化与顺序矫正。
+- **无控制台窗口启动 (P0)**：在 `apps/launcher/src-tauri/src/lib.rs` 中为所有 `Command::new` 注入 Windows `CREATE_NO_WINDOW = 0x08000000` 标志，彻底消灭 `node.exe` / `cmd.exe` 黑窗弹出。
+- **UI-UX-Pro-Max 智能库契约**：
+  - **风格定位**：Cinematic Dark（深色电影级） + Glassmorphism（现代微光玻璃拟态）；
+  - **颜色令牌**：底板 `#020203`（防 OLED 拖影纯黑）、表面 `#0A0A0F`、玻璃卡片 `rgba(255,255,255,0.04)`、发丝边框 `rgba(255,255,255,0.08)`、主强调色 `#5E6AD2`（Glow 辉光 `rgba(94,106,210,0.25)`）；
+  - **排版与密度**：Inter + JetBrains Mono（等宽日志），采用 Density 8 紧凑看板间距标尺；
+  - **规范红线**：严禁 Emoji 作为结构图标（全量引入 `lucide-react` 矢量图标系统）、可点按元素提供 80~150ms 物理缩放 `scale(0.98)` 按压反馈、最小触控热区 `≥ 44×44px`、零横向滚动溢出。
+- **四次分步升级路线**：
+  - 1. 基础 UI 框架重构（消灭黑窗 + CSS Tokens 底座 + 顶栏导航 + Lucide 矢量系统）；
+  - 2. 基础功能性 UI 填充（7 大业务页面看板与表格全面翻新）；
+  - 3. 功能性 UI 查漏补缺和实用性检查（空状态/骨架屏/错误边界/触控热区/防溢出/快捷键）；
+  - 4. 装饰性 UI 与微交互添加（流光点阵背景/阻尼按压/状态呼吸灯/终端扫描线）。
 
 ## Verified
 - Cargo.toml version = "0.5.1" ✅
@@ -43,10 +48,13 @@ godsh 升级为“环境可靠性中心” (Environment Reliability & Control Ce
 - ✓17 系统任务监控中心与实时终端 (/tasks & SystemTasksPage) 落地 — verified by: SystemTasksPage terminal streaming & Vite build passing with 0 errors
 - ✓18 DSH 官方桌面版 (DSH Desktop) 深度兼容（双轨启动、%APPDATA% 状态同步、Bundle 顺序净化） — verified by: apps/launcher/src-tauri/src/lib.rs & dsh.ts API integration
 - ✓19 v0.5.5 全量测试 69/69 通过，前端生产打包 0 错误 0 警告，Tauri 桌面端 release 编译成功并生成 NSIS 安装器与绿色便携包 — verified by: pnpm test (69 pass), pnpm build:web, make-release.ps1 (godsh-0.5.5-x64-setup.exe & zip)
+- ✓20 GitHub Release v0.5.5 上传并发布完成，CI 裸机环境单测隔离修复 — verified by: GitHub Release tag v0.5.5 (3 assets uploaded, online URL confirmed)
+- ✓21 全局 UI/UX 翻新总方案与四大升级阶段分步实施方案已完备输出至 09_输入文档/UI_UX_全面重构方案/ — verified by: 5 comprehensive markdown scheme docs in 09_输入文档/UI_UX_全面重构方案/
+- ✓22 阶段一（基础 UI 框架重构）全量落地：Rust CREATE_NO_WINDOW 消除黑窗、Cinematic Dark & Glassmorphism 全局设计令牌、顶栏与侧栏骨架翻新、Lucide 矢量图标系统替换 Raw Emoji — verified by: pnpm typecheck (0 errors), pnpm test (69/69 pass), pnpm build:web (0 errors)
 
 ## Open
-- ?01 确认各环境中是否存在未加入 dsh.profile.bundles 的自定义插件导致 DSH Desktop 校验通过但未在原生菜单展示
-- ?02 评估是否将快照历史直接同步至云端/本地跨盘归档目录
+- ?01 确认是否需要将默认字体 Inter 与 JetBrains Mono 嵌入前端包本地离线加载
+- ?02 评估是否提供全局暗黑/亮色切换，抑或作为专精极客工具强制锁定 Cinematic Dark
 
 ## Next
-向用户全面汇报 v0.5.5 环境可靠性中心升级成果、安装包产物与验证报告。
+等待用户确认并推进「阶段二：基础功能性 UI 填充（7 大业务页面看板、指标卡片与表格全面翻新，沉浸式玻璃拟态与高密度看板）」！

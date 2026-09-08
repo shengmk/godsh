@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
+import { Loader2, ClipboardList, X } from 'lucide-react'
 import { taskManager, type GlobalTask } from './tasks'
 
 export function TaskCenter() {
@@ -41,7 +42,7 @@ export function TaskCenter() {
         title="全局任务中心：点击查看后台任务与实时日志"
       >
         <span className={`task-indicator ${hasRunning ? 'running' : 'idle'}`}>
-          {hasRunning ? '🌀' : '📋'}
+          {hasRunning ? <Loader2 size={15} className="animate-spin" /> : <ClipboardList size={15} />}
         </span>
         <span className="task-pill-text">
           {hasRunning
@@ -55,7 +56,8 @@ export function TaskCenter() {
         <div className="task-center-drawer card">
           <div className="task-center-head">
             <div className="task-center-title">
-              <span>📋 全局任务中心</span>
+              <ClipboardList size={16} style={{ color: 'var(--brand-primary)' }} />
+              <span>全局任务中心</span>
               {hasRunning && <span className="badge running">{runningTasks.length} 运行中</span>}
             </div>
             <div className="task-center-actions">
@@ -70,8 +72,9 @@ export function TaskCenter() {
                 className="btn sm"
                 onClick={() => setOpen(false)}
                 title="最小化"
+                style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', padding: '4px 8px' }}
               >
-                ✕
+                <X size={14} />
               </button>
             </div>
           </div>
@@ -123,8 +126,9 @@ export function TaskCenter() {
                         className="btn sm"
                         onClick={() => taskManager.dismissTask(t.id)}
                         title="隐藏此任务"
+                        style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', padding: '4px 8px' }}
                       >
-                        ✕
+                        <X size={14} />
                       </button>
                     </div>
 

@@ -1,4 +1,19 @@
 import { lazy, Suspense, useEffect, useRef, useState } from 'react'
+import {
+  Cpu,
+  Layers,
+  Activity,
+  ShoppingBag,
+  Archive,
+  SlidersHorizontal,
+  Binary,
+  Box,
+  Settings,
+  Search,
+  RefreshCw,
+  Sparkles,
+  type LucideIcon,
+} from 'lucide-react'
 import { api } from './api'
 import type { Health, DshStatus, KernelInstance, LocalPlugin, ProfileView } from './types'
 import { useI18n } from './i18n'
@@ -19,16 +34,16 @@ const SettingsPage = lazy(() => import('./pages/SettingsPage'))
 
 type PageKey = 'console' | 'profiles' | 'tasks' | 'market' | 'vault' | 'allocations' | 'kernels' | 'dsh-envs' | 'settings'
 
-const NAV: { key: PageKey; labelKey: string; descKey: string }[] = [
-  { key: 'console', labelKey: 'nav.console', descKey: 'nav.consoleDesc' },
-  { key: 'profiles', labelKey: 'nav.profiles', descKey: 'nav.profilesDesc' },
-  { key: 'tasks', labelKey: 'nav.tasks', descKey: 'nav.tasksDesc' },
-  { key: 'market', labelKey: 'nav.market', descKey: 'nav.marketDesc' },
-  { key: 'vault', labelKey: 'nav.vault', descKey: 'nav.vaultDesc' },
-  { key: 'allocations', labelKey: 'nav.allocations', descKey: 'nav.allocationsDesc' },
-  { key: 'kernels', labelKey: 'nav.kernels', descKey: 'nav.kernelsDesc' },
-  { key: 'dsh-envs', labelKey: 'nav.dshEnvs', descKey: 'nav.dshEnvsDesc' },
-  { key: 'settings', labelKey: 'nav.settings', descKey: 'nav.settingsDesc' },
+const NAV: { key: PageKey; labelKey: string; descKey: string; icon: LucideIcon }[] = [
+  { key: 'console', labelKey: 'nav.console', descKey: 'nav.consoleDesc', icon: Cpu },
+  { key: 'profiles', labelKey: 'nav.profiles', descKey: 'nav.profilesDesc', icon: Layers },
+  { key: 'tasks', labelKey: 'nav.tasks', descKey: 'nav.tasksDesc', icon: Activity },
+  { key: 'market', labelKey: 'nav.market', descKey: 'nav.marketDesc', icon: ShoppingBag },
+  { key: 'vault', labelKey: 'nav.vault', descKey: 'nav.vaultDesc', icon: Archive },
+  { key: 'allocations', labelKey: 'nav.allocations', descKey: 'nav.allocationsDesc', icon: SlidersHorizontal },
+  { key: 'kernels', labelKey: 'nav.kernels', descKey: 'nav.kernelsDesc', icon: Binary },
+  { key: 'dsh-envs', labelKey: 'nav.dshEnvs', descKey: 'nav.dshEnvsDesc', icon: Box },
+  { key: 'settings', labelKey: 'nav.settings', descKey: 'nav.settingsDesc', icon: Settings },
 ]
 
 const VALID_PAGES: PageKey[] = ['console', 'profiles', 'tasks', 'market', 'vault', 'allocations', 'kernels', 'dsh-envs', 'settings']
@@ -191,42 +206,56 @@ export default function App() {
             <div className="splash-fill" style={{ width: `${((bootStep + 1) / BOOT_STEPS.length) * 100}%` }} />
           </div>
           <div className="splash-msg">
-            <span className="splash-spinner">🌀</span> {bootMsg}
+            <span className="splash-spinner">
+              <RefreshCw size={14} className="animate-spin" />
+            </span>{' '}
+            {bootMsg}
           </div>
         </div>
-        <div className="splash-foot">正在检查更新 · 加载插件 · 优化启动 ✨</div>
+        <div className="splash-foot" style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+          <span>正在检查更新 · 加载插件 · 优化启动</span>
+          <Sparkles size={13} style={{ color: '#818cf8' }} />
+        </div>
       </div>
     </div>
   ) : (
     <div className="app">
       <aside className="sidebar">
         <div className="brand">
-          <img className="brand-logo" src="/logo.png" alt="godsh" />
+          <div className="brand-logo-wrap">
+            <img className="brand-logo" src="/logo.png" alt="godsh" />
+          </div>
           <div>
             <div className="brand-name">{t('app.name')}</div>
             <div className="brand-sub">{t('app.subtitle')}</div>
           </div>
         </div>
-        {NAV.map((n, i) => (
-          <button
-            key={n.key}
-            className={`nav-item${page === n.key ? ' active' : ''}`}
-            onClick={() => setPage(n.key)}
-            title={`Ctrl+${i + 1}`}
-          >
-            <span className="dot" />
-            <span className="nav-text">
-              <span className="nav-label">{t(n.labelKey)}</span>
-              <span className="nav-desc">{t(n.descKey)}</span>
-            </span>
-          </button>
-        ))}
+        {NAV.map((n, i) => {
+          const Icon = n.icon
+          return (
+            <button
+              key={n.key}
+              className={`nav-item${page === n.key ? ' active' : ''}`}
+              onClick={() => setPage(n.key)}
+              title={`Ctrl+${i + 1}`}
+            >
+              <span className="nav-icon">
+                <Icon size={16} />
+              </span>
+              <span className="nav-text">
+                <span className="nav-label">{t(n.labelKey)}</span>
+                <span className="nav-desc">{t(n.descKey)}</span>
+              </span>
+            </button>
+          )
+        })}
         <div className="sidebar-foot">{t('nav.shortcut')}</div>
       </aside>
 
       <main className="main">
         <div className="topbar">
           <div className="search-wrap">
+            <Search size={14} className="search-icon" />
             <input
               className="input search-input"
               placeholder={t('topbar.search')}

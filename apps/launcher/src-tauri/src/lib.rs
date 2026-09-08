@@ -4,6 +4,12 @@ use std::process::{Child, Command};
 use std::sync::Mutex;
 use tauri::{Manager, State};
 
+#[cfg(windows)]
+use std::os::windows::process::CommandExt;
+
+#[cfg(windows)]
+const CREATE_NO_WINDOW: u32 = 0x08000000;
+
 struct ServerProc(Mutex<Option<Child>>);
 
 /// 实际选定的后端端口（Tauri command 暴露给前端，保证前后端一致）。
@@ -154,6 +160,8 @@ fn open_dsh_profile(profile: String, url: String) -> Result<String, String> {
   write_dsh_desktop_profile_state(&profile);
   if let Some(exe) = find_dsh_desktop() {
     let mut cmd = Command::new(&exe);
+    #[cfg(windows)]
+    cmd.creation_flags(CREATE_NO_WINDOW);
     cmd.env("DSH_DESKTOP_DEFAULT_PROFILE", &profile);
     if let Ok(home) = std::env::var("DSH_HOME") {
       if !home.is_empty() {
@@ -164,8 +172,10 @@ fn open_dsh_profile(profile: String, url: String) -> Result<String, String> {
     return Ok("desktop".into());
   }
   let parsed: url::Url = url.parse().map_err(|e| format!("无效 URL: {e}"))?;
-  Command::new("cmd")
-    .args(["/c", "start", "", parsed.as_str()])
+  let mut cmd = Command::new("cmd");
+  #[cfg(windows)]
+  cmd.creation_flags(CREATE_NO_WINDOW);
+  cmd.args(["/c", "start", "", parsed.as_str()])
     .spawn()
     .map_err(|e| format!("打开失败: {e}"))?;
   Ok("browser".into())
@@ -197,12 +207,16 @@ fn open_app_window(url: String) -> Result<(), String> {
   let parsed: url::Url = url.parse().map_err(|e| format!("无效 URL: {e}"))?;
   if let Some(exe) = find_browser_exe() {
     let mut cmd = Command::new(&exe);
+    #[cfg(windows)]
+    cmd.creation_flags(CREATE_NO_WINDOW);
     cmd.arg(format!("--app={}", parsed.as_str()));
     cmd.spawn().map_err(|e| format!("启动应用窗口失败: {e}"))?;
     return Ok(());
   }
-  Command::new("cmd")
-    .args(["/c", "start", "", parsed.as_str()])
+  let mut cmd = Command::new("cmd");
+  #[cfg(windows)]
+  cmd.creation_flags(CREATE_NO_WINDOW);
+  cmd.args(["/c", "start", "", parsed.as_str()])
     .spawn()
     .map_err(|e| format!("打开失败: {e}"))?;
   Ok(())
@@ -212,8 +226,10 @@ fn open_app_window(url: String) -> Result<(), String> {
 #[tauri::command]
 fn open_external(url: String) -> Result<(), String> {
   let parsed: url::Url = url.parse().map_err(|e| format!("无效 URL: {e}"))?;
-  Command::new("cmd")
-    .args(["/c", "start", "", parsed.as_str()])
+  let mut cmd = Command::new("cmd");
+  #[cfg(windows)]
+  cmd.creation_flags(CREATE_NO_WINDOW);
+  cmd.args(["/c", "start", "", parsed.as_str()])
     .spawn()
     .map_err(|e| format!("打开失败: {e}"))?;
   Ok(())
@@ -261,14 +277,15 @@ pub fn run() {
         let mut cmd = match &node_exe {
           Some(p) => {
             boot_log(&format!("node 定位(绝对路径): {p:?}"));
-            let mut c = Command::new(p);
-            c
+            Command::new(p)
           }
           None => {
             boot_log("node 未在常见路径找到，回退 PATH 'node'");
             Command::new("node")
           }
         };
+        #[cfg(windows)]
+        cmd.creation_flags(CREATE_NO_WINDOW);
         cmd.arg(&server)
           .arg("serve")
           .arg("--port")
