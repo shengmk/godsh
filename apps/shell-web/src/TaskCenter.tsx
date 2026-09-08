@@ -1,4 +1,4 @@
-﻿import { useEffect, useRef, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { taskManager, type GlobalTask } from './tasks'
 
 export function TaskCenter() {
@@ -87,7 +87,14 @@ export function TaskCenter() {
                 return (
                   <div className="task-item card" key={t.id}>
                     <div className="task-item-head">
-                      <strong className="task-title">{t.title}</strong>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 6, flex: 1, minWidth: 0 }}>
+                        <strong className="task-title" style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{t.title}</strong>
+                        {t.status === 'running' && (
+                          <span className="muted" style={{ fontSize: '11px', fontWeight: 600, flexShrink: 0 }}>
+                            {t.progress}%
+                          </span>
+                        )}
+                      </div>
                       <span
                         className={`badge ${
                           t.status === 'running'

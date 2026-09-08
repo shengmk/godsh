@@ -1,6 +1,6 @@
 {
     "name":  "@godsh/launcher",
-    "version":  "0.5.4",
+    "version":  "0.5.5",
     "private":  true,
     "type":  "module",
     "description":  "godsh 主启动器 CLI（后端逻辑编排）",
@@ -11,6 +11,7 @@
                          "@godsh/allocation":  "workspace:*",
                          "@godsh/core":  "workspace:*",
                          "@godsh/dsh-env":  "workspace:*",
+                         "@godsh/dsh-plugin":  "workspace:*",
                          "@godsh/kernel-manager":  "workspace:*",
                          "@godsh/marketplace":  "workspace:*",
                          "@godsh/plugin-registry":  "workspace:*",

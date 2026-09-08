@@ -788,9 +788,18 @@ export default function AllocationsPage() {
       const updated = (r.updates || []).filter((x) => x.hasUpdate).length
       if (updated > 0) {
         if (window.confirm(`已比对，发现 ${updated} 个沙箱插件有新版本更新！是否立即自动全量拉取升级并同步挂载环境？`)) {
-          const upRes = await api.vaultUpdateAll()
-          show(`自动升级完成：${upRes.updated} 个插件已升级并同步挂载环境！`)
-          await refresh()
+          show(`已将沙箱全量更新任务提交至右下角任务中心...`)
+          await taskManager.startVaultUpdateAllTask((ok) => {
+            if (ok) {
+              show(`沙箱全量自动升级完成并同步挂载环境！`)
+              void refresh()
+              void loadVault()
+            } else {
+              show(`沙箱自动升级完成（部分可能有异常），详情查看任务中心`, true)
+              void refresh()
+              void loadVault()
+            }
+          })
         } else {
           show(`发现 ${updated} 个插件有新版本`)
         }

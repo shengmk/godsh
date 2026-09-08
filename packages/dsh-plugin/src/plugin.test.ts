@@ -93,6 +93,17 @@ test('BackupManager: 创建快照、列出快照与一键回滚', () => {
     // 恢复
     const restored = bm.restoreSnapshot('web', snap.id)
     assert.equal(restored, true)
+
+    // 锁定与解锁测试
+    const locked = bm.toggleLock('web', snap.id)
+    assert.equal(locked, true)
+    const stats = bm.getStorageStats()
+    assert.equal(stats.totalSnapshots, 1)
+
+    // 保留策略测试：锁定的快照不应被删除
+    const cleanRes = bm.cleanExpiredSnapshots('web', 0, 0)
+    assert.equal(cleanRes.deleted, 0)
+    assert.equal(cleanRes.retained, 1)
   } finally {
     rmSync(dir, { recursive: true, force: true })
   }

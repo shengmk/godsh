@@ -1,28 +1,15 @@
 # J-Space Workspace Ledger
 
 ## Goal
-排查关闭启动环境后无法打开(web)的根因，输出检查方案.md并设计完备备份策略
+godsh 升级为“环境可靠性中心” (Environment Reliability & Control Center, v0.5.5) 全量落地与发布
 
 ## Core
-- 环境重启失效根因 — 涉及孤儿进程锁端口、Token认证断链与patch损坏，需对齐godsh与dshdesktop源码
-- 一致性原子落地 — 涉及core/launcher/web/dsh-plugin多包协同，每项改动必须双向同步并有单测防护
-- 仓库事实对齐 — v0.5.2已引入沙箱更新与框选紧凑化，输入文档落后于实际代码需逐项实测判别
-- 2. **全链路“下至沙箱”能力**：
-- 1. **Profile 瘦身与三核固化**：安全物理清理 `manage`、`test-profile`、`plugin_bag` 冗余环境，清洗 `vault.json` 挂载引用，固化 `dshcoding`、`web`、`desktop` 三大健康生产环境。
-- 市场页（MarketPage）：针对已安装（`installed`）插件补齐「📦 下至沙箱」动作（未入库时一键反向纳管收割，已入库高亮沙箱就绪）；
-- 分配页（AllocationsPage）：行内操作与右键菜单增加「📦 下至沙箱」入口；
-- 后端 API：打通 `/api/vault/harvest` 本地零下载瞬时反向入库。
-- 3. **分配工作台高密度紧凑化与框选引擎**：
-- 行高优化（从 46px 紧缩至 32px），内边距减半；
-- 操作收敛：状态微动开关 `⏻` + 悬停轻量图标组 `[↑] [↓] [📦] [🔄] [✕] [🗑️]`，彻底解决长列表橫向拥挤与纵向巨幅滚动的痛点；
-- 默认折叠冗余面板，提供紧凑模式开关，首屏可见插件数量提升 300%；
-- 鼠标拖拽框选（Marquee Box Selection）：视口 AABB 矩形碰撞判定，支持 Ctrl/Shift 叠加与条目 Checkbox 联动；
-- 浮动批量控制条（Batch Action FloatBar）：一键批量启用、批量禁用、批量下至沙箱、批量转移。
-- 4. **Bug 修复：沙箱检查更新自动拉取升级全闭环**：
-- 彻底解决原 `checkUpdates()` 仅在内存标记 `hasUpdate: true` 而未执行真实文件更新的断环；
-- 实现 `updatePlugin(id, targetVersion)`：通过 `npm pack` + `tar.exe` 下载解包至 `vault_store/<pkg>@<ver>`，执行静态 AST 审查，更新多版本元数据；
-- 跨 Profile 原子生效：自动为所有挂载了该插件的环境同步原子更新 NTFS Junction 软链与 `package.json`；
-- 交互增强：VaultHub 提供「⚡ 自动更新全部」与单条「⬆️ 立即更新」按钮；AllocationsPage 检测到新版本后支持一键全量升级。
+- **沙箱自动更新与物理连通性感知**：在 `vault.updatePlugin` 中加入 pre-flight 验证与悬空 profile 清理，返回颗粒化同步结果，杜绝静默挂死与无效重试。
+- **软件备份与时光机回退 (Backup & Rollback System)**：实现快照生命周期管理、防误删锁定、智能过期淘汰策略（Retention Policy）与安全前置备份（Safety Snapshot）。
+- **操作审计日记 (godsh-journal)**：实现原子级 JSONL 结构化日记与可读审计流，全量记录快照、回滚、自愈与更新事件。
+- **7-Phase 自愈工作流引擎 (Repair Agent)**：`Inspection` -> `Quarantine` -> `Checkpoint` -> `Restore` -> `DependencyHeal` -> `Verify` -> `BootAndReport` 闭环自愈。
+- **系统任务监控中心与实时终端 (`/tasks`)**：统一多模块后台异步任务，集成 Glassmorphism 实时日志终端与审计历史。
+- **DSH 官方桌面版 (DSH Desktop) 深度兼容**：双轨启动（Web vs 桌面版）、状态无缝穿透同步（`%APPDATA%\DSH Desktop\profile-selection\state.json`）、Profile Bundles 规范净化与顺序矫正。
 
 ## Verified
 - Cargo.toml version = "0.5.1" ✅
@@ -44,14 +31,22 @@
 - ✓05 排查关闭重启环境后无法打开(web)的根因并输出检查方案与备份工具 — verified by: 完成web环境关闭重启打不开检查方案.md(43KB)、dsh-backup.ps1与dsh-web-doctor.ps1落地，五大根因源码级复核
 - ✓06 修复全局dsh依赖被清空问题(commander缺失)与软链穿透缺陷 — verified by: dsh --version verified 0.1.2-rc.1, 5/5 dsh-heal.test.ts passing, and dsh-web-doctor.ps1 all layers green
 - ✓07 排查并解决dsh-mnemon占位符死软链阻断CordisLoader问题，实现web环境完全就绪 — verified by: automated tests and dsh CLI execution test over all profiles
+- ✓08 修复 vault.ts 中 tar 绝对解压路径与目录探测（根治 BUG-01） — verified by: vault.test.ts 7/7 tests passing including updatePlugin and checkUpdates
+- ✓09 优化 checkUpdates() 为异步并发非阻塞网络探测（根治 BUG-02） — verified by: native fetch pool 8-way concurrent test completed in 354ms
+- ✓10 后端路由增加异步任务派发与实时进度端点 /api/vault/task-progress（根治 BUG-03） — verified by: apps/launcher/src/routes/vault.test.ts 202 status and progress log polling
+- ✓11 前端 tasks.ts 扩展 TaskType 并实现沙箱任务调度器与工作栏通知闭环（根治 BUG-04） — verified by: taskManager startVaultUpdateAllTask & startVaultUpdatePluginTask implementation with desktop notification
+- ✓12 重构 VaultHubPage 与 AllocationsPage 自动更新全面接入 taskManager（根治 BUG-05） — verified by: Vite production build succeeded with 0 errors
+- ✓13 全套单元测试、TypeScript 类型检查与功能全量验证 — verified by: 63/63 tests passing across 12 suites, tsc --noEmit 0 errors, vite build 0 errors
+- ✓14 修复沙箱更新同步失效与失效 Profile 死循环重试（Pre-flight 环境感知清理与结果分级） — verified by: packages/plugin-registry/src/vault.test.ts passing 9/9
+- ✓15 时光机备份与原子回滚系统落地（SnapshotMeta、锁定保护、保留策略、结构化操作日记） — verified by: backup-repair.test.ts passing & defaultJournal JSONL audit trail
+- ✓16 7 阶段自愈工作流引擎 (7-Phase Repair Agent) 落地 — verified by: packages/core/src/repair-agent.test.ts passing all phases
+- ✓17 系统任务监控中心与实时终端 (/tasks & SystemTasksPage) 落地 — verified by: SystemTasksPage terminal streaming & Vite build passing with 0 errors
+- ✓18 DSH 官方桌面版 (DSH Desktop) 深度兼容（双轨启动、%APPDATA% 状态同步、Bundle 顺序净化） — verified by: apps/launcher/src-tauri/src/lib.rs & dsh.ts API integration
+- ✓19 v0.5.5 全量测试 69/69 通过，前端生产打包 0 错误 0 警告，Tauri 桌面端 release 编译成功并生成 NSIS 安装器与绿色便携包 — verified by: pnpm test (69 pass), pnpm build:web, make-release.ps1 (godsh-0.5.5-x64-setup.exe & zip)
 
 ## Open
-- [x] 物理清理冗余 Profile 并同步元数据
-- [x] 后端实现沙箱插件下载更新与挂载环境原子升级（updatePlugin / updateAll）
-- [x] 市场页与分配页打通已安装插件「下至沙箱」
-- [x] 分配页高密度紧凑化重构与框选多选控制条
-- [x] 全量单测、构建打包与系统发布
-- [x] 继承检查点严格复核与隐患清零
+- ?01 确认各环境中是否存在未加入 dsh.profile.bundles 的自定义插件导致 DSH Desktop 校验通过但未在原生菜单展示
+- ?02 评估是否将快照历史直接同步至云端/本地跨盘归档目录
 
 ## Next
-深度分析10_dsh-desktop-master与godsh的进程启停及Web加载机制
+向用户全面汇报 v0.5.5 环境可靠性中心升级成果、安装包产物与验证报告。

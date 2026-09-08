@@ -2,7 +2,7 @@
 # 流程：打包后端 → 构建前端(tauri) → tauri build（嵌入前端）→ 打 ZIP + 复制安装器 → SHA256
 # 用法: pwsh -File scripts/make-release.ps1 [-Version 0.5.1]
 param(
-  [string]$Version = "0.5.2",
+  [string]$Version = "0.5.5",
   [switch]$SkipBuild
 )
 
@@ -38,9 +38,9 @@ if (-not $SkipBuild) {
   # 1) 前置构建：后端单文件 + 前端（tauri 模式）
   Write-Host "==> 1/5 打包后端 + 构建前端..." -ForegroundColor Cyan
   Set-Location $root
-  pnpm build:server
+  node node_modules/esbuild/bin/esbuild apps/launcher/src/cli.ts --bundle --platform=node --format=esm --outfile=apps/launcher/dist/server.mjs
   if ($LASTEXITCODE -ne 0) { Write-Host "后端打包失败" -ForegroundColor Red; exit 1 }
-  pnpm --filter @godsh/shell-web build:tauri
+  node apps/shell-web/node_modules/vite/bin/vite.js build apps/shell-web --mode tauri
   if ($LASTEXITCODE -ne 0) { Write-Host "前端构建失败" -ForegroundColor Red; exit 1 }
 
   # 2) 填充 resources（server.mjs + templates）

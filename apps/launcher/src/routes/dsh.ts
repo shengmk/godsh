@@ -1,8 +1,8 @@
 import { spawn } from 'node:child_process'
-import { existsSync, rmSync } from 'node:fs'
+import { existsSync, rmSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { dirname, join } from 'node:path'
-import { DATA_DIR, readLogTail, stopWeb, safePurgeProfileJunctions } from '@godsh/core'
+import { DATA_DIR, readLogTail, stopWeb, safePurgeProfileJunctions, defaultJournal } from '@godsh/core'
 import { DshEnvManager } from '@godsh/dsh-env'
 import { removeProfile, scanProfiles } from '@godsh/profile-manager'
 import type { ApiHandler } from './types.js'
@@ -225,5 +225,106 @@ export const dshHandler: ApiHandler = async (ctx, _req, res, method, seg, body, 
     return true
   }
 
+  // GET /api/dsh/desktop-status —— 查询 DSH Desktop 安装状态与路径
+  if (seg.length === 2 && seg[0] === 'dsh' && seg[1] === 'desktop-status' && method === 'GET') {
+    const exe = findDshDesktopExe()
+    ctx.sendJson(res, 200, { installed: Boolean(exe), path: exe })
+    return true
+  }
+
+  // POST /api/dsh/open-desktop { profile } —— 同步状态并启动 DSH Desktop 官方客户端
+  if (seg.length === 2 && seg[0] === 'dsh' && seg[1] === 'open-desktop' && method === 'POST') {
+    const profile = typeof body.profile === 'string' ? body.profile.trim() : ''
+    if (!profile) {
+      ctx.sendJson(res, 400, { error: '缺少 profile 参数' })
+      return true
+    }
+    const exe = findDshDesktopExe()
+    if (!exe) {
+      ctx.sendJson(res, 404, { error: '未检测到已安装的 DSH Desktop 客户端' })
+      return true
+    }
+
+    // 1. 契约门禁：规范化 bundles 顺序并移除 launcher-owned
+    sanitizeProfileForDshDesktop(ctx.profilesDir, profile)
+
+    // 2. 写入官方选定状态 state.json
+    writeDshDesktopState(profile)
+
+    // 3. 注入 DSH_HOME 唤醒 DSH Desktop.exe
+    const envVars: NodeJS.ProcessEnv = { ...process.env, DSH_DESKTOP_DEFAULT_PROFILE: profile }
+    if (ctx.env.dshHome) {
+      envVars.DSH_HOME = ctx.env.dshHome
+    }
+    const child = spawn(exe, [], {
+      detached: true,
+      stdio: 'ignore',
+      env: envVars,
+    })
+    child.unref()
+
+    defaultJournal.log({
+      level: 'info',
+      category: 'desktop-launch',
+      profile,
+      action: '唤醒 DSH Desktop 客户端',
+      status: 'success',
+      details: `已写入选定状态并启动 ${exe}`,
+      operator: 'user',
+    })
+
+    ctx.sendJson(res, 200, { ok: true, profile, exe })
+    return true
+  }
+
   return false
+}
+
+function findDshDesktopExe(): string | null {
+  const local = process.env.LOCALAPPDATA || ''
+  const standard = join(local, 'Programs', 'DSH Desktop', 'DSH Desktop.exe')
+  if (existsSync(standard)) return standard
+
+  const appdata = process.env.APPDATA || ''
+  const shim = join(appdata, 'DSH Desktop', 'host-commands', 'desktop', 'bin', 'dsh.cmd')
+  if (existsSync(shim)) {
+    try {
+      const text = readFileSync(shim, 'utf8')
+      const start = text.indexOf('DSH Desktop.exe')
+      if (start > 0) {
+        const before = text.slice(0, start)
+        const quote = before.lastIndexOf('"')
+        if (quote >= 0) {
+          const exe = before.slice(quote + 1) + 'DSH Desktop.exe'
+          const cleaned = exe.replace(/\\\\/g, '\\')
+          if (existsSync(cleaned)) return cleaned
+        }
+      }
+    } catch {}
+  }
+  return null
+}
+
+function writeDshDesktopState(profile: string): void {
+  const appdata = process.env.APPDATA || ''
+  if (!appdata) return
+  const dir = join(appdata, 'DSH Desktop', 'profile-selection')
+  mkdirSync(dir, { recursive: true })
+  writeFileSync(join(dir, 'state.json'), JSON.stringify({ version: 2, active: profile }, null, 2) + '\n', 'utf8')
+}
+
+function sanitizeProfileForDshDesktop(profilesDir: string, profile: string): void {
+  const pkgPath = join(profilesDir, profile, 'package.json')
+  if (!existsSync(pkgPath)) return
+  try {
+    const pkg = JSON.parse(readFileSync(pkgPath, 'utf8'))
+    if (!pkg.dsh) pkg.dsh = {}
+    if (!pkg.dsh.profile) pkg.dsh.profile = {}
+    let bundles: string[] = Array.isArray(pkg.dsh.profile.bundles) ? [...pkg.dsh.profile.bundles] : []
+    bundles = bundles.filter((b) => b !== 'dsh-plugin-desktop' && b !== 'dsh-plugin-desktop-beta')
+    bundles = bundles.filter((b) => b !== '@deepseek-ai/dsh-base' && b !== '@deepseek-ai/dsh-web-app')
+    bundles.unshift('@deepseek-ai/dsh-base', '@deepseek-ai/dsh-web-app')
+    pkg.dsh.profile.bundles = bundles
+    writeFileSync(pkgPath, JSON.stringify(pkg, null, 2) + '\n', 'utf8')
+  } catch {}
 }

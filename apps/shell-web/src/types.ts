@@ -319,3 +319,44 @@ export interface WorkflowTemplate {
   recommendedProfile: string
 }
 
+export interface SnapshotItem {
+  id: string
+  profile: string
+  timestamp: number
+  tag?: string
+  trigger?: 'manual' | 'auto-pre-update' | 'auto-pre-install' | 'repair-workflow'
+  description?: string
+  godshVersion?: string
+  isLocked?: boolean
+  bundles: string[]
+  dependencies: Record<string, string>
+  patchContent: string
+}
+
+export interface JournalEntryItem {
+  timestamp: number
+  isoTime: string
+  level: 'info' | 'warn' | 'error'
+  category: 'snapshot' | 'rollback' | 'vault' | 'repair' | 'desktop-launch' | 'system'
+  profile?: string
+  action: string
+  status: 'success' | 'failed' | 'pending'
+  details?: string
+  operator?: 'user' | 'agent' | 'system'
+}
+
+export interface SystemTaskItem {
+  key: string
+  type: string
+  status: 'running' | 'done' | 'error'
+  message: string | null
+  logFile?: string
+  log?: string
+}
+
+export interface DshDesktopStatus {
+  installed: boolean
+  path: string | null
+}
+
+

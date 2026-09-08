@@ -25,6 +25,10 @@ import type {
   DiskSavingsReport,
   DeploymentSnapshot,
   PluginAuditReport,
+  SnapshotItem,
+  JournalEntryItem,
+  SystemTaskItem,
+  DshDesktopStatus,
 } from './types'
 
 import { isTauri, tauriInvoke } from './tauri'
@@ -492,7 +496,7 @@ export const api = {
       body: JSON.stringify({ id, version }),
     }),
 
-  /** 仓库沙箱：一键自动更新全部有新版本的沙箱插件 */
+  /** 仓库沙箱：一键自动更新全部有新版本的沙箱插件（同步） */
   vaultUpdateAll: () =>
     req<{
       ok: boolean
@@ -502,6 +506,127 @@ export const api = {
       results: { id: string; name: string; ok: boolean; fromVersion?: string; toVersion?: string; error?: string }[]
     }>('/vault/update-all', {
       method: 'POST',
+    }),
+
+  /** 仓库沙箱：异步单插件下载升级（移交全局任务中心） */
+  vaultUpdatePluginAsync: (id: string, version?: string) =>
+    req<{ ok: boolean; task?: string; message?: string }>('/vault/update', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ id, version, async: true }),
+    }),
+
+  /** 仓库沙箱：异步一键自动更新全部有新版本的插件（移交全局任务中心） */
+  vaultUpdateAllAsync: () =>
+    req<{ ok: boolean; task?: string; message?: string }>('/vault/update-all', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ async: true }),
+    }),
+
+  /** 仓库沙箱：轮询沙箱后台更新任务进度与流式日志 */
+  vaultTaskProgress: (task: string) =>
+    req<{ status: 'running' | 'done' | 'error'; log: string; message?: string }>(
+      `/vault/task-progress?task=${encodeURIComponent(task)}`
+    ),
+
+  /** 环境快照时光机：查询环境快照与统计 */
+  backupSnapshots: (profile: string) =>
+    req<{ snapshots: SnapshotItem[]; stats: any }>(`/backup/snapshots?profile=${encodeURIComponent(profile)}`),
+
+  /** 环境快照时光机：创建快照 */
+  backupCreate: (profile: string, description?: string, isLocked?: boolean) =>
+    req<{ ok: boolean; snapshot: SnapshotItem }>('/backup/create', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ profile, description, isLocked }),
+    }),
+
+  /** 环境快照时光机：回滚快照 */
+  backupRestore: (profile: string, snapshotId: string) =>
+    req<{ ok: boolean; profile: string; snapshotId: string }>('/backup/restore', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ profile, snapshotId }),
+    }),
+
+  /** 环境快照时光机：锁定/解锁快照 */
+  backupToggleLock: (profile: string, snapshotId: string, isLocked?: boolean) =>
+    req<{ ok: boolean; snapshotId: string; isLocked: boolean }>('/backup/toggle-lock', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ profile, snapshotId, isLocked }),
+    }),
+
+  /** 环境快照时光机：删除快照 */
+  backupDelete: (profile: string, snapshotId: string) =>
+    req<{ ok: boolean }>('/backup/snapshot', {
+      method: 'DELETE',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ profile, snapshotId }),
+    }),
+
+  /** 环境快照时光机：按策略清理过期快照 */
+  backupClean: (profile: string, maxSnapshots?: number, retentionDays?: number) =>
+    req<{ ok: boolean; deleted: number; retained: number }>('/backup/clean', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ profile, maxSnapshots, retentionDays }),
+    }),
+
+  /** 操作审计日记：查询历史 */
+  journalEntries: (profile?: string, category?: string, limit = 100) => {
+    const params = new URLSearchParams()
+    if (profile) params.set('profile', profile)
+    if (category) params.set('category', category)
+    params.set('limit', String(limit))
+    return req<{ entries: JournalEntryItem[] }>(`/journal?${params.toString()}`)
+  },
+
+  /** 操作审计日记：清理 */
+  journalClear: () =>
+    req<{ ok: boolean }>('/journal/clear', {
+      method: 'POST',
+    }),
+
+  /** 7 阶段自愈工作流：启动 */
+  repairWorkflow: (profile: string, targetSnapshotId?: string) =>
+    req<{ ok: boolean; task: string; profile: string; message: string }>('/repair/workflow', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ profile, targetSnapshotId }),
+    }),
+
+  /** 7 阶段自愈工作流：轮询任务进度 */
+  repairTaskProgress: (task: string) =>
+    req<{ status: 'running' | 'done' | 'error'; log: string; message?: string }>(
+      `/repair/task-progress?task=${encodeURIComponent(task)}`
+    ),
+
+  /** 全局系统任务中心：获取全部任务 */
+  systemTasks: () => req<{ tasks: SystemTaskItem[]; count: number }>('/tasks'),
+
+  /** 全局系统任务中心：获取单个任务详情与实时日志 */
+  systemTaskDetail: (key: string) =>
+    req<{ key: string; status: 'running' | 'done' | 'error'; log: string; message?: string }>(
+      `/tasks/${encodeURIComponent(key)}`
+    ),
+
+  /** 全局系统任务中心：清空已结束的历史任务 */
+  systemTasksClear: () =>
+    req<{ ok: boolean; cleared: number }>('/tasks/clear', {
+      method: 'POST',
+    }),
+
+  /** DSH Desktop 状态检测 */
+  dshDesktopStatus: () => req<DshDesktopStatus>('/dsh/desktop-status'),
+
+  /** DSH Desktop 启动环境 */
+  openDshDesktop: (profile: string) =>
+    req<{ ok: boolean; profile: string; exe: string }>('/dsh/open-desktop', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ profile }),
     }),
 }
 

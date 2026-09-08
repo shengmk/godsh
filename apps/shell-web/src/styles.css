@@ -1595,3 +1595,208 @@ body {
   margin-bottom: 14px;
   animation: splash-pop 0.2s ease;
 }
+
+/* ========================================================
+   系统任务中心与实时终端 (SystemTasksPage)
+   ======================================================== */
+.tasks-dashboard-layout {
+  display: grid;
+  grid-template-columns: 360px 1fr;
+  gap: 16px;
+  min-height: calc(100vh - 170px);
+}
+
+@media (max-width: 900px) {
+  .tasks-dashboard-layout {
+    grid-template-columns: 1fr;
+  }
+}
+
+.tasks-sidebar {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  max-height: calc(100vh - 170px);
+  padding: 12px;
+}
+
+.tasks-filter-bar {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+  padding-bottom: 12px;
+  border-bottom: 1px solid var(--surface-border);
+  margin-bottom: 12px;
+}
+
+.filter-tag {
+  background: var(--surface-soft);
+  border: 1px solid var(--surface-border);
+  color: var(--text-dim);
+  font-size: 11px;
+  padding: 4px 8px;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.filter-tag:hover {
+  background: var(--surface-hover);
+  color: var(--text);
+}
+
+.filter-tag.active {
+  background: var(--brand-1);
+  color: #fff;
+  border-color: var(--brand-1);
+}
+
+.tasks-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  overflow-y: auto;
+  flex: 1;
+}
+
+.task-card {
+  padding: 10px 12px;
+  border-radius: var(--radius-sm);
+  background: var(--surface-soft);
+  border: 1px solid var(--surface-border);
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.task-card:hover {
+  background: var(--surface-hover);
+  border-color: rgba(255, 255, 255, 0.14);
+}
+
+.task-card.selected {
+  border-color: var(--brand-1);
+  background: rgba(99, 102, 241, 0.08);
+}
+
+.task-card-title {
+  font-size: 12px;
+  font-weight: 500;
+  margin: 6px 0 2px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-family: 'JetBrains Mono', Consolas, monospace;
+}
+
+.task-card-msg {
+  font-size: 11px;
+  color: var(--err);
+}
+
+.terminal-panel {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  max-height: calc(100vh - 170px);
+  background: #050508 !important;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: var(--radius);
+  overflow: hidden;
+}
+
+.terminal-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 16px;
+  background: rgba(255, 255, 255, 0.03);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.terminal-info {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.terminal-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  display: inline-block;
+}
+
+.terminal-dot.red { background: #ff5f56; }
+.terminal-dot.yellow { background: #ffbd2e; }
+.terminal-dot.green { background: #27c93f; }
+
+.terminal-title {
+  font-size: 12px;
+  color: var(--text-dim);
+  font-family: 'JetBrains Mono', Consolas, monospace;
+  margin-left: 8px;
+}
+
+.terminal-controls {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.terminal-body {
+  flex: 1;
+  margin: 0;
+  padding: 16px;
+  overflow-y: auto;
+  font-family: 'JetBrains Mono', Consolas, monospace;
+  font-size: 12px;
+  line-height: 1.6;
+  color: #d1d5db;
+  white-space: pre-wrap;
+  word-break: break-all;
+  background: transparent;
+}
+
+/* 状态药丸与徽章 */
+.task-badge {
+  font-size: 10px;
+  padding: 2px 6px;
+  border-radius: 4px;
+  font-weight: 600;
+}
+
+.badge-repair { background: rgba(59, 130, 246, 0.15); color: #60a5fa; border: 1px solid rgba(59, 130, 246, 0.3); }
+.badge-vault { background: rgba(168, 85, 247, 0.15); color: #c084fc; border: 1px solid rgba(168, 85, 247, 0.3); }
+.badge-plugin { background: rgba(16, 185, 129, 0.15); color: #34d399; border: 1px solid rgba(16, 185, 129, 0.3); }
+.badge-install { background: rgba(245, 158, 11, 0.15); color: #fbbf24; border: 1px solid rgba(245, 158, 11, 0.3); }
+.badge-workflow { background: rgba(236, 72, 153, 0.15); color: #f472b6; border: 1px solid rgba(236, 72, 153, 0.3); }
+.badge-default { background: rgba(255, 255, 255, 0.08); color: #9ca3af; }
+
+.status-pill {
+  font-size: 11px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-weight: 500;
+}
+
+.status-running { background: rgba(59, 130, 246, 0.15); color: #60a5fa; border: 1px solid rgba(59, 130, 246, 0.3); }
+.status-done, .status-success { background: rgba(16, 185, 129, 0.15); color: #34d399; border: 1px solid rgba(16, 185, 129, 0.3); }
+.status-error, .status-failed { background: rgba(239, 68, 68, 0.15); color: #f87171; border: 1px solid rgba(239, 68, 68, 0.3); }
+.status-warn { background: rgba(245, 158, 11, 0.15); color: #fbbf24; border: 1px solid rgba(245, 158, 11, 0.3); }
+.status-info { background: rgba(99, 102, 241, 0.15); color: #818cf8; border: 1px solid rgba(99, 102, 241, 0.3); }
+
+/* 快照模态框 */
+.snapshot-modal {
+  animation: splash-pop 0.2s ease;
+}
+
+.snapshot-stats-bar {
+  display: flex;
+  gap: 16px;
+  font-size: 12px;
+  padding: 8px 12px;
+  background: rgba(255, 255, 255, 0.03);
+  border-radius: 6px;
+  margin-bottom: 12px;
+  border: 1px solid var(--surface-border);
+}

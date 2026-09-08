@@ -68,9 +68,18 @@ export async function openDshDesktop(profile: string): Promise<boolean> {
       await tauriInvoke('open_dsh_profile', { profile, url: '' })
       return true
     } catch (e) {
-      console.warn('open_dsh_profile 失败', e)
-      return false
+      console.warn('open_dsh_profile 失败，尝试通过后端 API 唤醒', e)
     }
   }
-  return false
+  try {
+    const res = await fetch('/api/dsh/open-desktop', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ profile }),
+    })
+    return res.ok
+  } catch (e) {
+    console.warn('open-desktop API 调用失败', e)
+    return false
+  }
 }

@@ -7,3 +7,6 @@ export * from './events.js'
 export * from './process-manager.js'
 export * from './dsh-heal.js'
 export * from './port-engine.js'
+export * from './journal.js'
+export * from './repair-agent.js'
+

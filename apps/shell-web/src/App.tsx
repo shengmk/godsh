@@ -9,6 +9,7 @@ import { TaskCenter } from './TaskCenter'
 // 按页代码分割：首屏只加载当前页面，其它页面按需加载
 const ControllerConsolePage = lazy(() => import('./pages/ControllerConsolePage'))
 const ProfilesPage = lazy(() => import('./pages/ProfilesPage'))
+const SystemTasksPage = lazy(() => import('./pages/SystemTasksPage'))
 const MarketPage = lazy(() => import('./pages/MarketPage'))
 const VaultHubPage = lazy(() => import('./pages/VaultHubPage'))
 const AllocationsPage = lazy(() => import('./pages/AllocationsPage'))
@@ -16,11 +17,12 @@ const KernelsPage = lazy(() => import('./pages/KernelsPage'))
 const DshEnvsPage = lazy(() => import('./pages/DshEnvsPage'))
 const SettingsPage = lazy(() => import('./pages/SettingsPage'))
 
-type PageKey = 'console' | 'profiles' | 'market' | 'vault' | 'allocations' | 'kernels' | 'dsh-envs' | 'settings'
+type PageKey = 'console' | 'profiles' | 'tasks' | 'market' | 'vault' | 'allocations' | 'kernels' | 'dsh-envs' | 'settings'
 
 const NAV: { key: PageKey; labelKey: string; descKey: string }[] = [
   { key: 'console', labelKey: 'nav.console', descKey: 'nav.consoleDesc' },
   { key: 'profiles', labelKey: 'nav.profiles', descKey: 'nav.profilesDesc' },
+  { key: 'tasks', labelKey: 'nav.tasks', descKey: 'nav.tasksDesc' },
   { key: 'market', labelKey: 'nav.market', descKey: 'nav.marketDesc' },
   { key: 'vault', labelKey: 'nav.vault', descKey: 'nav.vaultDesc' },
   { key: 'allocations', labelKey: 'nav.allocations', descKey: 'nav.allocationsDesc' },
@@ -29,7 +31,7 @@ const NAV: { key: PageKey; labelKey: string; descKey: string }[] = [
   { key: 'settings', labelKey: 'nav.settings', descKey: 'nav.settingsDesc' },
 ]
 
-const VALID_PAGES: PageKey[] = ['console', 'profiles', 'market', 'vault', 'allocations', 'kernels', 'dsh-envs', 'settings']
+const VALID_PAGES: PageKey[] = ['console', 'profiles', 'tasks', 'market', 'vault', 'allocations', 'kernels', 'dsh-envs', 'settings']
 
 function getPageFromHash(): PageKey {
   if (typeof window === 'undefined') return 'console'
@@ -310,6 +312,7 @@ export default function App() {
             {{
               console: <ControllerConsolePage onNavigate={setPage} />,
               profiles: <ProfilesPage />,
+              tasks: <SystemTasksPage />,
               market: <MarketPage />,
               vault: <VaultHubPage />,
               allocations: <AllocationsPage />,

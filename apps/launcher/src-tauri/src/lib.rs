@@ -134,10 +134,24 @@ fn find_dsh_desktop() -> Option<PathBuf> {
   None
 }
 
+/// 写入 DSH Desktop profile 选中状态（DSH Desktop GUI 强依赖此配置）：
+/// %APPDATA%\DSH Desktop\profile-selection\state.json
+fn write_dsh_desktop_profile_state(profile: &str) {
+  let appdata = std::env::var("APPDATA").unwrap_or_default();
+  if !appdata.is_empty() {
+    let dir = PathBuf::from(appdata).join("DSH Desktop").join("profile-selection");
+    let _ = std::fs::create_dir_all(&dir);
+    let state_file = dir.join("state.json");
+    let content = format!("{{\"version\": 2, \"active\": \"{}\"}}", profile);
+    let _ = std::fs::write(state_file, content);
+  }
+}
+
 /// 「打开环境」：优先用独立的 DSH Desktop 桌面软件打开指定 profile；
 /// 未安装 DSH Desktop 时回退系统浏览器打开 web URL。
 #[tauri::command]
 fn open_dsh_profile(profile: String, url: String) -> Result<String, String> {
+  write_dsh_desktop_profile_state(&profile);
   if let Some(exe) = find_dsh_desktop() {
     let mut cmd = Command::new(&exe);
     cmd.env("DSH_DESKTOP_DEFAULT_PROFILE", &profile);

@@ -1,13 +1,13 @@
 {
     "$schema":  "../node_modules/@tauri-apps/cli/config.schema.json",
     "productName":  "godsh",
-    "version":  "0.5.4",
+    "version":  "0.5.5",
     "identifier":  "com.godsh.app",
     "build":  {
                   "frontendDist":  "../../shell-web/dist",
                   "devUrl":  "http://localhost:5173",
                   "beforeDevCommand":  "pnpm --filter @godsh/shell-web dev",
-                  "beforeBuildCommand":  "pnpm --filter @godsh/shell-web build:tauri"
+                  "beforeBuildCommand":  "node ../shell-web/node_modules/vite/bin/vite.js build ../shell-web --mode tauri"
               },
     "app":  {
                 "windows":  [

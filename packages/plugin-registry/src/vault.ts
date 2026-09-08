@@ -46,6 +46,22 @@ export interface DeploymentSnapshot {
   action: 'deploy' | 'switch' | 'rollback' | 'unmount'
 }
 
+export interface ProfileSyncResult {
+  profile: string
+  status: 'synced' | 'failed' | 'pruned'
+  error?: string
+}
+
+export interface PluginUpdateResult {
+  ok: boolean
+  plugin?: VaultPlugin
+  fromVersion?: string
+  toVersion?: string
+  message?: string
+  failedSyncProfiles?: { profile: string; error: string }[]
+  profileResults?: ProfileSyncResult[]
+}
+
 export interface DiskSavingsReport {
   totalVaultBytes: number
   savedBytes: number
@@ -857,29 +873,64 @@ export class VaultManager {
   }
 
   /**
-   * 静默检查沙箱插件是否有新版本
+   * 异步并发静默检查沙箱插件是否有新版本（零阻塞主事件循环）
    */
   async checkUpdates(): Promise<{ id: string; hasUpdate: boolean; latestVersion?: string }[]> {
     const data = this.readData()
-    const results: { id: string; hasUpdate: boolean; latestVersion?: string }[] = []
+    const toCheck = data.plugins.filter((p) => p.source !== 'local')
+    const resultsMap = new Map<string, { hasUpdate: boolean; latestVersion?: string }>()
 
-    for (const p of data.plugins) {
-      if (p.source === 'local') continue
-      try {
-        const r = runSync('npm', ['view', p.name, 'version', '--registry=https://registry.npmmirror.com', '--fetch-timeout=3000'])
-        if (r.ok) {
-          const latest = r.stdout.split(/\r?\n/)[0]?.trim()
-          if (latest && latest !== p.version) {
-            p.hasUpdate = true
-            p.latestVersion = latest
-            results.push({ id: p.id, hasUpdate: true, latestVersion: latest })
-            continue
+    // 采用受控并发池（8路并发，快速获取最新版本）
+    const concurrency = 8
+    let cursor = 0
+
+    const worker = async () => {
+      while (cursor < toCheck.length) {
+        const p = toCheck[cursor++]
+        if (!p) break
+        let latest: string | undefined
+        try {
+          const controller = new AbortController()
+          const timer = setTimeout(() => controller.abort(), 3500)
+          const res = await fetch(`https://registry.npmmirror.com/${encodeURIComponent(p.name)}/latest`, {
+            headers: { Accept: 'application/json' },
+            signal: controller.signal,
+          }).finally(() => clearTimeout(timer))
+
+          if (res.ok) {
+            const info = (await res.json()) as { version?: string }
+            latest = info.version?.trim()
           }
+        } catch {}
+
+        // 若网络 fetch 失败则单次降级至 runSync
+        if (!latest) {
+          try {
+            const r = runSync('npm', ['view', p.name, 'version', '--registry=https://registry.npmmirror.com', '--fetch-timeout=2500'])
+            if (r.ok && r.stdout) {
+              latest = r.stdout.split(/\r?\n/)[0]?.trim()
+            }
+          } catch {}
         }
-      } catch {}
-      p.hasUpdate = false
-      results.push({ id: p.id, hasUpdate: false })
+
+        if (latest && latest !== p.version) {
+          p.hasUpdate = true
+          p.latestVersion = latest
+          resultsMap.set(p.id, { hasUpdate: true, latestVersion: latest })
+        } else {
+          p.hasUpdate = false
+          resultsMap.set(p.id, { hasUpdate: false })
+        }
+      }
     }
+
+    const workers = Array.from({ length: Math.min(concurrency, toCheck.length || 1) }, () => worker())
+    await Promise.all(workers)
+
+    const results: { id: string; hasUpdate: boolean; latestVersion?: string }[] = data.plugins.map((p) => {
+      const res = resultsMap.get(p.id) || { hasUpdate: false }
+      return { id: p.id, ...res }
+    })
 
     this.saveData(data)
     return results
@@ -999,20 +1050,63 @@ export class VaultManager {
   }
 
   /**
+   * 验真并原子同步插件挂载到已声明的运行环境，自动清理已不存在的环境引用
+   */
+  async syncToProfiles(
+    plugin: VaultPlugin,
+    ver: string,
+    profilesDir?: string,
+    onLog?: (msg: string) => void
+  ): Promise<{ profileResults: ProfileSyncResult[]; failedSyncProfiles: { profile: string; error: string }[] }> {
+    const profileResults: ProfileSyncResult[] = []
+    const failedSyncProfiles: { profile: string; error: string }[] = []
+    if (profilesDir && plugin.installedProfiles && plugin.installedProfiles.length > 0) {
+      onLog?.(`[4/4] 正在同步原子挂载各运行环境 (${plugin.installedProfiles.join(', ')}) ...\n`)
+      const validProfiles: string[] = []
+      for (const prof of plugin.installedProfiles) {
+        const profDir = join(profilesDir, prof)
+        const pkgPath = join(profDir, 'package.json')
+        if (!existsSync(profDir) || !existsSync(pkgPath)) {
+          // 该 Profile 已被物理删除，清理悬空废弃引用并记录
+          profileResults.push({ profile: prof, status: 'pruned', error: 'Profile 物理目录或 package.json 不存在，已自动移除悬空挂载' })
+          onLog?.(`  ⚠ 环境 ${prof} 目录不存在，已自动清理失效悬空引用\n`)
+          continue
+        }
+        validProfiles.push(prof)
+        try {
+          await this.deployToProfile(plugin.id, prof, profilesDir, ver)
+          profileResults.push({ profile: prof, status: 'synced' })
+          onLog?.(`  ✓ 成功刷新环境 ${prof} 的软链挂载与配置\n`)
+        } catch (err) {
+          const errStr = err instanceof Error ? err.message : String(err)
+          failedSyncProfiles.push({ profile: prof, error: errStr })
+          profileResults.push({ profile: prof, status: 'failed', error: errStr })
+          onLog?.(`  ✗ 刷新环境 ${prof} 软链挂载失败: ${errStr}\n`)
+          console.error(`自动同步至环境 ${prof} 失败:`, err)
+        }
+      }
+      if (validProfiles.length !== plugin.installedProfiles.length) {
+        plugin.installedProfiles = validProfiles
+        const data = this.readData()
+        const target = data.plugins.find((p) => p.id === plugin.id)
+        if (target) {
+          target.installedProfiles = validProfiles
+          this.saveData(data)
+        }
+      }
+    }
+    return { profileResults, failedSyncProfiles }
+  }
+
+  /**
    * 自动更新沙箱中的指定插件至目标版本（默认 latest）并同步已挂载的 Profile
    */
   async updatePlugin(
     id: string,
     targetVersion?: string,
-    profilesDir?: string
-  ): Promise<{
-    ok: boolean
-    plugin?: VaultPlugin
-    fromVersion?: string
-    toVersion?: string
-    message?: string
-    failedSyncProfiles?: { profile: string; error: string }[]
-  }> {
+    profilesDir?: string,
+    onLog?: (msg: string) => void
+  ): Promise<PluginUpdateResult> {
     const data = this.readData()
     const plugin = data.plugins.find((p) => p.id === id || p.name === id)
     if (!plugin) throw new Error(`沙箱中未找到插件: ${id}`)
@@ -1020,9 +1114,24 @@ export class VaultManager {
 
     let ver = targetVersion
     if (!ver || ver === 'latest') {
-      const r = runSync('npm', ['view', plugin.name, 'version', '--registry=https://registry.npmmirror.com', '--fetch-timeout=5000'])
-      if (r.ok && r.stdout) {
-        ver = r.stdout.split(/\r?\n/)[0]?.trim()
+      try {
+        const controller = new AbortController()
+        const timer = setTimeout(() => controller.abort(), 4000)
+        const res = await fetch(`https://registry.npmmirror.com/${encodeURIComponent(plugin.name)}/latest`, {
+          headers: { Accept: 'application/json' },
+          signal: controller.signal,
+        }).finally(() => clearTimeout(timer))
+        if (res.ok) {
+          const info = (await res.json()) as { version?: string }
+          ver = info.version?.trim()
+        }
+      } catch {}
+
+      if (!ver) {
+        const r = runSync('npm', ['view', plugin.name, 'version', '--registry=https://registry.npmmirror.com', '--fetch-timeout=5000'])
+        if (r.ok && r.stdout) {
+          ver = r.stdout.split(/\r?\n/)[0]?.trim()
+        }
       }
     }
     if (!ver) {
@@ -1030,19 +1139,31 @@ export class VaultManager {
     }
 
     const fromVersion = plugin.activeVersion || plugin.version
-    if (fromVersion === ver && existsSync(join(this.storeDir, `${plugin.name.replace(/[^a-zA-Z0-9@._-]/g, '_')}@${ver}`))) {
+    const sanitized = plugin.name.replace(/[^a-zA-Z0-9@._-]/g, '_')
+    const destStore = join(this.storeDir, `${sanitized}@${ver}`)
+
+    if (fromVersion === ver && existsSync(destStore)) {
       plugin.hasUpdate = false
+      const { profileResults, failedSyncProfiles } = await this.syncToProfiles(plugin, ver, profilesDir, onLog)
       this.saveData(data)
-      return { ok: true, plugin, fromVersion, toVersion: ver, message: '已经是最新版本' }
+      onLog?.(`插件 ${plugin.name} 已经是最新版本 (v${ver})\n`)
+      return {
+        ok: true,
+        plugin,
+        fromVersion,
+        toVersion: ver,
+        message: '已经是最新版本',
+        profileResults: profileResults.length > 0 ? profileResults : undefined,
+        failedSyncProfiles: failedSyncProfiles.length > 0 ? failedSyncProfiles : undefined,
+      }
     }
 
     // 下载并解包至 vault_store
-    const sanitized = plugin.name.replace(/[^a-zA-Z0-9@._-]/g, '_')
-    const destStore = join(this.storeDir, `${sanitized}@${ver}`)
     const tmpPackDir = join(this.storeDir, `.tmp-pack-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`)
     mkdirSync(tmpPackDir, { recursive: true })
 
     try {
+      onLog?.(`[1/4] 下载依赖包: ${plugin.name}@${ver} ...\n`)
       // 1. npm pack 下载压缩包
       const packRes = runSync('npm', ['pack', `${plugin.name}@${ver}`, '--registry=https://registry.npmmirror.com'], { cwd: tmpPackDir })
       if (!packRes.ok) {
@@ -1053,16 +1174,27 @@ export class VaultManager {
       if (!tgzFile) {
         throw new Error(`未找到下载的 tarball 压缩包`)
       }
-      // 2. tar -xzf 解压
-      const tarRes = runSync('tar', ['-xzf', tgzFile, '-C', tmpPackDir])
+
+      onLog?.(`[2/4] 解压校验物理包: ${tgzFile} ...\n`)
+      // 2. tar -xzf 解压（使用完整绝对路径并显式传入 cwd: tmpPackDir，彻底解决 Windows tar.exe 找不到压缩包的致命缺陷）
+      const fullTgzPath = join(tmpPackDir, tgzFile)
+      const tarRes = runSync('tar', ['-xzf', fullTgzPath, '-C', tmpPackDir], { cwd: tmpPackDir })
       if (!tarRes.ok) {
         throw new Error(`tar 解压失败: ${tarRes.stderr || tarRes.stdout}`)
       }
-      const extractedPkgDir = join(tmpPackDir, 'package')
+      let extractedPkgDir = join(tmpPackDir, 'package')
       if (!existsSync(extractedPkgDir)) {
-        throw new Error(`解压目录结构异常，未找到 package 文件夹`)
+        // 兼容部分非标准 tar 目录结构
+        const subs = readdirSync(tmpPackDir).filter((s) => s !== tgzFile && statSync(join(tmpPackDir, s)).isDirectory())
+        const foundPkg = subs.find((s) => existsSync(join(tmpPackDir, s, 'package.json')))
+        if (foundPkg) {
+          extractedPkgDir = join(tmpPackDir, foundPkg)
+        } else {
+          throw new Error(`解压目录结构异常，未找到 package 文件夹`)
+        }
       }
 
+      onLog?.(`[3/4] 归档入库至沙箱存储池: ${destStore} ...\n`)
       // 3. 部署至物理存储池
       removePathSafe(destStore)
       mkdirSync(destStore, { recursive: true })
@@ -1096,31 +1228,7 @@ export class VaultManager {
     this.saveData(data)
 
     // 6. 原子同步升级所有已挂载该插件的 Profile（带物理存在性验真与悬空清理）
-    const failedSyncProfiles: { profile: string; error: string }[] = []
-    if (profilesDir && plugin.installedProfiles && plugin.installedProfiles.length > 0) {
-      const validProfiles: string[] = []
-      for (const prof of plugin.installedProfiles) {
-        const profDir = join(profilesDir, prof)
-        if (!existsSync(profDir)) {
-          // 该 Profile 已被物理删除，清理悬空废弃引用
-          continue
-        }
-        validProfiles.push(prof)
-        try {
-          await this.deployToProfile(plugin.id, prof, profilesDir, ver)
-        } catch (err) {
-          failedSyncProfiles.push({
-            profile: prof,
-            error: err instanceof Error ? err.message : String(err),
-          })
-          console.error(`自动同步至环境 ${prof} 失败:`, err)
-        }
-      }
-      if (validProfiles.length !== plugin.installedProfiles.length) {
-        plugin.installedProfiles = validProfiles
-        this.saveData(data)
-      }
-    }
+    const { profileResults, failedSyncProfiles } = await this.syncToProfiles(plugin, ver, profilesDir, onLog)
 
     // 7. 记录部署快照历史
     const history = this.readHistory()
@@ -1142,49 +1250,87 @@ export class VaultManager {
       fromVersion,
       toVersion: ver,
       failedSyncProfiles: failedSyncProfiles.length > 0 ? failedSyncProfiles : undefined,
+      profileResults: profileResults.length > 0 ? profileResults : undefined,
     }
   }
 
   /**
    * 自动全量升级所有有更新的沙箱插件
    */
-  async updateAll(profilesDir?: string): Promise<{
+  async updateAll(
+    profilesDir?: string,
+    onLog?: (msg: string) => void,
+    onProgress?: (current: number, total: number, msg: string) => void
+  ): Promise<{
     total: number
     updated: number
     failed: number
-    results: { id: string; name: string; ok: boolean; fromVersion?: string; toVersion?: string; error?: string }[]
+    results: {
+      id: string
+      name: string
+      ok: boolean
+      fromVersion?: string
+      toVersion?: string
+      error?: string
+      profileResults?: ProfileSyncResult[]
+    }[]
   }> {
+    onLog?.(`正在比对沙箱插件最新版本...\n`)
     await this.checkUpdates()
     const data = this.readData()
     const needUpdate = data.plugins.filter((p) => p.hasUpdate && p.latestVersion)
 
-    const results: { id: string; name: string; ok: boolean; fromVersion?: string; toVersion?: string; error?: string }[] = []
+    if (needUpdate.length === 0) {
+      onLog?.(`所有沙箱插件均已是最新版本，无需更新 ✨\n`)
+      return { total: 0, updated: 0, failed: 0, results: [] }
+    }
+
+    onLog?.(`检测到 ${needUpdate.length} 个沙箱插件有新版本，开始自动拉取升级：\n`)
+    const results: {
+      id: string
+      name: string
+      ok: boolean
+      fromVersion?: string
+      toVersion?: string
+      error?: string
+      profileResults?: ProfileSyncResult[]
+    }[] = []
     let updated = 0
     let failed = 0
 
+    let current = 0
     for (const p of needUpdate) {
+      current++
+      onLog?.(`\n========================================\n[${current}/${needUpdate.length}] 升级插件: ${p.name} (${p.version} -> ${p.latestVersion})\n========================================\n`)
+      onProgress?.(current, needUpdate.length, `正在升级 ${p.name} [${current}/${needUpdate.length}]`)
       try {
-        const res = await this.updatePlugin(p.id, p.latestVersion, profilesDir)
+        const res = await this.updatePlugin(p.id, p.latestVersion, profilesDir, onLog)
         results.push({
           id: p.id,
           name: p.name,
           ok: res.ok,
           fromVersion: res.fromVersion,
           toVersion: res.toVersion,
+          profileResults: res.profileResults,
         })
         updated++
+        onLog?.(`✓ ${p.name} 升级成功 (${res.fromVersion} -> ${res.toVersion})\n`)
       } catch (err) {
         failed++
+        const errMsg = err instanceof Error ? err.message : String(err)
         results.push({
           id: p.id,
           name: p.name,
           ok: false,
-          error: err instanceof Error ? err.message : String(err),
+          error: errMsg,
         })
+        onLog?.(`✗ ${p.name} 升级失败: ${errMsg}\n`)
       }
     }
 
+    onLog?.(`\n========================================\n全部更新流程结束 ✅ 成功: ${updated}，失败: ${failed}\n========================================\n`)
     return { total: needUpdate.length, updated, failed, results }
   }
 }
+
 

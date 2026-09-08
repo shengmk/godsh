@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { api } from '../api'
+import { taskManager } from '../tasks'
 import type { DeploymentSnapshot, DiskSavingsReport, PluginAuditReport, ProfileView, VaultPlugin } from '../types'
 
 function formatBytes(bytes: number): string {
@@ -264,41 +265,49 @@ export default function VaultHubPage() {
     }
   }
 
-  // 单插件拉取升级
+  // 单插件拉取升级（接入全局任务中心）
   async function handleUpdateSingle(p: VaultPlugin) {
     const loadingKey = `update-${p.id}`
     setActionLoading(loadingKey)
     try {
-      const res = await api.vaultUpdatePlugin(p.id, p.latestVersion)
-      if (res.ok) {
-        showNotice(`已成功将 ${p.name} 自动拉取升级至 v${res.toVersion || p.latestVersion}，并同步各挂载环境！`, 'ok')
-        await loadData()
-      } else {
-        showNotice(`更新失败: ${res.message || '未知错误'}`, 'err')
+      showNotice(`已将 ${p.name} 的升级任务派发至右下角任务中心...`, 'ok')
+      const res = await taskManager.startVaultUpdatePluginTask(p.id, p.name, p.latestVersion, (ok) => {
+        if (ok) {
+          showNotice(`已成功将 ${p.name} 升级至 v${p.latestVersion || 'latest'}，并同步各挂载环境！`, 'ok')
+          void loadData()
+        } else {
+          showNotice(`插件 ${p.name} 升级遇到错误，详情可查阅任务中心日志`, 'err')
+        }
+      })
+      if (!res.ok) {
+        showNotice(`启动更新失败: ${res.message || '未知错误'}`, 'err')
       }
     } catch (e) {
-      showNotice(`更新失败: ${e instanceof Error ? e.message : String(e)}`, 'err')
+      showNotice(`启动更新失败: ${e instanceof Error ? e.message : String(e)}`, 'err')
     } finally {
       setActionLoading(null)
     }
   }
 
-  // 批量自动全量更新有新版本的插件
+  // 批量自动全量更新有新版本的插件（接入全局任务中心）
   async function handleUpdateAll() {
     setActionLoading('update-all')
     try {
-      const res = await api.vaultUpdateAll()
-      if (res.ok) {
-        showNotice(
-          `全量自动更新完成：${res.updated} 个插件已成功升级解包并同步挂载环境${res.failed > 0 ? `，${res.failed} 个失败` : ''}`,
-          res.failed > 0 ? 'warn' : 'ok'
-        )
-        await loadData()
-      } else {
-        showNotice('自动更新失败', 'err')
+      showNotice('已启动沙箱全量自动更新任务，请通过右下角工作栏实时查看进度与日志！', 'ok')
+      const res = await taskManager.startVaultUpdateAllTask((ok) => {
+        if (ok) {
+          showNotice('沙箱插件全量更新已完成，已同步刷新各挂载环境！', 'ok')
+          void loadData()
+        } else {
+          showNotice('沙箱插件全量更新完成（部分可能有异常），详情可查阅任务中心日志', 'warn')
+          void loadData()
+        }
+      })
+      if (!res.ok) {
+        showNotice(`启动自动更新失败: ${res.message || '未知错误'}`, 'err')
       }
     } catch (e) {
-      showNotice(`自动更新失败: ${e instanceof Error ? e.message : String(e)}`, 'err')
+      showNotice(`启动自动更新失败: ${e instanceof Error ? e.message : String(e)}`, 'err')
     } finally {
       setActionLoading(null)
     }

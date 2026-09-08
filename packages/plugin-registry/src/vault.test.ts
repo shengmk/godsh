@@ -202,4 +202,136 @@ test('VaultManager: 自动清理已物理删除 Profile 的悬空索引', async 
   }
 })
 
+test('VaultManager: 异步并发 checkUpdates 正常比对并标记 hasUpdate', async () => {
+  const tempDir = mkdtempSync(join(tmpdir(), 'godsh-vault-chk-'))
+  try {
+    const dataDir = join(tempDir, 'data')
+    mkdirSync(dataDir, { recursive: true })
+
+    const vm = new VaultManager(dataDir)
+    // 注入一个低版本和一个已是最新版本的插件
+    const data = (vm as any).readData()
+    data.plugins = [
+      {
+        id: 'vault-market-lodash',
+        name: 'lodash',
+        version: '1.0.0', // 远古版本，必定有新版
+        kind: 'bundle',
+        source: 'market',
+        stagedAt: Date.now(),
+      },
+      {
+        id: 'vault-local-custom',
+        name: 'custom-local',
+        version: '1.0.0',
+        kind: 'bundle',
+        source: 'local', // 本地插件跳过
+        stagedAt: Date.now(),
+      },
+    ]
+    ;(vm as any).saveData(data)
+
+    const updates = await vm.checkUpdates()
+    assert.equal(updates.length, 2)
+    const lodashRes = updates.find((u) => u.id === 'vault-market-lodash')
+    assert.ok(lodashRes)
+    assert.equal(lodashRes.hasUpdate, true)
+    assert.ok(lodashRes.latestVersion)
+
+    const localRes = updates.find((u) => u.id === 'vault-local-custom')
+    assert.ok(localRes)
+    assert.equal(localRes.hasUpdate, false)
+  } finally {
+    rmSync(tempDir, { recursive: true, force: true })
+  }
+})
+
+test('VaultManager: updatePlugin 传入 onLog 回调并正确调用', async () => {
+  const tempDir = mkdtempSync(join(tmpdir(), 'godsh-vault-log-'))
+  try {
+    const dataDir = join(tempDir, 'data')
+    mkdirSync(dataDir, { recursive: true })
+
+    const vm = new VaultManager(dataDir)
+    const data = (vm as any).readData()
+    // 构造一个已经是最新版本的插件
+    data.plugins = [
+      {
+        id: 'vault-market-test-rotator',
+        name: 'dsh-status-rotator',
+        version: '0.7.1',
+        activeVersion: '0.7.1',
+        kind: 'both',
+        source: 'market',
+        stagedAt: Date.now(),
+      },
+    ]
+    ;(vm as any).saveData(data)
+
+    // 创建对应版本的 store 目录，使其命中已经是最新版本分支
+    const storeDir = join(dataDir, 'vault_store', 'dsh-status-rotator@0.7.1')
+    mkdirSync(storeDir, { recursive: true })
+    writeFileSync(join(storeDir, 'package.json'), JSON.stringify({ name: 'dsh-status-rotator', version: '0.7.1' }), 'utf8')
+
+    const logs: string[] = []
+    const res = await vm.updatePlugin('vault-market-test-rotator', '0.7.1', undefined, (line) => {
+      logs.push(line)
+    })
+
+    assert.equal(res.ok, true)
+    assert.equal(res.toVersion, '0.7.1')
+    assert.ok(logs.some((l) => l.includes('已经是最新版本')))
+  } finally {
+    rmSync(tempDir, { recursive: true, force: true })
+  }
+})
+
+test('VaultManager: updatePlugin 遇到失效 Profile 目录时记录 pruned 状态并清理引用', async () => {
+  const tempDir = mkdtempSync(join(tmpdir(), 'godsh-vault-prune-'))
+  try {
+    const dataDir = join(tempDir, 'data')
+    const profilesDir = join(tempDir, 'profiles')
+    mkdirSync(dataDir, { recursive: true })
+    mkdirSync(profilesDir, { recursive: true })
+
+    // 建立一个正常存在的 profile 和一个不存在的 profile
+    const validProfDir = join(profilesDir, 'active-profile')
+    mkdirSync(validProfDir, { recursive: true })
+    writeFileSync(join(validProfDir, 'package.json'), JSON.stringify({ name: 'active-profile', dependencies: {} }), 'utf8')
+
+    const vm = new VaultManager(dataDir)
+    const data = (vm as any).readData()
+    data.plugins = [
+      {
+        id: 'vault-plugin-x',
+        name: 'plugin-x',
+        version: '1.0.0',
+        activeVersion: '1.0.0',
+        kind: 'bundle',
+        source: 'market',
+        installedProfiles: ['active-profile', 'deleted-profile'],
+        stagedAt: Date.now(),
+      },
+    ]
+    ;(vm as any).saveData(data)
+
+    // 创建对应版本的 store
+    const storeDir = join(dataDir, 'vault_store', 'plugin-x@1.0.0')
+    mkdirSync(storeDir, { recursive: true })
+    writeFileSync(join(storeDir, 'package.json'), JSON.stringify({ name: 'plugin-x', version: '1.0.0' }), 'utf8')
+
+    const logs: string[] = []
+    const res = await vm.updatePlugin('vault-plugin-x', '1.0.0', profilesDir, (l) => logs.push(l))
+    assert.equal(res.ok, true)
+    // 检查 profileResults
+    assert.ok(res.profileResults)
+    const prunedItem = res.profileResults.find((p) => p.profile === 'deleted-profile')
+    assert.ok(prunedItem)
+    assert.equal(prunedItem.status, 'pruned')
+  } finally {
+    rmSync(tempDir, { recursive: true, force: true })
+  }
+})
+
+
 

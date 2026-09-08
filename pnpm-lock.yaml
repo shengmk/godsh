@@ -35,6 +35,9 @@ importers:
       '@godsh/dsh-env':
         specifier: workspace:*
         version: link:../../packages/dsh-env
+      '@godsh/dsh-plugin':
+        specifier: workspace:*
+        version: link:../../packages/dsh-plugin
       '@godsh/kernel-manager':
         specifier: workspace:*
         version: link:../../packages/kernel-manager

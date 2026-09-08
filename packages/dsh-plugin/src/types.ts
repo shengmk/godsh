@@ -28,9 +28,20 @@ export interface SnapshotMeta {
   profile: string
   timestamp: number
   tag?: string
+  trigger?: 'manual' | 'auto-pre-update' | 'auto-pre-install' | 'repair-workflow'
+  description?: string
+  godshVersion?: string
+  dshVersion?: string
+  isLocked?: boolean
   bundles: string[]
   dependencies: Record<string, string>
   patchContent: string
+  workspaceContent?: string
+  metrics?: {
+    dependenciesCount: number
+    bundlesCount: number
+    patchEntriesCount: number
+  }
 }
 
 export interface MemoryPattern {

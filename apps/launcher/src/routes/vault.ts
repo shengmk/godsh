@@ -184,11 +184,27 @@ export const vaultHandler: ApiHandler = async (ctx, _req, res, method, seg, body
     return true
   }
 
-  // POST /api/vault/update —— 单插件下载升级至目标版本（默认 latest）并同步已挂载 Profile
+  // POST /api/vault/update —— 单插件下载升级至目标版本（默认 latest）并同步已挂载 Profile（支持异步后台任务与同步兼容）
   if (seg.length === 2 && seg[0] === 'vault' && seg[1] === 'update' && method === 'POST') {
-    const { id, version } = (body || {}) as { id?: string; version?: string }
+    const { id, version, async: isAsyncBody } = (body || {}) as { id?: string; version?: string; async?: boolean }
+    const isAsync = isAsyncBody === true || url.searchParams.get('async') === 'true'
     if (!id) {
       ctx.sendJson(res, 400, { error: '缺少插件 id' })
+      return true
+    }
+    if (isAsync) {
+      const taskKey = `vault-update-${encodeURIComponent(id).replace(/%/g, '_')}-${Date.now()}`
+      ctx.startInstallTask(taskKey, `vault-update-${Date.now()}.log`, async (log) => {
+        log(`[INFO] 开始升级沙箱插件 ${id}${version ? ` 至 ${version}` : ''}...\n`)
+        try {
+          const report = await vault.updatePlugin(id, version, profilesDir, (msg) => log(msg))
+          log(`\n[SUCCESS] 插件 ${id} 升级完成（${report.toVersion || version || 'latest'}）\n`)
+        } catch (err) {
+          log(`\n[ERROR] 插件 ${id} 升级失败：${err instanceof Error ? err.message : String(err)}\n`)
+          throw err
+        }
+      })
+      ctx.sendJson(res, 202, { ok: true, task: taskKey, message: `插件 ${id} 升级任务已启动` })
       return true
     }
     try {
@@ -200,14 +216,42 @@ export const vaultHandler: ApiHandler = async (ctx, _req, res, method, seg, body
     return true
   }
 
-  // POST /api/vault/update-all —— 批量自动拉取升级所有有新版本的沙箱插件
+  // POST /api/vault/update-all —— 批量自动拉取升级所有有新版本的沙箱插件（支持异步后台任务与同步兼容）
   if (seg.length === 2 && seg[0] === 'vault' && seg[1] === 'update-all' && method === 'POST') {
+    const isAsync = (body as { async?: boolean } | null)?.async === true || url.searchParams.get('async') === 'true'
+    if (isAsync) {
+      const taskKey = `vault-update-all-${Date.now()}`
+      ctx.startInstallTask(taskKey, `vault-update-all-${Date.now()}.log`, async (log) => {
+        log(`[INFO] 开始沙箱插件全量检测与升级...\n`)
+        try {
+          const report = await vault.updateAll(profilesDir, (msg) => log(msg))
+          log(`\n[SUCCESS] 沙箱全量更新完毕：检测更新 ${report.total} 个，成功 ${report.updated} 个，失败 ${report.failed} 个\n`)
+        } catch (err) {
+          log(`\n[ERROR] 沙箱更新任务异常中止：${err instanceof Error ? err.message : String(err)}\n`)
+          throw err
+        }
+      })
+      ctx.sendJson(res, 202, { ok: true, task: taskKey, message: '沙箱自动更新任务已启动' })
+      return true
+    }
     try {
       const report = await vault.updateAll(profilesDir)
       ctx.sendJson(res, 200, { ok: true, ...report })
     } catch (err) {
       ctx.sendJson(res, 400, { error: err instanceof Error ? err.message : String(err) })
     }
+    return true
+  }
+
+  // GET /api/vault/task-progress —— 轮询沙箱后台更新任务进度
+  if (seg.length === 2 && seg[0] === 'vault' && seg[1] === 'task-progress' && method === 'GET') {
+    const task = String(url.searchParams.get('task') ?? '')
+    const view = task ? ctx.installTaskView(task) : null
+    if (!view) {
+      ctx.sendJson(res, 404, { error: '任务不存在或已过期' })
+      return true
+    }
+    ctx.sendJson(res, 200, view)
     return true
   }
 

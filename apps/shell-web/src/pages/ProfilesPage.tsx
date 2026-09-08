@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { api } from '../api'
-import type { DshInstance, Health, PortInfo, ProfileView, WorkflowTemplate, ProfilePackage } from '../types'
+import type { DshInstance, Health, PortInfo, ProfileView, WorkflowTemplate, ProfilePackage, SnapshotItem } from '../types'
 import { ConfirmDialog, ContextMenu, ErrorText, Loading, Toast, type MenuState } from '../components'
 import { useToast } from '../hooks'
 import { useI18n } from '../i18n'
@@ -37,6 +37,14 @@ export default function ProfilesPage() {
   const [syncFromProfile, setSyncFromProfile] = useState<string>('')
   const [syncToProfile, setSyncToProfile] = useState<string>('')
   const [wfSubmitting, setWfSubmitting] = useState(false)
+  // 环境快照时光机与自愈工作流
+  const [snapshotModalProfile, setSnapshotModalProfile] = useState<string | null>(null)
+  const [snapshots, setSnapshots] = useState<SnapshotItem[]>([])
+  const [snapshotStats, setSnapshotStats] = useState<{ totalSnapshots: number; totalBytes: number; profileBytes?: number } | null>(null)
+  const [snapshotLoading, setSnapshotLoading] = useState(false)
+  const [newSnapshotDesc, setNewSnapshotDesc] = useState('')
+  const [repairingProfile, setRepairingProfile] = useState<string | null>(null)
+  const [desktopInstalled, setDesktopInstalled] = useState(false)
   const importInputRef = useRef<HTMLInputElement | null>(null)
   const logRef = useRef<HTMLDivElement | null>(null)
   const { toast, show } = useToast()
@@ -60,6 +68,10 @@ export default function ProfilesPage() {
         setDshInstances(s.dshInstances)
         setByProfileVersion(s.config.dsh.byProfile ?? {})
       })
+      .catch(() => {})
+    api
+      .dshDesktopStatus()
+      .then((st) => setDesktopInstalled(st.installed))
       .catch(() => {})
   }, [load])
 
@@ -190,6 +202,96 @@ export default function ProfilesPage() {
       show(`已在浏览器打开 ${label}（${p.url}）`)
     } catch (e) {
       show(`打开失败：${e instanceof Error ? e.message : String(e)}`, true)
+    }
+  }
+
+  async function openSnapshotModal(profile: string) {
+    setSnapshotModalProfile(profile)
+    setSnapshotLoading(true)
+    try {
+      const res = await api.backupSnapshots(profile)
+      setSnapshots(res.snapshots || [])
+      setSnapshotStats(res.stats || null)
+    } catch (e) {
+      show(e instanceof Error ? e.message : String(e), true)
+    } finally {
+      setSnapshotLoading(false)
+    }
+  }
+
+  async function handleCreateSnapshot() {
+    if (!snapshotModalProfile) return
+    try {
+      await api.backupCreate(snapshotModalProfile, newSnapshotDesc.trim() || undefined)
+      setNewSnapshotDesc('')
+      show('快照创建成功')
+      const res = await api.backupSnapshots(snapshotModalProfile)
+      setSnapshots(res.snapshots || [])
+      setSnapshotStats(res.stats || null)
+    } catch (e) {
+      show(e instanceof Error ? e.message : String(e), true)
+    }
+  }
+
+  async function handleToggleLock(snapId: string, currentLocked?: boolean) {
+    if (!snapshotModalProfile) return
+    try {
+      await api.backupToggleLock(snapshotModalProfile, snapId, !currentLocked)
+      const res = await api.backupSnapshots(snapshotModalProfile)
+      setSnapshots(res.snapshots || [])
+    } catch (e) {
+      show(e instanceof Error ? e.message : String(e), true)
+    }
+  }
+
+  async function handleRestoreSnapshot(snapId: string) {
+    if (!snapshotModalProfile) return
+    if (!window.confirm(`确定要将环境 ${snapshotModalProfile} 回滚到快照 ${snapId} 吗？当前配置将被快照覆盖。`)) return
+    try {
+      await api.backupRestore(snapshotModalProfile, snapId)
+      show(`已成功回滚至快照 ${snapId}`)
+      setSnapshotModalProfile(null)
+      load()
+    } catch (e) {
+      show(e instanceof Error ? e.message : String(e), true)
+    }
+  }
+
+  async function handleDeleteSnapshot(snapId: string) {
+    if (!snapshotModalProfile) return
+    if (!window.confirm(`确定删除快照 ${snapId} 吗？`)) return
+    try {
+      await api.backupDelete(snapshotModalProfile, snapId)
+      show('快照已删除')
+      const res = await api.backupSnapshots(snapshotModalProfile)
+      setSnapshots(res.snapshots || [])
+    } catch (e) {
+      show(e instanceof Error ? e.message : String(e), true)
+    }
+  }
+
+  async function handleRepair(name: string) {
+    setRepairingProfile(name)
+    try {
+      const res = await api.repairWorkflow(name)
+      show(`已启动 7 阶段自动化自愈工作流（任务: ${res.task}），可前往系统任务中心查看进度`, false)
+    } catch (e) {
+      show(`自愈工作流触发失败: ${e instanceof Error ? e.message : String(e)}`, true)
+    } finally {
+      setRepairingProfile(null)
+    }
+  }
+
+  async function handleOpenDesktop(name: string) {
+    try {
+      const ok = await openDshDesktopFn(name)
+      if (ok) {
+        show(`已唤醒 DSH Desktop 客户端（环境: ${name}）`)
+      } else {
+        show('未找到 DSH Desktop 客户端或启动失败', true)
+      }
+    } catch (e) {
+      show(`启动失败: ${e instanceof Error ? e.message : String(e)}`, true)
     }
   }
 
@@ -727,6 +829,28 @@ export default function ProfilesPage() {
                     打开 ↗
                   </button>
                 )}
+                <button
+                  className="btn sm"
+                  title={desktopInstalled ? '以 DSH Desktop 官方桌面端打开该环境' : '尝试唤醒 DSH Desktop 官方客户端'}
+                  onClick={() => void handleOpenDesktop(p.name)}
+                >
+                  🖥️ 桌面版
+                </button>
+                <button
+                  className="btn sm"
+                  title="环境快照时光机：多版本配置快照与一键回滚"
+                  onClick={() => void openSnapshotModal(p.name)}
+                >
+                  ⏱️ 快照
+                </button>
+                <button
+                  className="btn sm"
+                  title="一键 7 阶段环境全流程自愈与灾难修复"
+                  disabled={repairingProfile === p.name}
+                  onClick={() => void handleRepair(p.name)}
+                >
+                  {repairingProfile === p.name ? '修复中…' : '🩺 自愈'}
+                </button>
                 <span className="spacer" />
                 <button
                   className="btn danger sm delete-btn"
@@ -893,6 +1017,94 @@ export default function ProfilesPage() {
                 </div>
               </div>
             )}
+          </div>
+        </div>
+      )}
+
+      {/* 环境快照时光机模态框 */}
+      {snapshotModalProfile && (
+        <div className="modal-overlay" onClick={() => setSnapshotModalProfile(null)}>
+          <div className="modal glass snapshot-modal" style={{ maxWidth: 680, width: '92%' }} onClick={(e) => e.stopPropagation()}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
+              <h3 className="modal-title" style={{ margin: 0 }}>⏱️ 环境快照时光机 — {snapshotModalProfile}</h3>
+              <button className="btn sm" onClick={() => setSnapshotModalProfile(null)}>✕</button>
+            </div>
+            <p className="modal-desc muted" style={{ fontSize: 13, marginBottom: 12 }}>
+              原子捕获 package.json、依赖树与 cordis.patch.yml 完整状态，支持锁定保护与秒级一键回滚。
+            </p>
+
+            {/* 创建新快照区 */}
+            <div style={{ display: 'flex', gap: 8, marginBottom: 12 }}>
+              <input
+                className="input"
+                style={{ flex: 1 }}
+                placeholder="输入快照说明（例如：升级前基线备份）"
+                value={newSnapshotDesc}
+                onChange={(e) => setNewSnapshotDesc(e.target.value)}
+                onKeyDown={(e) => { if (e.key === 'Enter') void handleCreateSnapshot() }}
+              />
+              <button className="btn primary" onClick={() => void handleCreateSnapshot()}>
+                创建快照
+              </button>
+            </div>
+
+            {/* 统计指标 */}
+            {snapshotStats && (
+              <div style={{ display: 'flex', gap: 16, fontSize: 12, padding: '8px 12px', background: 'rgba(255,255,255,0.03)', borderRadius: 6, marginBottom: 12 }}>
+                <span>快照总数: <b>{snapshotStats.totalSnapshots}</b></span>
+                <span>当前环境存储: <b>{(Number(snapshotStats.profileBytes || 0) / 1024).toFixed(1)} KB</b></span>
+                <span>全域时光机空间: <b>{(Number(snapshotStats.totalBytes || 0) / 1024).toFixed(1)} KB</b></span>
+              </div>
+            )}
+
+            {/* 快照列表 */}
+            <div style={{ maxHeight: 300, overflowY: 'auto', border: '1px solid rgba(255,255,255,0.06)', borderRadius: 6 }}>
+              {snapshotLoading ? (
+                <div style={{ padding: 24, textAlign: 'center' }} className="muted">加载快照中…</div>
+              ) : snapshots.length === 0 ? (
+                <div style={{ padding: 24, textAlign: 'center' }} className="muted">暂无快照，可在上方创建首个基线快照</div>
+              ) : (
+                snapshots.map((snap) => (
+                  <div key={snap.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '10px 14px', borderBottom: '1px solid rgba(255,255,255,0.06)' }}>
+                    <div>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                        <span style={{ fontWeight: 600, fontSize: 13 }}>{snap.description || snap.tag || '环境快照'}</span>
+                        <span className={`status-pill trigger-${snap.trigger || 'manual'}`} style={{ fontSize: 10 }}>
+                          {snap.trigger === 'manual' ? '手动' : snap.trigger === 'repair-workflow' ? '自愈暂存' : '自动'}
+                        </span>
+                        {snap.isLocked && <span className="status-pill status-running" style={{ fontSize: 10 }}>🔒 已锁定</span>}
+                      </div>
+                      <div className="muted" style={{ fontSize: 11, marginTop: 4 }}>
+                        {new Date(snap.timestamp).toLocaleString()} · {snap.bundles?.length || 0} bundles · {Object.keys(snap.dependencies || {}).length} deps · ID: <code style={{ opacity: 0.7 }}>{snap.id}</code>
+                      </div>
+                    </div>
+                    <div style={{ display: 'flex', gap: 6 }}>
+                      <button
+                        className="btn sm"
+                        onClick={() => void handleToggleLock(snap.id, snap.isLocked)}
+                        title={snap.isLocked ? '已锁定（免淘汰），点击解锁' : '未锁定，点击锁定保护'}
+                      >
+                        {snap.isLocked ? '🔓 解锁' : '🔒 锁定'}
+                      </button>
+                      <button
+                        className="btn sm primary"
+                        onClick={() => void handleRestoreSnapshot(snap.id)}
+                        title="原子回滚此快照"
+                      >
+                        ↺ 回滚
+                      </button>
+                      <button
+                        className="btn sm danger"
+                        onClick={() => void handleDeleteSnapshot(snap.id)}
+                        title="删除此快照"
+                      >
+                        ✕
+                      </button>
+                    </div>
+                  </div>
+                ))
+              )}
+            </div>
           </div>
         </div>
       )}
