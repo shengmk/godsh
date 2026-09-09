@@ -55,13 +55,11 @@ godsh 全局 UI 电影级翻新与无控制台启动优化（v0.6.0，四大阶�
 - ✓24 阶段三（功能性 UI 查漏补缺和实用性检查）全量落地：全系统空状态组件化 (EmptyState 毛玻璃虚线与辉光光环)、微光渐变骨架屏 (CSS Shimmer 渐变平滑过渡替换纯文字 Loading)、React 错误边界 (ErrorBoundary 自愈沙箱与故障卡片)、触控热区达标 (小按钮 pseudo-element hitSlop >= 44×44px)、键盘无障碍体系 (Esc 全局层级关闭模态与选择、Ctrl+K 快速聚焦搜索、发丝微光焦点环)、零横向溢出防御体系 (极端长包名与路径截断与 tooltip、容器 min-width:0 与 overflow-x:hidden 严防溢出) — verified by: pnpm typecheck (0 errors), pnpm test (69/69 pass), pnpm build:web (0 errors)
 - ✓25 阶段四（装饰性 UI 与微交互添加）全量落地与视觉检查方案输出：流光环境微光与极客点阵背景 (Micro-dot Matrix)、全交互元素物理按压阻尼 (active: scale(0.975) & cubic-bezier(0.16, 1, 0.3, 1))、全色系多阶状态呼吸灯 (Emerald/Amber/Ruby/Indigo 脉冲光环)、极客终端 CRT 水平扫描线与磷光微质感 (Terminal CRT Overlay & 4px 发丝辉光滑轨)、模态弹窗与抽屉流体进入曲线 (modal-spring-enter)、基于 paicat1/dsh-screenshot 与 liustack/modlens 协同的自动化视觉走查方案 (方案.md) 完备归档 — verified by: pnpm typecheck (0 errors), pnpm test (69/69 pass), pnpm build:web (0 errors)
 - ✓26 godsh 正式版 v0.6.0 官方 NSIS 安装器、绿色免安装便携版与 GitHub Release 全量发布：全仓版本号统一跃迁至 0.6.0、RELEASE_NOTES.md 与 CHANGELOG.md 同步就绪、Tauri 编译产出 godsh-0.6.0-x64-setup.exe (3.87MB) 与 godsh-0.6.0-x64.zip (5.65MB)、SHA256 校验和对齐并已全部上传至 GitHub Release v0.6.0 — verified by: scripts/make-release.ps1, scripts/upload-release.mjs, and GitHub Release tag v0.6.0 (release ID: 385494498)
-- ✓27 全局 UI 进阶、双模主题架构落地与插件沙箱深度解密完成：修复系统任务中心两个白框（定义 .tab-pill-group 与 .pill-btn 胶囊选择器）、深色主题底座上浮至 Cosmic Slate #0B0D14 搭配 24s 动态浮动极光呼吸流光与点阵（根治纯黑过深与视口外黑框反差）、落地 UI-UX-Pro-Max 规范 Clean Frosted Light 浅色主题体系（顶栏增加快速主题切换开关，终端保持专业黑底极客撞色）、Tauri 窗口注入 theme Dark 配置、输出全部方案.md 并为沙箱插件更新机制增加深度解析与说明弹窗 — verified by: pnpm typecheck (0 errors), pnpm test (69/69 pass), pnpm build:web (0 errors), and 09_输入文档/全部方案.md
+- ✓27 全局 UI 进阶、双模主题架构落地与插件沙箱深度解密完成：修复系统任务中心两个白框（定义 .tab-pill-group 与 .pill-btn 胶囊选择器）、深色主题底座上浮至 Cosmic Slate #0B0D14 搭配 24s 动态浮动极光呼吸流光与点阵（根治纯黑过深与视口外黑框反差）、落地 UI-UX-Pro-Max 规范 Clean Frosted Light 浅色主题体系（顶栏增加快速主题切换开关，终端保持专业黑底极客撞色）、Tauri 窗口注入 theme Dark 配置、输出全部方案.md 并为沙箱插件更新机制增加深度解析与说明弹窗 — verified by: pnpm typecheck (0 errors), pnpm test (69/69 pass), pnpm build:web (0 errors), and 09_输入文档/全部方案.md — closes: ?02
+- ✓28 godsh 正式版 v0.6.1 打包与 GitHub Release 全量发布：全仓版本号统一跃迁至 0.6.1、CHANGELOG.md 与 RELEASE_NOTES.md 同步就绪、make-release.ps1 打包产出 godsh-0.6.1-x64-setup.exe (3.87MB) 与 godsh-0.6.1-x64.zip (5.65MB)、SHA256 校验和生成并通过 upload-release.mjs 上传发布至 GitHub Release v0.6.1 (Release ID: 385556270) — verified by: scripts/make-release.ps1, scripts/upload-release.mjs, and GitHub Release tag v0.6.1
 
 ## Open
 - ?01 确认是否需要将默认字体 Inter 与 JetBrains Mono 嵌入前端包本地离线加载
-- ?02 评估是否提供全局暗黑/亮色切换，抑或作为专精极客工具强制锁定 Cinematic Dark
 
 ## Next
-godsh v0.6.0 官方版本发布与资产同步全量达成！全局 UI/UX 四大阶段圆满收官，各功能模块稳定运行。
-
-
+godsh v0.6.1 双模主题进阶版正式发版，官方安装器与便携包已同步发布至 GitHub Release！
