@@ -113,10 +113,11 @@ body {
   color: var(--text);
   background-color: var(--bg-deep);
   background-image:
-    radial-gradient(circle at 50% 0%, rgba(94, 106, 210, 0.10) 0%, transparent 50%),
-    radial-gradient(circle at 100% 100%, rgba(139, 92, 246, 0.06) 0%, transparent 40%),
-    radial-gradient(rgba(255, 255, 255, 0.04) 1px, transparent 1px);
-  background-size: 100% 100%, 100% 100%, 24px 24px;
+    radial-gradient(circle at 50% 0%, rgba(94, 106, 210, 0.14) 0%, transparent 60%),
+    radial-gradient(circle at 100% 100%, rgba(139, 92, 246, 0.09) 0%, transparent 50%),
+    radial-gradient(circle at 0% 100%, rgba(16, 185, 129, 0.05) 0%, transparent 40%),
+    radial-gradient(rgba(255, 255, 255, 0.05) 1px, transparent 1px);
+  background-size: 100% 100%, 100% 100%, 100% 100%, 24px 24px;
   background-attachment: fixed;
   -webkit-font-smoothing: antialiased;
   overflow-x: hidden;
@@ -347,7 +348,7 @@ body {
   line-height: 1.6;
 }
 
-/* ---------- 呼吸灯与状态药丸 ---------- */
+/* ---------- 呼吸灯与全色系状态药丸 (Multi-tier Aurora Pulse System) ---------- */
 .pulse-dot {
   width: 7px;
   height: 7px;
@@ -356,32 +357,148 @@ body {
   display: inline-block;
   position: relative;
   flex-shrink: 0;
+  transition: all 150ms ease;
 }
 
-.pulse-dot.active {
+/* 翠绿 (Emerald) - 运行中 / 就绪 */
+.pulse-dot.active,
+.pulse-dot.running,
+.pulse-dot.success {
   background: #10b981;
-  box-shadow: 0 0 8px #10b981;
+  box-shadow: 0 0 8px rgba(16, 185, 129, 0.85);
 }
 
-.pulse-dot.active::after {
+.pulse-dot.active::after,
+.pulse-dot.running::after,
+.pulse-dot.success::after {
   content: '';
   position: absolute;
   inset: -3px;
   border-radius: 50%;
   background: #10b981;
   opacity: 0.6;
-  animation: pulse-ring 1.8s cubic-bezier(0.24, 0, 0.38, 1) infinite;
+  animation: pulse-ring-emerald 1.8s cubic-bezier(0.24, 0, 0.38, 1) infinite;
+}
+
+/* 琥珀 (Amber) - 启动中 / 警告 */
+.pulse-dot.starting,
+.pulse-dot.warn,
+.pulse-dot.warning {
+  background: #f59e0b;
+  box-shadow: 0 0 8px rgba(245, 158, 11, 0.85);
+}
+
+.pulse-dot.starting::after,
+.pulse-dot.warn::after,
+.pulse-dot.warning::after {
+  content: '';
+  position: absolute;
+  inset: -3px;
+  border-radius: 50%;
+  background: #f59e0b;
+  opacity: 0.6;
+  animation: pulse-ring-amber 1.8s cubic-bezier(0.24, 0, 0.38, 1) infinite;
+}
+
+/* 绯红 (Ruby) - 异常 / 故障 */
+.pulse-dot.error,
+.pulse-dot.danger,
+.pulse-dot.failed {
+  background: #ef4444;
+  box-shadow: 0 0 8px rgba(239, 68, 68, 0.85);
+}
+
+.pulse-dot.error::after,
+.pulse-dot.danger::after,
+.pulse-dot.failed::after {
+  content: '';
+  position: absolute;
+  inset: -3px;
+  border-radius: 50%;
+  background: #ef4444;
+  opacity: 0.6;
+  animation: pulse-ring-ruby 1.8s cubic-bezier(0.24, 0, 0.38, 1) infinite;
+}
+
+/* 靛蓝 (Indigo) - 调度中 / 待命 */
+.pulse-dot.info,
+.pulse-dot.system {
+  background: #5e6ad2;
+  box-shadow: 0 0 8px rgba(94, 106, 210, 0.85);
+}
+
+.pulse-dot.info::after,
+.pulse-dot.system::after {
+  content: '';
+  position: absolute;
+  inset: -3px;
+  border-radius: 50%;
+  background: #5e6ad2;
+  opacity: 0.6;
+  animation: pulse-ring-indigo 1.8s cubic-bezier(0.24, 0, 0.38, 1) infinite;
+}
+
+/* 独立脉冲微指示器 (Pulse Indicator) */
+.pulse-indicator {
+  position: relative;
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #10b981;
+  box-shadow: 0 0 8px rgba(16, 185, 129, 0.7);
+}
+
+.pulse-indicator::after {
+  content: '';
+  position: absolute;
+  inset: -3px;
+  border-radius: 50%;
+  border: 1.5px solid #10b981;
+  animation: pulse-ring-emerald 2s infinite ease-in-out;
+}
+
+.pulse-indicator.warning {
+  background: #f59e0b;
+  box-shadow: 0 0 8px rgba(245, 158, 11, 0.7);
+}
+.pulse-indicator.warning::after {
+  border-color: #f59e0b;
+  animation-name: pulse-ring-amber;
+}
+
+.pulse-indicator.error {
+  background: #ef4444;
+  box-shadow: 0 0 8px rgba(239, 68, 68, 0.7);
+}
+.pulse-indicator.error::after {
+  border-color: #ef4444;
+  animation-name: pulse-ring-ruby;
 }
 
 @keyframes pulse-ring {
-  0% {
-    transform: scale(0.9);
-    opacity: 0.8;
-  }
-  100% {
-    transform: scale(2.4);
-    opacity: 0;
-  }
+  0% { transform: scale(0.9); opacity: 0.8; }
+  100% { transform: scale(2.4); opacity: 0; }
+}
+
+@keyframes pulse-ring-emerald {
+  0% { transform: scale(0.9); opacity: 0.8; }
+  100% { transform: scale(2.4); opacity: 0; }
+}
+
+@keyframes pulse-ring-amber {
+  0% { transform: scale(0.9); opacity: 0.8; }
+  100% { transform: scale(2.4); opacity: 0; }
+}
+
+@keyframes pulse-ring-ruby {
+  0% { transform: scale(0.9); opacity: 0.8; }
+  100% { transform: scale(2.4); opacity: 0; }
+}
+
+@keyframes pulse-ring-indigo {
+  0% { transform: scale(0.9); opacity: 0.8; }
+  100% { transform: scale(2.4); opacity: 0; }
 }
 
 /* ---------- 极光辉光按钮 ---------- */
@@ -483,48 +600,76 @@ body {
   color: var(--brand-1);
 }
 
-/* ---------- 按钮（纯色/描边、无浮夸） ---------- */
+/* ---------- 按钮（物理阻尼按压与微光拟态） ---------- */
 .btn {
   display: inline-flex;
   align-items: center;
   gap: 6px;
   padding: 7px 14px;
   border-radius: var(--radius-sm);
-  border: 1px solid var(--surface-border);
+  border: 1px solid var(--border-hairline);
   background: var(--surface-strong);
   color: var(--text);
   font-size: 13px;
   cursor: pointer;
-  transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease;
+  transition: transform 120ms cubic-bezier(0.16, 1, 0.3, 1),
+              background-color 150ms ease,
+              border-color 150ms ease,
+              box-shadow 150ms ease,
+              color 150ms ease;
+  user-select: none;
 }
 
-.btn:hover {
-  background: var(--surface-hover);
-  border-color: #c9d3e0;
+.btn:hover:not(:disabled) {
+  background: var(--bg-glass-hover);
+  border-color: rgba(94, 106, 210, 0.4);
+  color: #fff;
+  transform: translateY(-1px);
+  box-shadow: 0 4px 16px -2px rgba(0, 0, 0, 0.4), 0 0 12px rgba(94, 106, 210, 0.15);
 }
 
-[data-theme='dark'] .btn:hover {
-  border-color: #3a4a63;
+.btn:active:not(:disabled) {
+  transform: scale(0.975);
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.35);
 }
 
 .btn.primary {
-  border: none;
-  background: var(--brand-1);
+  border: 1px solid rgba(94, 106, 210, 0.5);
+  background: linear-gradient(135deg, rgba(94, 106, 210, 0.38) 0%, rgba(94, 106, 210, 0.18) 100%);
   color: #fff;
+  box-shadow: 0 0 12px rgba(94, 106, 210, 0.25);
 }
 
-.btn.primary:hover {
-  background: #1e40af;
+.btn.primary:hover:not(:disabled) {
+  background: linear-gradient(135deg, rgba(94, 106, 210, 0.52) 0%, rgba(94, 106, 210, 0.28) 100%);
+  border-color: rgba(94, 106, 210, 0.75);
+  box-shadow: 0 0 18px rgba(94, 106, 210, 0.45);
+  color: #fff;
+  transform: translateY(-1px);
+}
+
+.btn.primary:active:not(:disabled) {
+  transform: scale(0.975);
+  box-shadow: 0 0 8px rgba(94, 106, 210, 0.3);
 }
 
 .btn.danger {
-  border: 1px solid rgba(220, 38, 38, 0.3);
-  background: rgba(220, 38, 38, 0.06);
-  color: var(--err);
+  border: 1px solid rgba(239, 68, 68, 0.35);
+  background: rgba(239, 68, 68, 0.08);
+  color: #fca5a5;
+  box-shadow: 0 0 8px rgba(239, 68, 68, 0.12);
 }
 
-.btn.danger:hover {
-  background: rgba(220, 38, 38, 0.12);
+.btn.danger:hover:not(:disabled) {
+  background: rgba(239, 68, 68, 0.18);
+  border-color: rgba(239, 68, 68, 0.6);
+  color: #fff;
+  transform: translateY(-1px);
+  box-shadow: 0 4px 14px rgba(239, 68, 68, 0.25);
+}
+
+.btn.danger:active:not(:disabled) {
+  transform: scale(0.975);
 }
 
 .btn.sm {
@@ -535,6 +680,35 @@ body {
 .btn:disabled {
   opacity: 0.45;
   cursor: not-allowed;
+  transform: none !important;
+  box-shadow: none !important;
+}
+
+/* 全局可点击控件阻尼按压 */
+.clickable,
+.clickable-card,
+.tab-item,
+.action-btn,
+.icon-btn,
+.filter-chip,
+.batch-btn,
+.delete-btn {
+  transition: transform 120ms cubic-bezier(0.16, 1, 0.3, 1),
+              background-color 150ms ease,
+              border-color 150ms ease,
+              box-shadow 150ms ease,
+              color 150ms ease;
+}
+
+.clickable:active:not(:disabled),
+.clickable-card:active:not(:disabled),
+.tab-item:active:not(:disabled),
+.action-btn:active:not(:disabled),
+.icon-btn:active:not(:disabled),
+.filter-chip:active:not(:disabled),
+.batch-btn:active:not(:disabled),
+.delete-btn:active:not(:disabled) {
+  transform: scale(0.975);
 }
 
 /* ---------- 表单 ---------- */
@@ -556,19 +730,57 @@ body {
   box-shadow: 0 0 0 3px rgba(29, 78, 216, 0.12);
 }
 
-/* ---------- 日志 ---------- */
+/* ---------- 日志 (Terminal CRT Aesthetic) ---------- */
 .log-panel {
   margin-top: 12px;
-  background: #0f172a;
-  color: #cbd5e1;
+  background: #08080d;
+  color: #e2e8f0;
+  border: 1px solid var(--border-hairline);
   border-radius: var(--radius-sm);
   padding: 12px;
-  font-family: 'Cascadia Code', 'JetBrains Mono', Consolas, monospace;
+  font-family: var(--font-mono);
   font-size: 12px;
+  line-height: 1.6;
   max-height: 240px;
   overflow: auto;
   white-space: pre-wrap;
   word-break: break-all;
+  position: relative;
+  text-shadow: 0 0 1px rgba(255, 255, 255, 0.35);
+}
+
+.log-panel::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: repeating-linear-gradient(
+    0deg,
+    rgba(0, 0, 0, 0.16) 0px,
+    rgba(0, 0, 0, 0.16) 1px,
+    transparent 1px,
+    transparent 2px
+  );
+  pointer-events: none;
+  border-radius: inherit;
+}
+
+.log-panel::-webkit-scrollbar {
+  width: 4px;
+  height: 4px;
+}
+
+.log-panel::-webkit-scrollbar-track {
+  background: rgba(0, 0, 0, 0.2);
+}
+
+.log-panel::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.15);
+  border-radius: 4px;
+}
+
+.log-panel::-webkit-scrollbar-thumb:hover {
+  background: rgba(94, 106, 210, 0.7);
+  box-shadow: 0 0 8px rgba(94, 106, 210, 0.85);
 }
 
 /* ---------- 工具行 ---------- */
@@ -1042,26 +1254,48 @@ button,
   background: rgba(220, 38, 38, 0.12);
 }
 
-/* ---------- 确认对话框与模态框 ---------- */
+/* ---------- 确认对话框与模态框 (Fluid Spring Transitions) ---------- */
+@keyframes modal-overlay-fade {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes modal-spring-enter {
+  0% {
+    opacity: 0;
+    transform: scale(0.96) translateY(12px);
+  }
+  100% {
+    opacity: 1;
+    transform: scale(1) translateY(0);
+  }
+}
+
 .modal-overlay {
   position: fixed;
   inset: 0;
   z-index: 999;
-  background: rgba(2, 2, 3, 0.8);
-  backdrop-filter: blur(16px);
+  background: rgba(2, 2, 3, 0.82);
+  backdrop-filter: blur(20px);
   display: grid;
   place-items: center;
-  animation: fade-slide 0.16s ease;
+  animation: modal-overlay-fade 150ms ease forwards;
 }
 
-.modal.glass {
+.modal.glass,
+.modal-dialog {
   width: min(520px, calc(100vw - 48px));
-  background: rgba(13, 13, 20, 0.94);
+  background: rgba(13, 13, 20, 0.95);
   backdrop-filter: blur(24px);
   border: 1px solid var(--border-hairline);
   border-radius: var(--radius);
-  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.7);
+  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.75), 0 0 20px rgba(94, 106, 210, 0.12);
   padding: 24px;
+  animation: modal-spring-enter 180ms cubic-bezier(0.16, 1, 0.3, 1) forwards;
 }
 
 .modal-title {
@@ -1539,16 +1773,53 @@ button,
   flex: 1;
   max-height: 180px;
   overflow: auto;
-  font-family: Consolas, monospace;
+  font-family: var(--font-mono);
   font-size: 11px;
   line-height: 1.5;
-  color: #a5b4fc;
-  background: rgba(0, 0, 0, 0.25);
+  color: #c7d2fe;
+  background: #08080d;
+  border: 1px solid var(--border-hairline);
   border-radius: 8px;
   padding: 8px 10px;
   margin: 0;
   white-space: pre-wrap;
   word-break: break-all;
+  position: relative;
+  text-shadow: 0 0 1px rgba(255, 255, 255, 0.35);
+}
+
+.progress-log::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: repeating-linear-gradient(
+    0deg,
+    rgba(0, 0, 0, 0.16) 0px,
+    rgba(0, 0, 0, 0.16) 1px,
+    transparent 1px,
+    transparent 2px
+  );
+  pointer-events: none;
+  border-radius: inherit;
+}
+
+.progress-log::-webkit-scrollbar {
+  width: 4px;
+  height: 4px;
+}
+
+.progress-log::-webkit-scrollbar-track {
+  background: rgba(0, 0, 0, 0.2);
+}
+
+.progress-log::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.15);
+  border-radius: 4px;
+}
+
+.progress-log::-webkit-scrollbar-thumb:hover {
+  background: rgba(94, 106, 210, 0.7);
+  box-shadow: 0 0 8px rgba(94, 106, 210, 0.85);
 }
 
 /* ---------- 插件悬停简介 tooltip ---------- */
@@ -1646,12 +1917,12 @@ button,
   z-index: 950;
   display: flex;
   flex-direction: column;
-  box-shadow: 0 16px 40px rgba(0, 0, 0, 0.6);
+  box-shadow: 0 20px 50px rgba(0, 0, 0, 0.7), 0 0 20px rgba(94, 106, 210, 0.15);
   border: 1px solid var(--border-hairline);
   border-radius: var(--radius);
-  background: rgba(13, 13, 20, 0.92);
+  background: rgba(13, 13, 20, 0.94);
   backdrop-filter: blur(24px);
-  animation: splash-pop 0.2s ease;
+  animation: modal-spring-enter 180ms cubic-bezier(0.16, 1, 0.3, 1) forwards;
   overflow: hidden;
 }
 .task-center-head {
@@ -1961,6 +2232,23 @@ button,
   border: 1px solid rgba(255, 255, 255, 0.08);
   border-radius: var(--radius);
   overflow: hidden;
+  position: relative;
+}
+
+/* 终端 CRT 水平扫描线 */
+.terminal-panel::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: repeating-linear-gradient(
+    0deg,
+    rgba(0, 0, 0, 0.16) 0px,
+    rgba(0, 0, 0, 0.16) 1px,
+    transparent 1px,
+    transparent 2px
+  );
+  pointer-events: none;
+  z-index: 2;
 }
 
 .terminal-header {
@@ -1970,6 +2258,8 @@ button,
   padding: 10px 16px;
   background: rgba(255, 255, 255, 0.03);
   border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+  position: relative;
+  z-index: 3;
 }
 
 .terminal-info {
@@ -2010,10 +2300,33 @@ button,
   font-family: 'JetBrains Mono', Consolas, monospace;
   font-size: 12px;
   line-height: 1.6;
-  color: #d1d5db;
+  color: #e2e8f0;
   white-space: pre-wrap;
   word-break: break-all;
   background: transparent;
+  position: relative;
+  z-index: 1;
+  text-shadow: 0 0 1px rgba(255, 255, 255, 0.35);
+}
+
+.terminal-body::-webkit-scrollbar {
+  width: 4px;
+  height: 4px;
+}
+
+.terminal-body::-webkit-scrollbar-track {
+  background: rgba(0, 0, 0, 0.25);
+}
+
+.terminal-body::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.16);
+  border-radius: 4px;
+  transition: all 150ms ease;
+}
+
+.terminal-body::-webkit-scrollbar-thumb:hover {
+  background: rgba(94, 106, 210, 0.75);
+  box-shadow: 0 0 8px rgba(94, 106, 210, 0.9);
 }
 
 /* 状态药丸与徽章 */
@@ -2046,7 +2359,7 @@ button,
 
 /* 快照模态框 */
 .snapshot-modal {
-  animation: splash-pop 0.2s ease;
+  animation: modal-spring-enter 180ms cubic-bezier(0.16, 1, 0.3, 1) forwards;
 }
 
 .snapshot-stats-bar {
@@ -2354,3 +2667,93 @@ button,
   overflow: hidden;
   text-overflow: ellipsis;
 }
+
+/* ============================================================
+   阶段四：装饰性 UI 与微交互打磨体系 (Phase 4: Decorative Polish & Micro-Interactions)
+   ============================================================ */
+
+/* 1. 全局流光环境背景增强与极客点阵 */
+.ambient-glow-layer {
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: 0;
+  background: 
+    radial-gradient(circle at 50% -10%, rgba(94, 106, 210, 0.15) 0%, transparent 60%),
+    radial-gradient(circle at 100% 100%, rgba(139, 92, 246, 0.08) 0%, transparent 50%),
+    radial-gradient(circle at 0% 100%, rgba(16, 185, 129, 0.05) 0%, transparent 40%);
+  opacity: 0.85;
+  transition: opacity 300ms ease;
+}
+
+/* 2. 阻尼物理按压扩展 (Damped Spring Press Haptics) */
+button:active:not(:disabled),
+.clickable:active:not(:disabled),
+.tab-item:active:not(:disabled),
+.nav-item:active:not(:disabled),
+.card.clickable:active:not(:disabled) {
+  transform: scale(0.975) !important;
+  transition: transform 80ms cubic-bezier(0.16, 1, 0.3, 1) !important;
+}
+
+/* 3. 极客终端 CRT 扫描线与磷光微光专用类 (Terminal CRT Screen Class) */
+.terminal-crt,
+.crt-screen {
+  position: relative;
+  overflow: hidden;
+}
+
+.terminal-crt::before,
+.crt-screen::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: repeating-linear-gradient(
+    0deg,
+    rgba(0, 0, 0, 0.15) 0px,
+    rgba(0, 0, 0, 0.15) 1px,
+    transparent 1px,
+    transparent 2px
+  );
+  pointer-events: none;
+  z-index: 2;
+  border-radius: inherit;
+}
+
+/* 4. 终端日志高亮荧光色标 (Phosphor Badges & Log Highlights) */
+.log-line-info {
+  color: #818cf8;
+}
+
+.log-line-warn {
+  color: #fbbf24;
+}
+
+.log-line-error {
+  color: #f87171;
+}
+
+.log-line-success {
+  color: #34d399;
+}
+
+/* 5. 极细发丝圆角滑动条全局加固 (Hairline Glowing Scrollbars) */
+*::-webkit-scrollbar {
+  width: 5px;
+  height: 5px;
+}
+
+*::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+*::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.12);
+  border-radius: 4px;
+}
+
+*::-webkit-scrollbar-thumb:hover {
+  background: rgba(94, 106, 210, 0.55);
+  box-shadow: 0 0 10px rgba(94, 106, 210, 0.75);
+}
+

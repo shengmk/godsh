@@ -253,7 +253,7 @@ export default function SystemTasksPage() {
           </div>
 
           {/* 右侧终端输出 */}
-          <div className="terminal-panel panel glass">
+          <div className="terminal-panel panel glass terminal-crt">
             <div className="terminal-header flex-between">
               <div className="terminal-info">
                 <span className="terminal-dot red" />

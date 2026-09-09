@@ -146,7 +146,7 @@ export function TaskCenter() {
                     )}
 
                     {isExpanded && (
-                      <pre className="progress-log" ref={logRef} style={{ marginTop: 8 }}>
+                      <pre className="progress-log terminal-crt" ref={logRef} style={{ marginTop: 8 }}>
                         {t.log || '（等待日志输出…）'}
                       </pre>
                     )}

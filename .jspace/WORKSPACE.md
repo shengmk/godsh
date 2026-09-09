@@ -53,10 +53,12 @@ godsh 全局 UI 电影级翻新与无控制台启动优化（v0.6.0，四大阶�
 - ✓22 阶段一（基础 UI 框架重构）全量落地：Rust CREATE_NO_WINDOW 消除黑窗、Cinematic Dark & Glassmorphism 全局设计令牌、顶栏与侧栏骨架翻新、Lucide 矢量图标系统替换 Raw Emoji — verified by: pnpm typecheck (0 errors), pnpm test (69/69 pass), pnpm build:web (0 errors)
 - ✓23 阶段二（基础功能性 UI 填充）全量落地：7 大业务页面（ProfilesPage, AllocationsPage, VaultHubPage, SystemTasksPage, MarketPage, ControllerConsolePage, KernelsPage, DshEnvsPage, SettingsPage）看板与表格全面翻新，全站 100% 消除 Raw Emoji，全量覆盖 Lucide 矢量图标系统，双轨启动与微光拟态生效 — verified by: pnpm typecheck (0 errors), pnpm test (69/69 pass), pnpm build:web (0 errors)
 - ✓24 阶段三（功能性 UI 查漏补缺和实用性检查）全量落地：全系统空状态组件化 (EmptyState 毛玻璃虚线与辉光光环)、微光渐变骨架屏 (CSS Shimmer 渐变平滑过渡替换纯文字 Loading)、React 错误边界 (ErrorBoundary 自愈沙箱与故障卡片)、触控热区达标 (小按钮 pseudo-element hitSlop >= 44×44px)、键盘无障碍体系 (Esc 全局层级关闭模态与选择、Ctrl+K 快速聚焦搜索、发丝微光焦点环)、零横向溢出防御体系 (极端长包名与路径截断与 tooltip、容器 min-width:0 与 overflow-x:hidden 严防溢出) — verified by: pnpm typecheck (0 errors), pnpm test (69/69 pass), pnpm build:web (0 errors)
+- ✓25 阶段四（装饰性 UI 与微交互添加）全量落地与视觉检查方案输出：流光环境微光与极客点阵背景 (Micro-dot Matrix)、全交互元素物理按压阻尼 (active: scale(0.975) & cubic-bezier(0.16, 1, 0.3, 1))、全色系多阶状态呼吸灯 (Emerald/Amber/Ruby/Indigo 脉冲光环)、极客终端 CRT 水平扫描线与磷光微质感 (Terminal CRT Overlay & 4px 发丝辉光滑轨)、模态弹窗与抽屉流体进入曲线 (modal-spring-enter)、基于 paicat1/dsh-screenshot 与 liustack/modlens 协同的自动化视觉走查方案 (方案.md) 完备归档 — verified by: pnpm typecheck (0 errors), pnpm test (69/69 pass), pnpm build:web (0 errors)
 
 ## Open
 - ?01 确认是否需要将默认字体 Inter 与 JetBrains Mono 嵌入前端包本地离线加载
 - ?02 评估是否提供全局暗黑/亮色切换，抑或作为专精极客工具强制锁定 Cinematic Dark
 
 ## Next
-推进「阶段四：装饰性 UI 与微交互添加（流光点阵背景 / 物理按压阻尼 / 状态呼吸灯 / 终端扫描线 / 细腻动画调优）」！
+四大重构阶段已全量闭环交付！ godsh UI/UX 已完成从无控制台启动、Cinematic Dark 底座、7 大业务功能看板、实用性查漏补缺至电影级微交互终极升华。后续可根据实际联调反馈推进 v0.6.0 正式发版！
+
