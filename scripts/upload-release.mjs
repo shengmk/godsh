@@ -11,8 +11,9 @@ const token = credOut.match(/password=(.+)/)[1].trim();
 
 const owner = 'shengmk';
 const repo = 'godsh';
-const tag = 'v0.5.5';
-const releaseName = 'godsh v0.5.5 — 环境可靠性中心与 DSH Desktop 深度兼容';
+const version = process.argv[2] || '0.6.0';
+const tag = `v${version}`;
+const releaseName = `godsh v${version} — 全局 UI/UX 电影级重构与无控制台启动`;
 const releaseNotes = fs.readFileSync(path.resolve('release/RELEASE_NOTES.md'), 'utf8');
 
 function request(options, data = null) {
@@ -86,8 +87,8 @@ async function run() {
   }
 
   const files = [
-    'godsh-0.5.5-x64-setup.exe',
-    'godsh-0.5.5-x64.zip',
+    `godsh-${version}-x64-setup.exe`,
+    `godsh-${version}-x64.zip`,
     'SHA256SUMS.txt'
   ];
 

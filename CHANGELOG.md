@@ -1,3 +1,35 @@
+## [0.6.0] - 2026-09-09
+
+全局 UI/UX 电影级重构（Cinematic Dark + Glassmorphism）与无控制台启动优化。
+
+### 🛡️ 无黑窗启动 (P0)
+- **CREATE_NO_WINDOW**：在 Tauri Rust 核心层通过 `CREATE_NO_WINDOW = 0x08000000` 注入，彻底消除启动时弹出的 node.exe / cmd.exe 黑窗；
+- **全生命周期静默托管**：后端子服务与命令行操作全部转为后台静默管道托管。
+
+### 🎨 电影级环境底座与设计令牌
+- **Cinematic Dark**：OLED 纯黑 `#020203` 底板结合现代微光毛玻璃拟态 `backdrop-filter: blur(20px)` 与发丝微光边框 `rgba(255,255,255,0.08)`；
+- **流光点阵图层**：天顶散射微蓝 (`0.14`)、右下极光紫 (`0.09`) 与 24px 网格点阵微光叠加；
+- **矢量图标系统全覆盖**：100% 根除所有 Raw Emoji，全量引入 `lucide-react` 精密矢量图标。
+
+### 📊 七大业务功能页面全量看板化
+- **Profiles / Allocations / Vault / Tasks / Market / Kernels / Settings** 7 大页面全面看板化重构，32px 超紧凑高密度数据表格、鼠标框选多选（AABB碰撞算法）与双轨启动唤起。
+
+### 🧩 实用性防御与键盘无障碍体系
+- **空状态组件 (EmptyState)**：虚线微光边框、弥散光环与场景化引导；
+- **微光渐变骨架屏 (CSS Shimmer)**：平滑流光骨架替换纯文字 Loading；
+- **React 错误边界 (ErrorBoundary)**：组件级故障隔离自愈；
+- **触控热区与键盘导航**：按钮热区扩展 `≥ 44×44px`，支持全局 `Esc` 退出与 `Ctrl+K` 聚焦搜索；
+- **零横向溢出防御**：容器与文本截断保护，视口严丝合缝。
+
+### ⚡ 阻尼物理按压与极客终端微质感
+- **机械按压阻尼**：交互元素引入 `cubic-bezier(0.16, 1, 0.3, 1)` 弹性曲线，`:active { transform: scale(0.975); }`；
+- **全色系状态呼吸灯**：翠绿、琥珀、绯红、靛蓝四色动态呼吸光晕环；
+- **极客终端 CRT 扫描线**：水平扫描线微纹理（`pointer-events: none`），4px 超细发丝荧光滑轨；
+- **流体弹簧转场**：弹窗与抽屉 `@keyframes modal-spring-enter` 180ms 回弹展开。
+
+### 🔍 自动化视觉检查方案
+- 联合 `paicat1/dsh-screenshot` 与 `liustack/modlens` 构建桌面 WebView2 自动化视觉质检闭环 (`09_输入文档/方案.md`)。
+
 ## [0.5.5] - 2026-09-08
 
 升级为环境可靠性中心（Environment Reliability & Control Center）与 DSH Desktop 深度兼容。

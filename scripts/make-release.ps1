@@ -2,7 +2,7 @@
 # 流程：打包后端 → 构建前端(tauri) → tauri build（嵌入前端）→ 打 ZIP + 复制安装器 → SHA256
 # 用法: pwsh -File scripts/make-release.ps1 [-Version 0.5.1]
 param(
-  [string]$Version = "0.5.5",
+  [string]$Version = "0.6.0",
   [switch]$SkipBuild
 )
 
