@@ -12,6 +12,8 @@ import {
   Search,
   RefreshCw,
   Sparkles,
+  Sun,
+  Moon,
   type LucideIcon,
 } from 'lucide-react'
 import { api } from './api'
@@ -350,6 +352,30 @@ export default function App() {
           >
             {`DSH ${shownVersion || '—'} · ${dshStatus?.activeVersionName ? 'env' : 'PATH'}`}
           </div>
+          <button
+            className="topbar-btn theme-toggle-btn"
+            title={`切换主题（当前：${theme === 'light' ? '浅色' : theme === 'dark' ? '深色' : '跟随系统'}，点击切换）`}
+            onClick={() => {
+              const next = theme === 'light' ? 'dark' : 'light'
+              changeTheme(next)
+            }}
+            style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              width: '32px',
+              height: '32px',
+              borderRadius: '8px',
+              background: 'var(--surface-soft, rgba(255,255,255,0.04))',
+              border: '1px solid var(--border-hairline)',
+              color: 'var(--text-secondary)',
+              cursor: 'pointer',
+              transition: 'all 150ms ease',
+              flexShrink: 0,
+            }}
+          >
+            {theme === 'light' ? <Moon size={15} /> : <Sun size={15} />}
+          </button>
         </div>
 
         <ErrorBoundary fallbackTitle="页面发生未捕获异常">

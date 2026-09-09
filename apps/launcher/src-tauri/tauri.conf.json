@@ -19,6 +19,7 @@
                                     "minHeight":  600,
                                     "resizable":  true,
                                     "fullscreen":  false,
+                                    "theme":  "Dark",
                                     "additionalBrowserArgs":  "--proxy-bypass-list=\u003c-loopback\u003e"
                                 }
                             ],

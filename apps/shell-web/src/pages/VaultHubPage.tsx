@@ -19,6 +19,7 @@ import {
   RotateCcw,
   Upload,
   ArrowUpCircle,
+  HelpCircle,
 } from 'lucide-react'
 import { api } from '../api'
 import { EmptyState, SkeletonTable } from '../components'
@@ -81,6 +82,7 @@ export default function VaultHubPage() {
     version: '',
   })
   const [historyModal, setHistoryModal] = useState<{ open: boolean }>({ open: false })
+  const [explainModal, setExplainModal] = useState(false)
   const [notice, setNotice] = useState<{ msg: string; type: 'ok' | 'warn' | 'err' } | null>(null)
 
   function showNotice(msg: string, type: 'ok' | 'warn' | 'err' = 'ok') {
@@ -410,6 +412,14 @@ export default function VaultHubPage() {
           </button>
           <button className="btn sm" onClick={() => setImportModal({ open: true, targetPath: '', category: 'local' })}>
             <Plus size={12} /> 导入本地包
+          </button>
+          <button
+            className="btn sm"
+            onClick={() => setExplainModal(true)}
+            title="为什么常规更新只更新部分插件？查看沙箱差量版本机制说明"
+            style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}
+          >
+            <HelpCircle size={12} /> 更新机制说明
           </button>
           <button className="btn sm" onClick={() => void handleCheckUpdates()} disabled={actionLoading === 'updates'}>
             <RefreshCw size={12} className={actionLoading === 'updates' ? 'animate-spin' : ''} /> 检查更新
@@ -1304,6 +1314,40 @@ export default function VaultHubPage() {
                 ) : (
                   '导入入库'
                 )}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 弹窗 6: 沙箱更新机制与版本判定规则深度解析 */}
+      {explainModal && (
+        <div className="modal-backdrop" onClick={() => setExplainModal(false)}>
+          <div className="modal-dialog" onClick={(e) => e.stopPropagation()} style={{ maxWidth: '580px' }}>
+            <div className="modal-title" style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+              <HelpCircle size={18} style={{ color: 'var(--brand-primary)' }} />
+              <span>插件沙箱更新与版本机制说明</span>
+            </div>
+            <div style={{ margin: '14px 0', fontSize: '0.85rem', lineHeight: '1.7', color: 'var(--text-secondary)' }}>
+              <p style={{ marginBottom: '10px' }}>
+                用户常见疑问：<strong>“为什么点击‘全部更新’时，只有一部分插件更新了，而不是所有 50+ 个插件都全量下载？”</strong>
+              </p>
+              <div style={{ background: 'var(--surface-soft)', padding: '12px 14px', borderRadius: '8px', border: '1px solid var(--border-hairline)', marginBottom: '10px' }}>
+                <div style={{ fontWeight: 600, color: 'var(--text-primary)', marginBottom: '4px' }}>1. 智能差量升级策略 (Save Bandwidth & Stability)</div>
+                <div>沙箱采用现代化包管理器的差量升级哲学。系统首先并发校验 npm 镜像源上的最新版本（latest），<strong>仅对远程确实存在更高版本（hasUpdate = true）的插件执行拉取与解包</strong>。对于版本已是最新（当前 {plugins.filter((p) => !p.hasUpdate && p.source !== 'local').length} 个）的插件，系统自动跳过冗余下载，直接复用本地缓存与既有 Junction 链接。</div>
+              </div>
+              <div style={{ background: 'var(--surface-soft)', padding: '12px 14px', borderRadius: '8px', border: '1px solid var(--border-hairline)', marginBottom: '10px' }}>
+                <div style={{ fontWeight: 600, color: 'var(--text-primary)', marginBottom: '4px' }}>2. 本地收割资产保护 (Local Harvest Protection)</div>
+                <div>从环境反向收割入库（<code>source: 'local'</code>）的插件属于用户本地开发或魔改包。为防止远程 npm 代码覆盖破坏您的本地开发改动，系统<strong>严格排除自动从 npm 覆盖这些插件</strong>。</div>
+              </div>
+              <div style={{ background: 'var(--surface-soft)', padding: '12px 14px', borderRadius: '8px', border: '1px solid var(--border-hairline)' }}>
+                <div style={{ fontWeight: 600, color: 'var(--text-primary)', marginBottom: '4px' }}>3. 私有包与网络超时保护</div>
+                <div>专属私有包在 npm 镜像返回 404 时将安全保留；若遇到网络抖动触发 3.5s 保护性超时，对应插件将保持就绪，您可在网络通畅后再次点击“检查更新”。</div>
+              </div>
+            </div>
+            <div className="modal-actions" style={{ display: 'flex', justifyContent: 'flex-end' }}>
+              <button className="btn primary" onClick={() => setExplainModal(false)}>
+                知道了
               </button>
             </div>
           </div>
