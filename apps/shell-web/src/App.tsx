@@ -18,7 +18,7 @@ import { api } from './api'
 import type { Health, DshStatus, KernelInstance, LocalPlugin, ProfileView } from './types'
 import { useI18n } from './i18n'
 import { useTheme } from './theme'
-import { KeepAlive } from './components'
+import { ErrorBoundary, KeepAlive, PageSkeleton } from './components'
 import { TaskCenter } from './TaskCenter'
 
 // 按页代码分割：首屏只加载当前页面，其它页面按需加载
@@ -86,6 +86,7 @@ export default function App() {
     kernels: KernelInstance[]
   } | null>(null)
   const searchTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const searchInputRef = useRef<HTMLInputElement | null>(null)
   const [booting, setBooting] = useState(true)
   const [bootStep, setBootStep] = useState(0)
   const [bootMsg, setBootMsg] = useState('正在启动…')
@@ -177,9 +178,23 @@ export default function App() {
   const shownVersion = dshStatus?.currentVersion ?? health?.dsh.version ?? ''
   const shownVersionHint = dshStatus?.activeVersionName ? `env: ${dshStatus.activeVersionName}` : 'PATH dsh'
 
-  // 键盘快捷键：Ctrl/Alt + 1..7（不在输入框内拦截；不显示数字角标）
+  // 键盘快捷键：Ctrl+K 快速聚焦搜索，Esc 清空/退出，Ctrl/Alt + 1..9 导航切换
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k') {
+        e.preventDefault()
+        searchInputRef.current?.focus()
+        searchInputRef.current?.select()
+        return
+      }
+      if (e.key === 'Escape') {
+        if (searchOpen || search) {
+          setSearchOpen(false)
+          setSearch('')
+          searchInputRef.current?.blur()
+          return
+        }
+      }
       const target = e.target as HTMLElement | null
       if (target && ['INPUT', 'TEXTAREA', 'SELECT'].includes(target.tagName)) return
       if (!(e.ctrlKey || e.metaKey || e.altKey)) return
@@ -191,7 +206,7 @@ export default function App() {
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [])
+  }, [search, searchOpen])
 
   return booting ? (
     <div className="splash">
@@ -257,8 +272,9 @@ export default function App() {
           <div className="search-wrap">
             <Search size={14} className="search-icon" />
             <input
+              ref={searchInputRef}
               className="input search-input"
-              placeholder={t('topbar.search')}
+              placeholder={`${t('topbar.search')} (Ctrl+K)`}
               value={search}
               onChange={(e) => void runSearch(e.target.value)}
               onFocus={() => q && setSearchOpen(true)}
@@ -336,30 +352,32 @@ export default function App() {
           </div>
         </div>
 
-        <Suspense fallback={<div className="empty">页面加载中…</div>}>
-          <KeepAlive activeKey={page}>
-            {{
-              console: <ControllerConsolePage onNavigate={setPage} />,
-              profiles: <ProfilesPage />,
-              tasks: <SystemTasksPage />,
-              market: <MarketPage />,
-              vault: <VaultHubPage />,
-              allocations: <AllocationsPage />,
-              kernels: <KernelsPage />,
-              'dsh-envs': <DshEnvsPage />,
+        <ErrorBoundary fallbackTitle="页面发生未捕获异常">
+          <Suspense fallback={<PageSkeleton />}>
+            <KeepAlive activeKey={page}>
+              {{
+                console: <ControllerConsolePage onNavigate={setPage} />,
+                profiles: <ProfilesPage />,
+                tasks: <SystemTasksPage />,
+                market: <MarketPage />,
+                vault: <VaultHubPage />,
+                allocations: <AllocationsPage />,
+                kernels: <KernelsPage />,
+                'dsh-envs': <DshEnvsPage />,
 
-              settings: (
-                <SettingsPage
-                  locale={locale}
-                  changeLocale={changeLocale}
-                  theme={theme}
-                  changeTheme={changeTheme}
-                  onNavigate={setPage}
-                />
-              ),
-            }}
-          </KeepAlive>
-        </Suspense>
+                settings: (
+                  <SettingsPage
+                    locale={locale}
+                    changeLocale={changeLocale}
+                    theme={theme}
+                    changeTheme={changeTheme}
+                    onNavigate={setPage}
+                  />
+                ),
+              }}
+            </KeepAlive>
+          </Suspense>
+        </ErrorBoundary>
       </main>
       <TaskCenter />
     </div>

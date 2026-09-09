@@ -20,10 +20,11 @@ import {
   Unlock,
   RotateCcw,
   Loader2,
+  Layers,
 } from 'lucide-react'
 import { api } from '../api'
 import type { DshInstance, Health, PortInfo, ProfileView, WorkflowTemplate, ProfilePackage, SnapshotItem } from '../types'
-import { ConfirmDialog, ContextMenu, ErrorText, Loading, Toast, type MenuState } from '../components'
+import { ConfirmDialog, ContextMenu, EmptyState, Loading, SkeletonGrid, Toast, type MenuState } from '../components'
 import { useToast } from '../hooks'
 import { useI18n } from '../i18n'
 import { isTauri, openDshWeb, openDshDesktop as openDshDesktopFn, openExternal } from '../tauri'
@@ -96,6 +97,44 @@ export default function ProfilesPage() {
       .then((st) => setDesktopInstalled(st.installed))
       .catch(() => {})
   }, [load])
+
+  // Esc 键层级关闭模态框、日志、选择
+  useEffect(() => {
+    function onKeyDown(e: KeyboardEvent) {
+      if (e.key !== 'Escape') return
+      if (workflowsModalOpen) {
+        setWorkflowsModalOpen(false)
+        return
+      }
+      if (snapshotModalProfile) {
+        setSnapshotModalProfile(null)
+        return
+      }
+      if (deleteTarget) {
+        setDeleteTarget(null)
+        return
+      }
+      if (menu) {
+        setMenu(null)
+        return
+      }
+      if (showPorts) {
+        setShowPorts(false)
+        return
+      }
+      if (logFor) {
+        setLogFor(null)
+        setLog('')
+        setPaused(false)
+        return
+      }
+      if (selected.size > 0) {
+        setSelected(new Set())
+      }
+    }
+    window.addEventListener('keydown', onKeyDown)
+    return () => window.removeEventListener('keydown', onKeyDown)
+  }, [workflowsModalOpen, snapshotModalProfile, deleteTarget, menu, showPorts, logFor, selected])
 
   // 指定 Profile 使用的 dsh 版本
   async function setProfileVersion(name: string, instance: string) {
@@ -718,9 +757,16 @@ export default function ProfilesPage() {
             </button>
           </div>
           {ports === null ? (
-            <p className="muted">加载中…</p>
+            <div style={{ padding: '16px 0' }}>
+              <Loading label="正在查询活动端口…" />
+            </div>
           ) : ports.length === 0 ? (
-            <p className="muted">当前没有运行中的环境</p>
+            <EmptyState
+              compact
+              icon={Network}
+              title="暂无活动监听端口"
+              description="当前没有正在运行的 DSH 实例在监听端口。启动环境后将在此显示端口与 PID 状态。"
+            />
           ) : (
             <div className="queue-list">
               {ports.map((p) => (
@@ -749,9 +795,27 @@ export default function ProfilesPage() {
       )}
 
       {profiles === null ? (
-        <Loading />
+        <SkeletonGrid count={6} />
       ) : profiles.length === 0 ? (
-        <ErrorText message="未发现任何 Profile" />
+        <EmptyState
+          icon={Layers}
+          title="暂无任何环境配置 (Profile)"
+          description="当前工作空间尚未创建任何 DSH 环境。您可以立即初始化官方标准模板（包含 @deepseek-ai/dsh-base 与 Web 控制台），或从本地导入已有的环境配置包。"
+          action={{
+            label: '新建首个环境',
+            icon: Plus,
+            variant: 'glow',
+            onClick: () => {
+              if (!newName.trim()) setNewName('myenv')
+              void createNewProfile()
+            },
+          }}
+          secondaryAction={{
+            label: '导入环境包',
+            icon: Upload,
+            onClick: () => importInputRef.current?.click(),
+          }}
+        />
       ) : (
         <div className="grid">
           {profiles.map((p) => (

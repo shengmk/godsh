@@ -18,8 +18,10 @@ import {
   Sparkles,
   RotateCcw,
   Upload,
+  ArrowUpCircle,
 } from 'lucide-react'
 import { api } from '../api'
+import { EmptyState, SkeletonTable } from '../components'
 import { taskManager } from '../tasks'
 import type { DeploymentSnapshot, DiskSavingsReport, PluginAuditReport, ProfileView, VaultPlugin } from '../types'
 
@@ -666,15 +668,37 @@ export default function VaultHubPage() {
             <tbody>
               {loading && (
                 <tr>
-                  <td colSpan={7} style={{ textAlign: 'center', padding: '30px', color: 'var(--muted)' }}>
-                    正在加载沙箱插件数据…
+                  <td colSpan={7} style={{ padding: '20px 10px' }}>
+                    <SkeletonTable rows={4} cols={7} />
                   </td>
                 </tr>
               )}
               {!loading && filteredPlugins.length === 0 && (
                 <tr>
-                  <td colSpan={7} style={{ textAlign: 'center', padding: '30px', color: 'var(--muted)' }}>
-                    无匹配插件资产
+                  <td colSpan={7} style={{ padding: '24px 0' }}>
+                    <EmptyState
+                      icon={Archive}
+                      title="沙箱隔离仓库中暂无匹配资产"
+                      description={
+                        search
+                          ? `未搜索到匹配「${search}」的插件资产，请更换关键词或清除筛选。`
+                          : 'Vault 沙箱隔离池为空。您可以从市场一键下载插件至沙箱，或导入本地开发中的插件包。'
+                      }
+                      action={
+                        search
+                          ? {
+                              label: '清除搜索',
+                              icon: X,
+                              onClick: () => setSearch(''),
+                            }
+                          : {
+                              label: '导入本地插件',
+                              icon: Upload,
+                              variant: 'glow',
+                              onClick: () => setImportModal({ open: true, targetPath: '', category: 'local' }),
+                            }
+                      }
+                    />
                   </td>
                 </tr>
               )}
@@ -738,7 +762,15 @@ export default function VaultHubPage() {
                                 }}
                                 title={`立即下载并升级到 v${p.latestVersion}，并自动更新所有挂载环境`}
                               >
-                                {actionLoading === `update-${p.id}` ? '更新中…' : '⬆️ 立即更新'}
+                                {actionLoading === `update-${p.id}` ? (
+                                  <>
+                                    <RefreshCw size={10} className="animate-spin" /> 更新中…
+                                  </>
+                                ) : (
+                                  <span style={{ display: 'inline-flex', alignItems: 'center', gap: 3 }}>
+                                    <ArrowUpCircle size={10} /> 立即更新
+                                  </span>
+                                )}
                               </button>
                             </span>
                           )}
@@ -1163,7 +1195,12 @@ export default function VaultHubPage() {
 
             <div style={{ maxHeight: '360px', overflowY: 'auto', margin: '14px 0' }}>
               {history.length === 0 && (
-                <div style={{ textAlign: 'center', padding: '20px', color: 'var(--muted)' }}>暂无部署快照记录</div>
+                <EmptyState
+                  compact
+                  icon={History}
+                  title="暂无部署快照记录"
+                  description="在沙箱中执行跨环境挂载或多版本原子切换时，系统将在此自动保存快照并支持秒级回滚。"
+                />
               )}
               {history.slice().reverse().map((h) => (
                 <div
@@ -1258,8 +1295,15 @@ export default function VaultHubPage() {
                 className="btn primary"
                 disabled={!importModal.targetPath.trim() || actionLoading === 'import-local'}
                 onClick={() => void handleImportLocal()}
+                style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}
               >
-                {actionLoading === 'import-local' ? '⏳ 导入中…' : '导入入库'}
+                {actionLoading === 'import-local' ? (
+                  <>
+                    <RefreshCw size={12} className="animate-spin" /> 正在导入…
+                  </>
+                ) : (
+                  '导入入库'
+                )}
               </button>
             </div>
           </div>

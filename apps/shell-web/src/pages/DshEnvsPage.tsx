@@ -13,7 +13,7 @@ import {
 } from 'lucide-react'
 import { api } from '../api'
 import type { DshEnv, DshEnvsInfo, DshStatus, ProfileView } from '../types'
-import { Toast } from '../components'
+import { PageSkeleton, Toast } from '../components'
 import { useToast } from '../hooks'
 import { useI18n } from '../i18n'
 
@@ -172,7 +172,7 @@ export default function DshEnvsPage() {
     }
   }
 
-  if (!info) return <div className="empty">{t('dash.loading')}</div>
+  if (!info) return <PageSkeleton />
 
   const { envs, activeVersionName, byProfile, tasks } = info
   const activeId = activeVersionName.replace(/^env:/, '')

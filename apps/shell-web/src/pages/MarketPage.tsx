@@ -12,10 +12,12 @@ import {
   Plus,
   Clock,
   AlertCircle,
+  Search,
+  RotateCcw,
 } from 'lucide-react'
 import { api } from '../api'
 import type { MarketPlugin, ProfileView, VaultPlugin } from '../types'
-import { ErrorText, Loading, Toast } from '../components'
+import { EmptyState, SkeletonGrid, Toast } from '../components'
 import { useToast } from '../hooks'
 import { useI18n } from '../i18n'
 
@@ -615,9 +617,35 @@ export default function MarketPage() {
       )}
 
       {plugins === null ? (
-        <Loading />
+        <SkeletonGrid count={8} />
       ) : filteredPlugins.length === 0 ? (
-        <ErrorText message="没有匹配的插件，请尝试更换关键词或筛选条件" />
+        <EmptyState
+          icon={Search}
+          title="未找到匹配的插件包"
+          description={
+            query || category
+              ? `在${category ? `「${category}」` : '全部'}分类下未找到与「${query}」匹配的插件。请尝试更换检索关键词或重置筛选条件。`
+              : '市场插件列表为空。请检查网络连接或尝试刷新数据。'
+          }
+          action={{
+            label: '重置搜索与分类',
+            icon: RotateCcw,
+            onClick: () => {
+              setQuery('')
+              setCategory('')
+            },
+          }}
+          secondaryAction={{
+            label: '刷新市场',
+            icon: RefreshCw,
+            onClick: () => {
+              api
+                .market()
+                .then(setPlugins)
+                .catch((e) => show(e instanceof Error ? e.message : String(e), true))
+            },
+          }}
+        />
       ) : (
         <>
           <div className="muted" style={{ marginBottom: 10, fontSize: 12, display: 'flex', justifyContent: 'space-between' }}>

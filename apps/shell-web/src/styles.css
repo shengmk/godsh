@@ -125,6 +125,8 @@ body {
 .app {
   display: flex;
   height: 100%;
+  width: 100%;
+  overflow: hidden;
 }
 
 /* ---------- 侧边导航（深色、沉稳） ---------- */
@@ -277,7 +279,9 @@ body {
 /* ---------- 主内容 ---------- */
 .main {
   flex: 1;
+  min-width: 0;
   overflow-y: auto;
+  overflow-x: hidden;
   padding: 28px 32px;
 }
 
@@ -891,15 +895,59 @@ body {
   box-shadow: 0 0 8px var(--ok);
 }
 
-/* ---------- 键盘无障碍 ---------- */
+/* ---------- 键盘无障碍与焦点光环 ---------- */
 .btn:focus-visible,
 .nav-item:focus-visible,
 .ctx-item:focus-visible,
 .input:focus-visible,
 .select:focus-visible,
-.search-item:focus-visible {
-  outline: 2px solid var(--brand-2);
+.search-item:focus-visible,
+button:focus-visible,
+[tabindex]:focus-visible {
+  outline: 2px solid var(--border-focus);
   outline-offset: 2px;
+  box-shadow: 0 0 12px rgba(94, 106, 210, 0.45);
+}
+
+/* ---------- 触控热区与可用性标尺 (Accessibility & Touch Targets >= 44x44) ---------- */
+.btn.sm,
+.btn-compact,
+.icon-btn {
+  position: relative;
+  min-height: 28px;
+  user-select: none;
+  cursor: pointer;
+}
+
+.btn.sm::after,
+.btn-compact::after,
+.icon-btn::after {
+  content: '';
+  position: absolute;
+  top: -8px;
+  bottom: -8px;
+  left: -8px;
+  right: -8px;
+}
+
+button,
+.btn,
+.nav-item,
+.search-item,
+.chip,
+.badge,
+.tab,
+.select,
+.switch-item {
+  user-select: none;
+}
+
+button,
+.btn,
+.nav-item,
+.search-item,
+.ctx-item {
+  cursor: pointer;
 }
 
 /* ---------- 入场动画（克制） ---------- */
@@ -2010,4 +2058,299 @@ body {
   border-radius: 6px;
   margin-bottom: 12px;
   border: 1px solid var(--surface-border);
+}
+
+/* ============================================================
+   阶段三：状态完备性、骨架流光、错误边界与零溢出防御体系
+   ============================================================ */
+
+/* ---------- 骨架流光动效 (Shimmer Skeleton Effect) ---------- */
+@keyframes shimmer-sweep {
+  0% {
+    background-position: -200% 0;
+  }
+  100% {
+    background-position: 200% 0;
+  }
+}
+
+.skeleton-shimmer {
+  display: inline-block;
+  background: linear-gradient(
+    90deg,
+    rgba(255, 255, 255, 0.03) 25%,
+    rgba(255, 255, 255, 0.09) 37%,
+    rgba(255, 255, 255, 0.03) 63%
+  );
+  background-size: 400% 100%;
+  animation: shimmer-sweep 1.8s ease-in-out infinite;
+  border-radius: var(--radius-sm, 6px);
+}
+
+.skeleton-card-wrap {
+  pointer-events: none;
+  border: 1px solid var(--border-hairline);
+  background: rgba(13, 13, 20, 0.45);
+}
+
+.skeleton-table {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 16px;
+  background: rgba(13, 13, 20, 0.4);
+  border: 1px solid var(--border-hairline);
+  border-radius: var(--radius);
+}
+
+.skeleton-table-row {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 8px 0;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.03);
+}
+
+.skeleton-table-row:last-child {
+  border-bottom: none;
+}
+
+.page-skeleton {
+  animation: fade-slide 0.18s ease;
+}
+
+/* ---------- 状态完备性：空状态卡片 (Empty States) ---------- */
+.empty-card {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  padding: 48px 24px;
+  background: rgba(13, 13, 20, 0.55);
+  backdrop-filter: blur(16px);
+  border: 1px dashed var(--border-subtle);
+  border-radius: var(--radius);
+  margin: 16px 0;
+  transition: all var(--transition-normal);
+}
+
+.empty-card:hover {
+  border-color: rgba(94, 106, 210, 0.45);
+  background: rgba(13, 13, 20, 0.68);
+  box-shadow: 0 4px 24px rgba(0, 0, 0, 0.35);
+}
+
+.empty-card.compact {
+  padding: 24px 16px;
+  margin: 8px 0;
+}
+
+.empty-icon-halo {
+  width: 58px;
+  height: 58px;
+  border-radius: 50%;
+  background: radial-gradient(circle, rgba(94, 106, 210, 0.25) 0%, rgba(94, 106, 210, 0.04) 70%, transparent 100%);
+  border: 1px solid rgba(94, 106, 210, 0.35);
+  box-shadow: 0 0 24px rgba(94, 106, 210, 0.25);
+  color: var(--brand-secondary);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin-bottom: 14px;
+  flex-shrink: 0;
+}
+
+.empty-card.compact .empty-icon-halo {
+  width: 44px;
+  height: 44px;
+  margin-bottom: 10px;
+}
+
+.empty-title {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--text-primary);
+  margin: 0 0 6px 0;
+}
+
+.empty-desc {
+  font-size: 13px;
+  color: var(--text-secondary);
+  max-width: 480px;
+  line-height: 1.6;
+  margin: 0 0 18px 0;
+}
+
+.empty-card.compact .empty-desc {
+  margin: 0 0 12px 0;
+}
+
+.empty-actions {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  justify-content: center;
+  flex-wrap: wrap;
+}
+
+/* ---------- 错误边界故障卡片 (ErrorBoundary Fault Card) ---------- */
+.fault-card {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  padding: 48px 32px;
+  background: rgba(20, 10, 15, 0.75);
+  backdrop-filter: blur(20px);
+  border: 1px solid rgba(239, 68, 68, 0.35);
+  border-radius: var(--radius);
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.6), 0 0 24px rgba(239, 68, 68, 0.15);
+  margin: 24px 0;
+}
+
+.fault-icon-halo {
+  width: 60px;
+  height: 60px;
+  border-radius: 50%;
+  background: radial-gradient(circle, rgba(239, 68, 68, 0.25) 0%, rgba(239, 68, 68, 0.05) 70%, transparent 100%);
+  border: 1px solid rgba(239, 68, 68, 0.4);
+  box-shadow: 0 0 24px rgba(239, 68, 68, 0.3);
+  color: var(--err);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin-bottom: 16px;
+}
+
+.fault-title {
+  font-size: 17px;
+  font-weight: 700;
+  color: #fff;
+  margin: 0 0 8px 0;
+}
+
+.fault-desc {
+  font-size: 13px;
+  color: var(--text-secondary);
+  max-width: 520px;
+  line-height: 1.6;
+  margin: 0 0 16px 0;
+}
+
+.fault-details {
+  background: rgba(0, 0, 0, 0.5);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: var(--radius-sm);
+  padding: 10px 16px;
+  margin-bottom: 24px;
+  max-width: 620px;
+  width: 100%;
+  overflow-x: auto;
+}
+
+.fault-code {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: #fca5a5;
+  white-space: pre-wrap;
+  word-break: break-all;
+}
+
+.fault-actions {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  justify-content: center;
+  flex-wrap: wrap;
+}
+
+/* ---------- 错误条幅 (Error Banner Card) ---------- */
+.error-banner-card {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 12px 16px;
+  background: rgba(239, 68, 68, 0.1);
+  border: 1px solid rgba(239, 68, 68, 0.25);
+  border-radius: var(--radius-sm);
+  color: #fca5a5;
+  font-size: 13px;
+  margin: 12px 0;
+}
+
+.error-banner-card .error-icon {
+  color: var(--err);
+  flex-shrink: 0;
+}
+
+.error-banner-card .error-message {
+  flex: 1;
+  min-width: 0;
+  word-break: break-word;
+}
+
+/* ---------- 加载态动效 (Loading State) ---------- */
+.loading-state-wrap {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 14px;
+  padding: 48px 16px;
+  color: var(--text-secondary);
+  user-select: none;
+}
+
+.loading-spinner-ring {
+  width: 32px;
+  height: 32px;
+  border: 3px solid rgba(94, 106, 210, 0.15);
+  border-top-color: var(--brand-primary);
+  border-radius: 50%;
+  animation: ring-spin 0.8s linear infinite;
+  box-shadow: 0 0 14px rgba(94, 106, 210, 0.2);
+}
+
+@keyframes ring-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.loading-text {
+  font-size: 13px;
+  color: var(--text-secondary);
+  letter-spacing: 0.2px;
+}
+
+/* ---------- 零横向溢出防御体系 (Zero Horizontal Overflow Defense) ---------- */
+.truncate,
+.text-truncate {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+}
+
+.overflow-guard {
+  overflow-x: hidden;
+  max-width: 100%;
+}
+
+/* 单元格与弹性容器防溢出保护 */
+.table,
+.data-table {
+  width: 100%;
+  table-layout: fixed;
+}
+
+.table th,
+.table td,
+.data-table th,
+.data-table td {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }

@@ -10,10 +10,11 @@ import {
   AlertTriangle,
   Check,
   RotateCcw,
+  Binary,
 } from 'lucide-react'
 import { api } from '../api'
 import type { KernelInstance, KernelTemplate, ProfileView, UnifiedKernelConfig } from '../types'
-import { Toast } from '../components'
+import { EmptyState, Toast } from '../components'
 import { useToast } from '../hooks'
 import { useI18n } from '../i18n'
 
@@ -317,7 +318,12 @@ export default function KernelsPage() {
 
       <h2 style={{ fontSize: 16, margin: '0 0 12px' }}>实例</h2>
       {instances.length === 0 ? (
-        <div className="empty">暂无内核实例</div>
+        <EmptyState
+          compact
+          icon={Binary}
+          title="暂无运行中的内核实例"
+          description="当前尚未独立启动 Kernel 实例。您可以选择指定模版与目标 Profile 创建新内核实例并启动。"
+        />
       ) : (
         <div className="grid">
           {instances.map((k) => (

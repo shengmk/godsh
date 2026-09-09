@@ -10,6 +10,7 @@ import {
   FileText,
 } from 'lucide-react'
 import { api } from '../api'
+import { EmptyState } from '../components'
 import type { SystemTaskItem, JournalEntryItem } from '../types'
 
 export default function SystemTasksPage() {
@@ -197,7 +198,16 @@ export default function SystemTasksPage() {
 
             <div className="tasks-list">
               {filteredTasks.length === 0 ? (
-                <div className="empty-tasks">暂无符合条件的任务</div>
+                <EmptyState
+                  compact
+                  icon={ListTodo}
+                  title="暂无符合条件的系统任务"
+                  description={
+                    filterStatus !== 'all'
+                      ? `当前分类下没有状态为「${filterStatus}」的后台任务。`
+                      : '系统暂无正在运行或排队中的插件安装、备份或更新任务。'
+                  }
+                />
               ) : (
                 filteredTasks.map((t) => {
                   const b = getTaskBadge(t.type)
@@ -309,8 +319,13 @@ export default function SystemTasksPage() {
               <tbody>
                 {journal.length === 0 ? (
                   <tr>
-                    <td colSpan={7} className="text-center muted py-4">
-                      暂无审计日记记录
+                    <td colSpan={7} style={{ padding: '24px 0' }}>
+                      <EmptyState
+                        compact
+                        icon={FileText}
+                        title="暂无审计日记记录"
+                        description="系统尚未产生操作日记或已执行清空。后续的插件安装、环境启动等关键操作将自动记录于此。"
+                      />
                     </td>
                   </tr>
                 ) : (

@@ -17,10 +17,11 @@ import {
   Upload,
   CheckCircle2,
   AlertCircle,
+  Archive,
 } from 'lucide-react'
 import { api } from '../api'
 import type { Allocation, AvailablePlugin, MarketCategory, ProfileView, VaultPlugin } from '../types'
-import { ContextMenu, Toast, type MenuState } from '../components'
+import { ContextMenu, EmptyState, Toast, type MenuState } from '../components'
 import { useToast } from '../hooks'
 import { useI18n } from '../i18n'
 import { taskManager } from '../tasks'
@@ -898,9 +899,12 @@ export default function AllocationsPage() {
         {vaultExpanded && (
           <div style={{ marginTop: 14 }}>
             {vaultPlugins.length === 0 ? (
-              <div className="empty" style={{ padding: '16px 0' }}>
-                沙箱为空。可点击「导入本地插件」导入本地开发包或从市场暂存。
-              </div>
+              <EmptyState
+                compact
+                icon={Archive}
+                title="沙箱隔离仓库中暂无插件"
+                description="Vault 存储池为空。您可以从市场将插件暂存至沙箱，或导入本地开发中的插件包。"
+              />
             ) : (
               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(320px, 1fr))', gap: 12 }}>
                 {vaultPlugins.map((vp) => (
@@ -1039,7 +1043,11 @@ export default function AllocationsPage() {
       )}
 
       {profiles.length === 0 ? (
-        <div className="empty">未发现任何 Profile</div>
+        <EmptyState
+          icon={SlidersHorizontal}
+          title="未发现任何 Profile 环境"
+          description="当前工作空间尚未建立任何环境。请先前往「Profiles 环境」页创建环境后再来分配插件与执行管道流转。"
+        />
       ) : (
         profiles.map((p) => {
           const list = unifiedList(p.name)
@@ -1085,12 +1093,23 @@ export default function AllocationsPage() {
               {isOpen && (
                 <div style={{ marginTop: 12 }}>
                   {list.length === 0 && (
-                    <p className="muted" style={{ marginBottom: 8 }}>
-                      该环境没有已安装插件。可在「插件市场」安装后再来分配。
-                    </p>
+                    <EmptyState
+                      compact
+                      icon={SlidersHorizontal}
+                      title="该环境暂无已安装插件"
+                      description="该 Profile 尚未安装任何插件或依赖包。您可以前往「插件市场」安装常用官方及社区插件，或从上方的沙箱仓库一键挂载。"
+                    />
                   )}
 
                   {/* 已分配卡片（可拖动排序/转移） */}
+                  {allocCount === 0 && list.length > 0 && (
+                    <div className="empty-card compact" style={{ margin: '8px 0 14px 0' }}>
+                      <p className="empty-title" style={{ fontSize: 13 }}>暂无已激活分配条目</p>
+                      <p className="empty-desc" style={{ fontSize: 12, marginBottom: 0 }}>
+                        从下方分类中勾选插件或点击「全部分配」，即可将插件加载顺序应用到当前环境。
+                      </p>
+                    </div>
+                  )}
                   <div
                     className="alloc-list"
                     onPointerDown={(e) => onContainerPointerDown(e, p.name)}
