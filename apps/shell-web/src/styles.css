@@ -937,7 +937,11 @@ body {
 
 .badge.stopped {
   background: rgba(138, 151, 168, 0.14);
-  color: var(--muted);
+  /* 原为 var(--muted)（深色 #64748b / 浅色 #94a3b8）。徽章是 11px/600 的**小字**，
+     WCAG 要求 ≥4.5:1，而实测这两种主题下分别只有 3.18:1 与 2.21:1。
+     改用语义更贴切的 --text-secondary：实测深色 4.7:1、浅色 6.5:1，且仍是「次要、克制」的观感。
+     数值来自 scripts/probe-browser.mjs 在真实页面里的实测（见方案 §13.19）。 */
+  color: var(--text-secondary);
 }
 
 .badge.error {
