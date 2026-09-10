@@ -6,7 +6,7 @@ import { findPidByPort } from './process-manager.js'
  */
 export async function isPortAvailable(port: number, host = '127.0.0.1'): Promise<boolean> {
   // 1. 系统级占用检测（通过 netstat 反查 PID）
-  const pid = findPidByPort(port)
+  const pid = await findPidByPort(port)
   if (pid !== null) return false
 
   // 2. 原生 Socket 绑定测试

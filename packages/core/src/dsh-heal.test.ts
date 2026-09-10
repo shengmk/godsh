@@ -166,7 +166,7 @@ test('safePurgeProfileJunctions: 安全解除所有 Junction 且源目标物理�
   }
 })
 
-test('diagnoseProfile & runPreflightCheck: 正确识别非法占位符死链并触发门禁拦截', () => {
+test('diagnoseProfile & runPreflightCheck: 正确识别非法占位符死链并触发门禁拦截', async () => {
   const tmpRoot = mkdtempSync(join(tmpdir(), 'dsh-diag-test-'))
   try {
     const dshHome = join(tmpRoot, 'dsh-home')
@@ -197,7 +197,7 @@ test('diagnoseProfile & runPreflightCheck: 正确识别非法占位符死链并�
     }
     writeFileSync(join(profDir, 'package.json'), JSON.stringify(badPkg, null, 2))
 
-    const preflight = runPreflightCheck(dshHome, 'test-web', 3999, mockBin)
+    const preflight = await runPreflightCheck(dshHome, 'test-web', 3999, mockBin)
     assert.equal(preflight.ok, false)
     assert.ok(preflight.reason?.includes('占位符'))
     assert.equal(preflight.report.overall, 'CRITICAL')
@@ -217,7 +217,7 @@ test('diagnoseProfile & runPreflightCheck: 正确识别非法占位符死链并�
     }
     writeFileSync(join(profDir, 'package.json'), JSON.stringify(goodPkg, null, 2))
 
-    const preflightGood = runPreflightCheck(dshHome, 'test-web', 3999, mockBin)
+    const preflightGood = await runPreflightCheck(dshHome, 'test-web', 3999, mockBin)
     assert.equal(preflightGood.ok, true)
     assert.equal(preflightGood.report.layers.layer3_config.invalidPlaceholders.length, 0)
   } finally {

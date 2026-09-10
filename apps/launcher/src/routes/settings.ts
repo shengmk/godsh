@@ -8,7 +8,7 @@ export const settingsHandler: ApiHandler = async (ctx, _req, res, method, seg, b
   // GET /api/settings
   if (seg.length === 1 && seg[0] === 'settings' && method === 'GET') {
     const cfg = store.readConfig()
-    const dshInstances = findDshInstances(cfg.dsh.dirs ?? [])
+    const dshInstances = await findDshInstances(cfg.dsh.dirs ?? [])
     ctx.sendJson(res, 200, {
       config: cfg,
       dshInstances,

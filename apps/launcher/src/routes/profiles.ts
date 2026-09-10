@@ -142,7 +142,7 @@ export const profilesHandler: ApiHandler = async (ctx, _req, res, method, seg, b
     const ports = await Promise.all(
       [...running.entries()].map(async ([profile, proc]) => {
         const alive = await isPortListening(proc.port)
-        const pid = alive ? findPidByPort(proc.port) : null
+        const pid = alive ? await findPidByPort(proc.port) : null
         const logFile = join(logDir, `dsh-web-${profile}-${proc.port}.log`)
         const authUrl = proc.url ?? extractDshWebUrl(logFile) ?? `http://127.0.0.1:${proc.port}`
         return {
@@ -151,7 +151,7 @@ export const profilesHandler: ApiHandler = async (ctx, _req, res, method, seg, b
           running: alive,
           status: proc.status,
           pid,
-          processName: pid ? findProcessName(pid) : null,
+          processName: pid ? await findProcessName(pid) : null,
           url: alive ? authUrl : null,
         }
       }),
@@ -307,7 +307,7 @@ export const profilesHandler: ApiHandler = async (ctx, _req, res, method, seg, b
       const preferredPort = isCustom ? Number(body.port) : undefined
 
       // 启动前 Pre-flight 毫秒级门禁拦截（拦截死软链、非法占位符、CLI损坏等致命隐患）
-      const preflight = runPreflightCheck(ctx.env.dshHome, name, preferredPort ?? 3080)
+      const preflight = await runPreflightCheck(ctx.env.dshHome, name, preferredPort ?? 3080)
       if (!preflight.ok && body.force !== true) {
         ctx.sendJson(res, 400, {
           error: `环境启动被安全拦截：${preflight.reason}。请使用 Godsh 医生一键自愈。`,
@@ -468,7 +468,7 @@ export const profilesHandler: ApiHandler = async (ctx, _req, res, method, seg, b
         running: runningState,
         starting: false,
         port: proc.port,
-        pid: runningState ? findPidByPort(proc.port) : null,
+        pid: runningState ? await findPidByPort(proc.port) : null,
       })
       return true
     }

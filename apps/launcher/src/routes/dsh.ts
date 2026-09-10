@@ -29,7 +29,7 @@ export const dshHandler: ApiHandler = async (ctx, _req, res, method, seg, body, 
 
   // GET /api/dsh/status
   if (seg.length === 2 && seg[0] === 'dsh' && seg[1] === 'status' && method === 'GET') {
-    const st = dshEnvs.status()
+    const st = await dshEnvs.status()
     const tasks = [...installTasks.entries()].map(([key, rec]) => ({
       key,
       status: rec.status,
@@ -42,7 +42,7 @@ export const dshHandler: ApiHandler = async (ctx, _req, res, method, seg, body, 
 
   // GET /api/dsh/versions
   if (seg.length === 2 && seg[0] === 'dsh' && seg[1] === 'versions' && method === 'GET') {
-    ctx.sendJson(res, 200, { published: dshEnvs.publishedVersions(), local: dshEnvs.detectedInstances() })
+    ctx.sendJson(res, 200, { published: await dshEnvs.publishedVersions(), local: await dshEnvs.detectedInstances() })
     return true
   }
 
@@ -103,7 +103,7 @@ export const dshHandler: ApiHandler = async (ctx, _req, res, method, seg, body, 
   if (seg.length === 1 && seg[0] === 'dsh-envs' && method === 'GET') {
     const cfg = store.readConfig()
     ctx.sendJson(res, 200, {
-      envs: dshEnvs.list(),
+      envs: await dshEnvs.list(),
       activeVersionName: cfg.dsh.activeVersion ?? '',
       byProfile: cfg.dsh.byProfile ?? {},
       tasks: [...installTasks.entries()].map(([key, rec]) => ({
@@ -151,7 +151,7 @@ export const dshHandler: ApiHandler = async (ctx, _req, res, method, seg, body, 
   if (seg.length === 3 && seg[0] === 'dsh-envs' && seg[2] === 'activate' && method === 'POST') {
     const id = decodeURIComponent(seg[1] ?? '')
     try {
-      const env = dshEnvs.activate(id)
+      const env = await dshEnvs.activate(id)
       ctx.sendJson(res, 200, { env })
     } catch (err) {
       ctx.sendJson(res, 404, { error: err instanceof Error ? err.message : String(err) })

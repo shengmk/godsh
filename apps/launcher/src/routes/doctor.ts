@@ -1,4 +1,4 @@
-﻿import { join } from 'node:path'
+import { join } from 'node:path'
 import { existsSync, rmSync } from 'node:fs'
 import {
   diagnoseProfile,
@@ -24,7 +24,7 @@ export const doctorHandler: ApiHandler = async (ctx, _req, res, method, seg, bod
     const profile = typeof body.profile === 'string' && body.profile ? body.profile.trim() : 'web'
     const port = typeof body.port === 'number' && body.port > 0 ? body.port : 3080
     try {
-      const report = diagnoseProfile(env.dshHome, profile, port)
+      const report = await diagnoseProfile(env.dshHome, profile, port)
       ctx.sendJson(res, 200, report)
     } catch (err) {
       ctx.sendJson(res, 500, { error: err instanceof Error ? err.message : String(err) })
@@ -37,7 +37,7 @@ export const doctorHandler: ApiHandler = async (ctx, _req, res, method, seg, bod
     const profile = typeof body.profile === 'string' && body.profile ? body.profile.trim() : 'web'
     const port = typeof body.port === 'number' && body.port > 0 ? body.port : 3080
     try {
-      const preflight = runPreflightCheck(env.dshHome, profile, port)
+      const preflight = await runPreflightCheck(env.dshHome, profile, port)
       ctx.sendJson(res, 200, preflight)
     } catch (err) {
       ctx.sendJson(res, 500, { error: err instanceof Error ? err.message : String(err) })
@@ -51,7 +51,7 @@ export const doctorHandler: ApiHandler = async (ctx, _req, res, method, seg, bod
     const options = (typeof body.options === 'object' && body.options ? body.options : {}) as HealOptions
     const dshBin = ctx.resolveDshBin(profile)
     try {
-      const result = healProfile(env.dshHome, profile, options, dshBin)
+      const result = await healProfile(env.dshHome, profile, options, dshBin)
       ctx.sendJson(res, 200, { ok: true, healed: result.healed, report: result.report })
     } catch (err) {
       ctx.sendJson(res, 500, { error: err instanceof Error ? err.message : String(err) })

@@ -3,7 +3,7 @@ import { execFile, type ChildProcess } from 'node:child_process'
 import { promisify } from 'node:util'
 import http from 'node:http'
 import { join } from 'node:path'
-import { killProcess, runSync, spawnCommand } from './run.js'
+import { killProcess, run, spawnCommand } from './run.js'
 
 const execFileAsync = promisify(execFile)
 
@@ -64,6 +64,31 @@ export function isPortListening(port: number, timeoutMs = 500): Promise<boolean>
 /** 主动失效端口缓存（启动/停止后调用，避免旧值影响判活）。 */
 export function invalidatePortProbe(port: number): void {
   portProbeCache.delete(port)
+  netstatCache = null // netstat 快照同样失效，确保后续判活读到最新拓扑
+}
+
+/**
+ * netstat 输出的短时快照缓存。
+ *
+ * 动机：端口协商（`resolveSafePort` / `findFreePort`）会对多个候选端口**连续**调用
+ * `findPidByPort`，每次都派生一次 `netstat -ano`（Windows 上约 0.1–0.4s）。
+ * 25 次重试意味着数秒的重复派生。500ms TTL 让同一轮协商只跑一次 netstat，
+ * 既去掉阻塞又显著减少子进程数量。
+ */
+let netstatCache: { at: number; text: string } | null = null
+const NETSTAT_TTL_MS = 500
+
+async function readNetstatSnapshot(): Promise<string> {
+  if (netstatCache && Date.now() - netstatCache.at < NETSTAT_TTL_MS) return netstatCache.text
+  let text = ''
+  try {
+    const r = await run('netstat', ['-ano'], { timeoutMs: 8000 })
+    text = r.ok ? r.stdout : ''
+  } catch {
+    text = ''
+  }
+  netstatCache = { at: Date.now(), text }
+  return text
 }
 
 /** 轮询等待端口就绪。 */
@@ -101,11 +126,14 @@ export function readPidFile(pidDir: string, port: number): number | null {
  * 反查监听某端口的真实进程 pid。
  * 必要场景：Windows 上 `dsh` 走 cmd shim（`cmd.exe /c ...`），pid 文件记录的是 shim 的 pid；
  * shim 退出后真实 dsh（node）会被孤儿化但仍监听端口，此时只能按端口反查进程。
+ *
+ * ⚠️ 必须保持异步（R3b）：端口协商会对多个候选端口连续调用本函数，
+ * 同步 netstat 会累积成数秒的事件循环阻塞（前端表现为「点击无响应」）。
  */
-export function findPidByPort(port: number): number | null {
+export async function findPidByPort(port: number): Promise<number | null> {
   if (process.platform === 'win32') {
-    const r = runSync('netstat', ['-ano'])
-    for (const line of r.stdout.split(/\r?\n/)) {
+    const text = await readNetstatSnapshot()
+    for (const line of text.split(/\r?\n/)) {
       const tokens = line.trim().split(/\s+/)
       if (tokens.length < 5) continue
       if (tokens[0] !== 'TCP' && tokens[0] !== 'TCPv6') continue
@@ -118,7 +146,7 @@ export function findPidByPort(port: number): number | null {
     }
     return null
   }
-  const r = runSync('lsof', ['-ti', `tcp:${port}`])
+  const r = await run('lsof', ['-ti', `tcp:${port}`], { timeoutMs: 8000 })
   const pid = Number.parseInt(r.stdout.trim(), 10)
   return Number.isFinite(pid) ? pid : null
 }
@@ -235,10 +263,10 @@ export async function getPortStatus(pidDir: string, port: number): Promise<{ run
   return { running: false, pid: null }
 }
 
-/** 反查某 pid 的进程名（Windows tasklist；其它平台返回 null）。 */
-export function findProcessName(pid: number): string | null {
+/** 反查某 pid 的进程名（Windows tasklist；其它平台返回 null）。异步，避免阻塞事件循环。 */
+export async function findProcessName(pid: number): Promise<string | null> {
   if (process.platform !== 'win32') return null
-  const r = runSync('tasklist', ['/FI', `PID eq ${pid}`, '/FO', 'CSV', '/NH'])
+  const r = await run('tasklist', ['/FI', `PID eq ${pid}`, '/FO', 'CSV', '/NH'], { timeoutMs: 8000 })
   if (!r.ok || !r.stdout) return null
   // tasklist CSV: "image.exe","pid","session","#","mem"
   const line = r.stdout.split(/\r?\n/)[0]?.trim()

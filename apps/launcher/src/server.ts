@@ -278,7 +278,7 @@ export async function startApiServer(ctx: CliContext, opts: ApiServerOptions): P
       if (proc.child === null) {
         // 从 runtime.json 恢复的进程没有 child 引用：以端口就绪为准，pid 按端口反查真实进程
         runningState = await isPortListening(proc.port)
-        pid = runningState ? findPidByPort(proc.port) : null
+        pid = runningState ? await findPidByPort(proc.port) : null
       } else {
         starting = proc.status === 'starting'
         runningState = proc.status === 'running'

@@ -1021,12 +1021,12 @@ export function scanCrossJunctionRisks(nmDir: string): string[] {
 /**
  * 诊断单个 Profile 的六层健康状态，返回结构化 DoctorReport
  */
-export function diagnoseProfile(
+export async function diagnoseProfile(
   dshHome: string,
   profileName: string,
   expectedPort = 3080,
   activeDshBin?: string
-): DoctorReport {
+): Promise<DoctorReport> {
   const profDir = join(dshHome, 'profiles', profileName)
   const nmDir = join(profDir, 'node_modules')
   let issuesFound = 0
@@ -1045,7 +1045,7 @@ export function diagnoseProfile(
   }
 
   // Layer 1: Network
-  const occupyingPid = findPidByPort(expectedPort)
+  const occupyingPid = await findPidByPort(expectedPort)
   const isListening = occupyingPid !== null
   const pidFile = join(dshHome, `service-pid-${expectedPort}.txt`)
   let recordedPid = ''
@@ -1193,13 +1193,13 @@ export function diagnoseProfile(
 /**
  * 启动前 Pre-flight 毫秒级门禁拦截校验
  */
-export function runPreflightCheck(
+export async function runPreflightCheck(
   dshHome: string,
   profileName: string,
   expectedPort = 3080,
   activeDshBin?: string
-): PreflightResult {
-  const report = diagnoseProfile(dshHome, profileName, expectedPort, activeDshBin)
+): Promise<PreflightResult> {
+  const report = await diagnoseProfile(dshHome, profileName, expectedPort, activeDshBin)
   if (report.overall === 'CRITICAL') {
     let reason = '检测到严重配置或依赖隐患'
     if (report.layers.layer3_config.invalidPlaceholders.length > 0) {
@@ -1228,12 +1228,12 @@ export function runPreflightCheck(
 /**
  * 执行指定 Profile 的安全原子自愈
  */
-export function healProfile(
+export async function healProfile(
   dshHome: string,
   profileName: string,
   options: HealOptions = {},
   activeDshBin?: string
-): { healed: number; report: DoctorReport } {
+): Promise<{ healed: number; report: DoctorReport }> {
   let healed = 0
   const profDir = join(dshHome, 'profiles', profileName)
   const nmDir = join(profDir, 'node_modules')
@@ -1265,7 +1265,7 @@ export function healProfile(
   healed += bundleResult.healed
 
   // 4. 重测并生成报告
-  const report = diagnoseProfile(dshHome, profileName)
+  const report = await diagnoseProfile(dshHome, profileName)
   report.autoFixed = healed
 
   return { healed, report }

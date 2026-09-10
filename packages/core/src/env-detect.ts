@@ -1,7 +1,7 @@
 import { existsSync, readFileSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { dirname, join } from 'node:path'
-import { findInPath, runSync } from './run.js'
+import { findInPath, run, runSync } from './run.js'
 import type { DshInstance, EnvInfo, ToolInfo } from './types.js'
 
 function detectTool(command: string, versionArgs: string[]): ToolInfo {
@@ -23,7 +23,13 @@ export interface DetectOptions {
   profilesDirName?: string
 }
 
-/** 检测运行环境：node / pnpm / dsh 与 DSH_HOME。 */
+/**
+ * 检测运行环境：node / pnpm / dsh 与 DSH_HOME。
+ *
+ * 说明（R3b 有意保留同步）：本函数**只在进程启动期**由 `createContext()` 调用一次，
+ * 此时 HTTP 服务尚未 `listen`，同步等待不会冻结任何在途请求；改为异步反而增加
+ * 调用链复杂度而无用户可见收益。请求路径上的实例发现已由 `findDshInstances`（异步）承担。
+ */
 export function detectEnvironment(opts: DetectOptions = {}): EnvInfo {
   const node: ToolInfo = { found: true, path: process.execPath, version: process.version }
   const pnpm = detectTool('pnpm', ['--version'])
@@ -77,11 +83,33 @@ function readPackageEntry(pkgDir: string): string | null {
 // 模块级版本探测持久缓存（60s TTL）：避免每次请求重复派生子进程检测版本
 const GLOBAL_DSH_VERSION_CACHE = new Map<string, { at: number; version: string | null }>()
 
+/**
+ * 实例发现结果缓存（10s TTL）。
+ * 动机：`GET /api/settings` 每次都会调用 `findDshInstances`，而它要跑
+ * `where dsh` + `npm root -g` + `pnpm root -g`（npm/pnpm 启动本身就要数百毫秒）。
+ * 没有缓存时，每次打开/刷新设置页都会重复付出这份成本。
+ */
+const INSTANCE_DISCOVERY_CACHE = new Map<string, { at: number; value: DshInstance[] }>()
+const INSTANCE_DISCOVERY_TTL_MS = 10_000
+
 export function clearEnvDetectCache(): void {
   GLOBAL_DSH_VERSION_CACHE.clear()
+  INSTANCE_DISCOVERY_CACHE.clear()
 }
 
-export function findDshInstances(extraDirs: string[] = []): DshInstance[] {
+/**
+ * 发现本机所有可用的 dsh 实例（PATH shim、npm/pnpm 全局、用户指定目录）。
+ *
+ * ⚠️ 必须保持异步（R3b）：本函数在 `GET /api/settings` 的请求路径上，
+ * 内部的 `where` / `npm root -g` / `node --version` 若同步执行会冻结整个 HTTP 服务。
+ */
+export async function findDshInstances(extraDirs: string[] = []): Promise<DshInstance[]> {
+  const cacheKey = extraDirs.join('|')
+  const cached = INSTANCE_DISCOVERY_CACHE.get(cacheKey)
+  if (cached && Date.now() - cached.at < INSTANCE_DISCOVERY_TTL_MS) {
+    return [...cached.value]
+  }
+
   const out = new Map<string, DshInstance>()
   const add = (name: string, path: string, run: string | null) => {
     if (!run || out.has(name)) return
@@ -91,8 +119,9 @@ export function findDshInstances(extraDirs: string[] = []): DshInstance[] {
   }
 
   if (process.platform === 'win32') {
-    const whereLines = runSync('where', ['dsh'])
-      .stdout.split(/\r?\n/)
+    const whereRes = await run('where', ['dsh'], { timeoutMs: 10_000 })
+    const whereLines = whereRes.stdout
+      .split(/\r?\n/)
       .map((s) => s.trim())
       .filter(Boolean)
     // 1) .cmd/.bat/.ps1 shim（优先，通常能正确反解包目录）
@@ -111,7 +140,7 @@ export function findDshInstances(extraDirs: string[] = []): DshInstance[] {
   }
 
   for (const pkgMgr of ['npm', 'pnpm'] as const) {
-    const r = runSync(pkgMgr, ['root', '-g'])
+    const r = await run(pkgMgr, ['root', '-g'], { timeoutMs: 15_000 })
     const root = r.stdout.trim()
     if (!root) continue
     const pkgDir = join(root, 'node_modules', '@deepseek-ai', 'dsh')
@@ -124,15 +153,18 @@ export function findDshInstances(extraDirs: string[] = []): DshInstance[] {
 
   const now = Date.now()
   for (const inst of out.values()) {
-    const cached = GLOBAL_DSH_VERSION_CACHE.get(inst.run)
-    if (cached && now - cached.at < 60_000) {
-      inst.version = cached.version
+    const cachedVer = GLOBAL_DSH_VERSION_CACHE.get(inst.run)
+    if (cachedVer && now - cachedVer.at < 60_000) {
+      inst.version = cachedVer.version
       continue
     }
-    const r = runSync('node', [inst.run, '--version'])
+    const r = await run('node', [inst.run, '--version'], { timeoutMs: 10_000 })
     const version = r.ok ? (r.stdout.split(/\r?\n/)[0]?.trim() ?? null) : null
     GLOBAL_DSH_VERSION_CACHE.set(inst.run, { at: now, version })
     inst.version = version
   }
-  return [...out.values()]
+
+  const result = [...out.values()]
+  INSTANCE_DISCOVERY_CACHE.set(cacheKey, { at: now, value: result })
+  return [...result]
 }

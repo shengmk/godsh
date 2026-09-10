@@ -488,8 +488,9 @@ async function main(): Promise<void> {
       const sub = parsed.positionals[0]
       if (!sub) {
         const cfg = store.readConfig()
-        console.log(`=== DSH 环境（${dshEnvs.list().length}）===`)
-        for (const e of dshEnvs.list()) {
+        const envList = await dshEnvs.list()
+        console.log(`=== DSH 环境（${envList.length}）===`)
+        for (const e of envList) {
           const active = cfg.dsh.activeVersion === `env:${e.id}` ? ' ← 默认' : ''
           console.log(`- [${e.kind}] ${e.id} v${e.version ?? '?'} @ ${e.dir || e.run}${active}`)
         }
@@ -513,7 +514,7 @@ async function main(): Promise<void> {
       if (sub === 'activate') {
         const id = parsed.positionals[1]
         if (!id) throw new Error('用法: dsh-envs activate <id>')
-        const env = dshEnvs.activate(id)
+        const env = await dshEnvs.activate(id)
         console.log(`已激活 ${env.id} v${env.version}`)
         break
       }
@@ -523,7 +524,7 @@ async function main(): Promise<void> {
     case 'dsh-install': {
       const sub = parsed.positionals[0] ?? 'status'
       if (sub === 'status') {
-        const st = dshEnvs.status()
+        const st = await dshEnvs.status()
         console.log(`dsh 已安装: ${st.found ? '是' : '否'}`)
         console.log(`base 版本: ${st.baseVersion ?? '-'}`)
         console.log(`激活版本: ${st.activeVersion ?? '-'}`)
@@ -570,7 +571,7 @@ async function main(): Promise<void> {
 
     case 'settings': {
       const cfg = store.readConfig()
-      const instances = findDshInstances(cfg.dsh.dirs ?? [])
+      const instances = await findDshInstances(cfg.dsh.dirs ?? [])
       console.log('=== Launcher 配置 ===')
       console.log(`DSH 根目录: ${cfg.dsh.home || '(未设置，用 DSH_HOME 或 ~/.dsh)'}`)
       console.log(`数据目录: ${cfg.dataDir}`)
@@ -597,10 +598,10 @@ async function main(): Promise<void> {
       if (autoFix) {
         console.log('正在执行安全自愈...')
         const dshBin = resolveDshBin(profile)
-        const healed = healProfile(ctx.env.dshHome, profile, {}, dshBin)
+        const healed = await healProfile(ctx.env.dshHome, profile, {}, dshBin)
         console.log(`自愈完成，已修复 ${healed.healed} 项`)
       }
-      const report = diagnoseProfile(ctx.env.dshHome, profile, port)
+      const report = await diagnoseProfile(ctx.env.dshHome, profile, port)
       console.log(`整体评级: ${report.overall}`)
       console.log(`Layer 0 (全局 CLI): ${report.layers.layer0_cli.ok ? '√' : 'X'} (版本: ${report.layers.layer0_cli.version ?? '未知'})`)
       console.log(`Layer 1 (网络监听): ${report.layers.layer1_network.ok ? '√' : '!'} (监听中: ${report.layers.layer1_network.isListening}, PID: ${report.layers.layer1_network.pid ?? '-'})`)

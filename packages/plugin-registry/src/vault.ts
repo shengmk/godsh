@@ -1,6 +1,6 @@
 import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, cpSync, writeFileSync, lstatSync, statSync, symlinkSync } from 'node:fs'
 import { basename, dirname, join } from 'node:path'
-import { DATA_DIR, runSync, ensureCompatibilityShims } from '@godsh/core'
+import { DATA_DIR, run, ensureCompatibilityShims } from '@godsh/core'
 import { auditPackage, type PluginAuditReport, type SecurityLevel } from '@godsh/security'
 import { inspectManifest } from './bundle.js'
 import { getVaultContract, detectPluginConflicts } from './vault-contract.js'
@@ -903,10 +903,10 @@ export class VaultManager {
           }
         } catch {}
 
-        // 若网络 fetch 失败则单次降级至 runSync
+        // 若网络 fetch 失败则单次降级至 npm view（异步，避免阻塞事件循环）
         if (!latest) {
           try {
-            const r = runSync('npm', ['view', p.name, 'version', '--registry=https://registry.npmmirror.com', '--fetch-timeout=2500'])
+            const r = await run('npm', ['view', p.name, 'version', '--registry=https://registry.npmmirror.com', '--fetch-timeout=2500'], { timeoutMs: 8000 })
             if (r.ok && r.stdout) {
               latest = r.stdout.split(/\r?\n/)[0]?.trim()
             }
@@ -1128,7 +1128,7 @@ export class VaultManager {
       } catch {}
 
       if (!ver) {
-        const r = runSync('npm', ['view', plugin.name, 'version', '--registry=https://registry.npmmirror.com', '--fetch-timeout=5000'])
+        const r = await run('npm', ['view', plugin.name, 'version', '--registry=https://registry.npmmirror.com', '--fetch-timeout=5000'], { timeoutMs: 10000 })
         if (r.ok && r.stdout) {
           ver = r.stdout.split(/\r?\n/)[0]?.trim()
         }
@@ -1165,7 +1165,14 @@ export class VaultManager {
     try {
       onLog?.(`[1/4] 下载依赖包: ${plugin.name}@${ver} ...\n`)
       // 1. npm pack 下载压缩包
-      const packRes = runSync('npm', ['pack', `${plugin.name}@${ver}`, '--registry=https://registry.npmmirror.com'], { cwd: tmpPackDir })
+      //    异步执行（原先 runSync 会在下载期间完全冻结 HTTP 服务，npm pack 可达分钟级）；
+      //    同时把 stdout/stderr 流式转给 onLog，让前端任务中心能看到实时下载进度；
+      //    并加超时保护，避免网络挂起导致任务永不结束。
+      const packRes = await run('npm', ['pack', `${plugin.name}@${ver}`, '--registry=https://registry.npmmirror.com'], {
+        cwd: tmpPackDir,
+        timeoutMs: 300_000,
+        onLog: (chunk) => onLog?.(chunk),
+      })
       if (!packRes.ok) {
         throw new Error(`npm pack 下载失败: ${packRes.stderr || packRes.stdout}`)
       }
@@ -1178,7 +1185,7 @@ export class VaultManager {
       onLog?.(`[2/4] 解压校验物理包: ${tgzFile} ...\n`)
       // 2. tar -xzf 解压（使用完整绝对路径并显式传入 cwd: tmpPackDir，彻底解决 Windows tar.exe 找不到压缩包的致命缺陷）
       const fullTgzPath = join(tmpPackDir, tgzFile)
-      const tarRes = runSync('tar', ['-xzf', fullTgzPath, '-C', tmpPackDir], { cwd: tmpPackDir })
+      const tarRes = await run('tar', ['-xzf', fullTgzPath, '-C', tmpPackDir], { cwd: tmpPackDir, timeoutMs: 120_000 })
       if (!tarRes.ok) {
         throw new Error(`tar 解压失败: ${tarRes.stderr || tarRes.stdout}`)
       }

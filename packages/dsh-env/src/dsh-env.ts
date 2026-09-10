@@ -1,6 +1,6 @@
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
-import { clearEnvDetectCache, findDshInstances, runSync, spawnCommand, type ConfigStore, type DshInstance } from '@godsh/core'
+import { clearEnvDetectCache, findDshInstances, run, spawnCommand, type ConfigStore, type DshInstance } from '@godsh/core'
 import { createProfile } from '@godsh/profile-manager'
 
 export type DshEnvKind = 'base' | 'managed' | 'external'
@@ -53,17 +53,17 @@ export class DshEnvManager {
     clearEnvDetectCache()
   }
 
-  private detectedFresh(): DshInstance[] {
+  private async detectedFresh(): Promise<DshInstance[]> {
     const now = Date.now()
     if (DshEnvManager.detectCache && now - DshEnvManager.detectCache.at < 10000) {
       return DshEnvManager.detectCache.data
     }
-    const data = findDshInstances(this.store.readConfig().dsh.dirs ?? [])
+    const data = await findDshInstances(this.store.readConfig().dsh.dirs ?? [])
     DshEnvManager.detectCache = { at: now, data }
     return data
   }
 
-  private latestFresh(): string | null {
+  private async latestFresh(): Promise<string | null> {
     const now = Date.now()
     if (DshEnvManager.latestCache && now - DshEnvManager.latestCache.at < 120_000) {
       return DshEnvManager.latestCache.value
@@ -71,7 +71,8 @@ export class DshEnvManager {
     let latest: string | null = null
     try {
       const reg = resolveNpmRegistry()
-      const r = runSync('npm', ['view', '@deepseek-ai/dsh', 'version', `--registry=${reg}`, '--fetch-timeout=4000'])
+      // 异步执行：npm view 是网络调用（最长 4s），同步执行会冻结整个 HTTP 服务
+      const r = await run('npm', ['view', '@deepseek-ai/dsh', 'version', `--registry=${reg}`, '--fetch-timeout=4000'], { timeoutMs: 10_000 })
       latest = r.ok ? (r.stdout.split(/\r?\n/)[0]?.trim() ?? null) : null
     } catch {
       latest = null
@@ -80,7 +81,7 @@ export class DshEnvManager {
     return latest
   }
 
-  private versionsFresh(): string[] {
+  private async versionsFresh(): Promise<string[]> {
     const now = Date.now()
     if (DshEnvManager.versionsCache && now - DshEnvManager.versionsCache.at < 120_000) {
       return DshEnvManager.versionsCache.value
@@ -88,7 +89,8 @@ export class DshEnvManager {
     let versions: string[] = []
     try {
       const reg = resolveNpmRegistry()
-      const r = runSync('npm', ['view', '@deepseek-ai/dsh', 'versions', '--json', `--registry=${reg}`, '--fetch-timeout=5000'])
+      // 异步执行：理由同上（网络调用不得阻塞事件循环）
+      const r = await run('npm', ['view', '@deepseek-ai/dsh', 'versions', '--json', `--registry=${reg}`, '--fetch-timeout=5000'], { timeoutMs: 12_000 })
       if (r.ok) {
         const v = JSON.parse(r.stdout) as unknown
         if (Array.isArray(v)) versions = v.filter((x): x is string => typeof x === 'string').slice(-20).reverse()
@@ -155,10 +157,10 @@ export class DshEnvManager {
    * 自愈：若未注册 base 但检测到 dsh（npm 全局优先），自动注册为 base。
    * 解决重置/首启后 base 记录缺失导致版本"测不出来"的问题。
    */
-  ensureBaseRegistered(): boolean {
+  async ensureBaseRegistered(): Promise<boolean> {
     const managed = this.readManaged()
     if (managed.some((e) => e.kind === 'base')) return false
-    const detected = this.detectedFresh()
+    const detected = await this.detectedFresh()
     const global = detected.find((d) => d.name.startsWith('npm-')) ?? detected[0]
     if (!global) return false
     managed.push({
@@ -175,8 +177,8 @@ export class DshEnvManager {
   }
 
   /** 合并检测到的外部实例 + 持久化的 base/managed 环境。 */
-  list(): DshEnv[] {
-    this.ensureBaseRegistered()
+  async list(): Promise<DshEnv[]> {
+    await this.ensureBaseRegistered()
     const cfg = this.store.readConfig()
     const out = new Map<string, DshEnv>()
     const add = (e: DshEnv) => {
@@ -185,7 +187,7 @@ export class DshEnvManager {
     }
 
     // 检测到的外部实例（PATH / npm / pnpm / 自定义目录）
-    const detected = this.detectedFresh()
+    const detected = await this.detectedFresh()
     detected.forEach((inst, i) => {
       const source = inst.name.startsWith('path:') ? 'PATH' : inst.name.startsWith('npm-') ? 'npm 全局' : 'pnpm 全局'
       add({ id: `external-${i}`, kind: 'external', name: inst.name, dir: dirname(inst.run), run: inst.run, version: inst.version, source })
@@ -216,18 +218,18 @@ export class DshEnvManager {
   }
 
   /** 当前激活的环境（config.dsh.activeVersion 指向的 instance 名）。 */
-  activeEnv(): DshEnv | null {
+  async activeEnv(): Promise<DshEnv | null> {
     const cfg = this.store.readConfig()
     const active = cfg.dsh.activeVersion
     if (!active) return null
-    const env = this.list().find((e) => this.instanceName(e.id) === active)
+    const env = (await this.list()).find((e) => this.instanceName(e.id) === active)
     return env ?? null
   }
 
   // ---------- 激活 ----------
 
-  activate(id: string): DshEnv {
-    const env = this.list().find((e) => e.id === id)
+  async activate(id: string): Promise<DshEnv> {
+    const env = (await this.list()).find((e) => e.id === id)
     if (!env) throw new Error(`DSH 环境不存在: ${id}`)
     const cfg = this.store.readConfig()
     cfg.dsh.activeVersion = this.instanceName(id)
@@ -277,7 +279,7 @@ export class DshEnvManager {
     }
     DshEnvManager.invalidateCache()
     // 注册 base：找 npm 全局实例
-    const detected = findDshInstances([])
+    const detected = await findDshInstances([])
     const global = detected.find((d) => d.name.startsWith('npm-')) ?? detected[0]
     if (!global) throw new Error('安装完成但未检测到 dsh，请检查 npm 全局目录')
     const managed = this.readManaged().filter((e) => e.kind !== 'base')
@@ -339,7 +341,7 @@ export class DshEnvManager {
       rmSync(dir, { recursive: true, force: true })
       throw new Error('安装完成但未找到 dsh 入口')
     }
-    const ver = this.probeVersion(entry)
+    const ver = await this.probeVersion(entry)
     const env: DshEnv = {
       id: `managed-${name}`,
       kind: 'managed',
@@ -387,8 +389,8 @@ export class DshEnvManager {
     return { home, profilesDir, created }
   }
 
-  probeVersion(runPath: string): string | null {
-    const r = runSync('node', [runPath, '--version'])
+  async probeVersion(runPath: string): Promise<string | null> {
+    const r = await run('node', [runPath, '--version'], { timeoutMs: 10_000 })
     return r.ok ? (r.stdout.split(/\r?\n/)[0]?.trim() ?? null) : null
   }
 
@@ -396,21 +398,21 @@ export class DshEnvManager {
    * 当前状态：是否找到 dsh、当前使用版本（激活环境 → base → 首个检测）、base、npm 最新版本、检测数量。
    * 版本"测不出来"的修复：确保 base 自愈注册 + 给出"当前实际使用版本"。
    */
-  status(): {
+  async status(): Promise<{
     found: boolean
     currentVersion: string | null
     baseVersion: string | null
     activeVersion: string | null
     latestVersion: string | null
     detectedCount: number
-  } {
-    this.ensureBaseRegistered()
-    const envs = this.list()
+  }> {
+    await this.ensureBaseRegistered()
+    const envs = await this.list()
     const base = envs.find((e) => e.kind === 'base')
-    const active = this.activeEnv()
+    const active = await this.activeEnv()
     const currentVersion = active?.version ?? base?.version ?? envs[0]?.version ?? null
     let latest: string | null = null
-    latest = this.latestFresh()
+    latest = await this.latestFresh()
     return {
       found: envs.length > 0,
       currentVersion,
@@ -422,7 +424,7 @@ export class DshEnvManager {
   }
 
   /** npm 已发布的 dsh 版本列表（供"添加并列环境"下拉选择）。 */
-  publishedVersions(): string[] {
+  async publishedVersions(): Promise<string[]> {
     return this.versionsFresh()
   }
 
@@ -446,7 +448,7 @@ export class DshEnvManager {
   }
 
   /** 合并 DshInstance（供 settings 等既有接口复用）。 */
-  detectedInstances(): DshInstance[] {
+  async detectedInstances(): Promise<DshInstance[]> {
     return this.detectedFresh()
   }
 }
