@@ -15,7 +15,7 @@ import {
 } from 'lucide-react'
 import { api } from '../api'
 import type { KernelInstance, KernelTemplate, ProfileView, UnifiedKernelConfig } from '../types'
-import { EmptyState, Toast } from '../components'
+import { EmptyState, ToastStack } from '../components'
 import { useAsyncAction, useToast } from '../hooks'
 import { usePageRefresh } from '../refresh'
 import { useI18n } from '../i18n'
@@ -42,7 +42,7 @@ export default function KernelsPage() {
   const [savingUnified, setSavingUnified] = useState<string | null>(null)
   /** 按环境覆盖保存中（保存的是环境名） */
   const [overrideBusy, setOverrideBusy] = useState<string | null>(null)
-  const { toast, show } = useToast()
+  const { toasts, show } = useToast()
   const { t } = useI18n()
 
   // 内核实例日志轮询（每 2s）
@@ -544,7 +544,7 @@ export default function KernelsPage() {
         </div>
       )}
 
-      {toast && <Toast text={toast.text} error={toast.error} />}
+      <ToastStack toasts={toasts} />
     </>
   )
 }

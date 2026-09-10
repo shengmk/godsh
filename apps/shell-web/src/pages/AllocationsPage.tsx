@@ -21,7 +21,7 @@ import {
 } from 'lucide-react'
 import { api } from '../api'
 import type { Allocation, AvailablePlugin, MarketCategory, ProfileView, VaultPlugin } from '../types'
-import { ContextMenu, EmptyState, Toast, type MenuState } from '../components'
+import { ContextMenu, EmptyState, ToastStack, type MenuState } from '../components'
 import { useAsyncAction, useToast } from '../hooks'
 import { useI18n } from '../i18n'
 import { usePageRefresh } from '../refresh'
@@ -86,7 +86,7 @@ export default function AllocationsPage() {
   const dragRef = useRef<DragState | null>(null)
   /** 拖放处理中标记（同步判断，避免渲染延迟期间重复触发拖放） */
   const dropBusyRef = useRef(false)
-  const { toast, show } = useToast()
+  const { toasts, show } = useToast()
   const { t } = useI18n()
 
   /** 置位 / 复位某个操作的忙碌键 */
@@ -1697,7 +1697,7 @@ export default function AllocationsPage() {
         </div>
       )}
 
-      {toast && <Toast text={toast.text} error={toast.error} />}
+      <ToastStack toasts={toasts} />
       {menu && <ContextMenu menu={menu} onClose={() => setMenu(null)} />}
     </>
   )

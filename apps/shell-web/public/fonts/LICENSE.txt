@@ -1,0 +1,29 @@
+godsh 内嵌字体说明
+==================
+
+本目录下的两个 woff2 文件为 godsh 界面内嵌的 Latin 子集变量字体，
+目的是让界面声明的 Inter / JetBrains Mono 真正生效（此前字体栈声明了它们，
+但多数机器并未安装，界面实际退化为 Arial 与通用等宽），同时避免任何运行时网络请求。
+
+文件
+----
+- inter-var-latin.woff2             Inter 变量字体（字重 100–900，Latin 子集）
+- jetbrains-mono-var-latin.woff2    JetBrains Mono 变量字体（字重 100–800，Latin 子集）
+
+来源
+----
+通过 Google Fonts CSS2 API 取得对应字体的 Latin 子集 woff2：
+- https://fonts.googleapis.com/css2?family=Inter:wght@100..900&display=swap
+- https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@100..800&display=swap
+（请求时使用现代浏览器 UA，以取得 woff2 形式的变量字体；仅取 `unicode-range` 含
+ `U+0000-00FF` 的 Latin 基本区那一片，因此不包含 CJK 字形，中文仍由系统字体渲染。）
+
+许可
+----
+- Inter — SIL Open Font License 1.1，版权归 The Inter Project Authors
+  https://github.com/rsms/inter
+- JetBrains Mono — SIL Open Font License 1.1，版权归 JetBrains s.r.o.
+  https://github.com/JetBrains/JetBrainsMono
+
+OFL 允许在遵守其条款的前提下随软件一起分发（包括商用），要求保留版权与许可声明，
+且不得单独出售字体本身。完整许可见上述各项目仓库中的 OFL.txt。

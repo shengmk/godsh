@@ -10,7 +10,7 @@ import {
   FileText,
 } from 'lucide-react'
 import { api } from '../api'
-import { EmptyState, Toast } from '../components'
+import { EmptyState, ToastStack } from '../components'
 import { useAsyncAction, useToast } from '../hooks'
 import { usePageRefresh } from '../refresh'
 import type { SystemTaskItem, JournalEntryItem } from '../types'
@@ -25,7 +25,7 @@ export default function SystemTasksPage() {
   const [autoScroll, setAutoScroll] = useState(true)
   const [refreshing, setRefreshing] = useState(false)
   const terminalRef = useRef<HTMLPreElement | null>(null)
-  const { toast, show } = useToast()
+  const { toasts, show } = useToast()
 
   const loadData = async () => {
     try {
@@ -369,7 +369,7 @@ export default function SystemTasksPage() {
         </div>
       )}
 
-      {toast && <Toast text={toast.text} error={toast.error} />}
+      <ToastStack toasts={toasts} />
     </div>
   )
 }

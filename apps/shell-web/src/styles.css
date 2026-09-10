@@ -1,7 +1,29 @@
 /* ============================================================
-   godsh — 电影级深邃微光 (Cinematic Dark & Glassmorphism, v0.6.1+)
+   godsh — 电影级深邃微光 (Cinematic Dark & Glassmorphism, v0.6.3+)
    设计语言：Cosmic Slate 深空灰阶 · 动态浮动极光 · 毛玻璃拟态 · 发丝边框 · 紧凑看板 · 物理阻尼
    ============================================================ */
+
+/* 本地内嵌的 Latin 变量字体（离线可用、无网络请求、无 FOUT 风险）。
+   为什么必须内嵌：字体栈里一直写着 Inter / JetBrains Mono，但用宽度对比法实测
+   它们并不存在，界面实际退化为 Arial 与通用等宽 —— 属于「声明了却没生效」。
+   只内嵌 **Latin 子集**（合计约 87 KB，均为 OFL 许可，见 public/fonts/LICENSE.txt）：
+   中文仍由系统字体渲染（这两款本就没有 CJK 字形），因此包体增量很小。
+   font-display: swap 确保首屏文字不被字体加载阻塞。 */
+@font-face {
+  font-family: 'Inter';
+  font-style: normal;
+  font-weight: 100 900;
+  font-display: swap;
+  src: url('/fonts/inter-var-latin.woff2') format('woff2');
+}
+
+@font-face {
+  font-family: 'JetBrains Mono';
+  font-style: normal;
+  font-weight: 100 800;
+  font-display: swap;
+  src: url('/fonts/jetbrains-mono-var-latin.woff2') format('woff2');
+}
 
 :root {
   /* 底板与表面色彩（深空 Slate 替代死寂纯黑，丰富空间纵深） */
@@ -37,6 +59,7 @@
   --space-4: 16px;
   --space-5: 20px;
   --space-6: 24px;
+  --space-7: 28px;
   --space-8: 32px;
 
   /* 状态色（高对比度精练色） */
@@ -1206,6 +1229,26 @@ body {
   color: var(--brand-text);
   font-size: 11px;
   font-family: Consolas, monospace;
+}
+
+/* 全局提示栈（U4）：容器固定在右下角、一次最多 3 条；内部的 .toast 取消各自 fixed，
+   否则多条提示会重叠在一起。 */
+.toast-stack {
+  position: fixed;
+  bottom: 24px;
+  right: 24px;
+  z-index: 60;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  align-items: flex-end;
+  max-width: min(420px, calc(100vw - 48px));
+  pointer-events: none;
+}
+
+.toast-stack .toast {
+  position: static;
+  pointer-events: auto;
 }
 
 .toast {
@@ -2407,7 +2450,7 @@ button,
 }
 
 .mono-tag {
-  font-family: 'Geist Mono', 'JetBrains Mono', Consolas, monospace;
+  font-family: 'JetBrains Mono', 'Geist Mono', Consolas, monospace;
   font-size: 11px;
   color: var(--text-dim);
   background: var(--surface-soft, rgba(148, 163, 184, 0.1));

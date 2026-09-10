@@ -13,7 +13,7 @@ import {
 } from 'lucide-react'
 import { api } from '../api'
 import type { DshEnv, DshEnvsInfo, DshStatus, ProfileView } from '../types'
-import { PageSkeleton, Toast } from '../components'
+import { PageSkeleton, ToastStack } from '../components'
 import { useAsyncAction, useToast } from '../hooks'
 import { useI18n } from '../i18n'
 import { usePageRefresh } from '../refresh'
@@ -33,7 +33,7 @@ export default function DshEnvsPage() {
   const [busyKeys, setBusyKeys] = useState<string[]>([])
   const busyRef = useRef<Set<string>>(new Set())
   const pollTimer = useRef<ReturnType<typeof setInterval> | null>(null)
-  const { toast, show } = useToast()
+  const { toasts, show } = useToast()
   const { t } = useI18n()
 
   const isBusy = (key: string) => busyKeys.includes(key)
@@ -508,7 +508,7 @@ export default function DshEnvsPage() {
         </div>
       </div>
 
-      {toast && <Toast text={toast.text} error={toast.error} />}
+      <ToastStack toasts={toasts} />
     </>
   )
 }

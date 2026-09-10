@@ -1,8 +1,37 @@
 import { Component, useEffect, useState, type ErrorInfo, type ReactNode } from 'react'
 import { AlertTriangle, RotateCcw, type LucideIcon } from 'lucide-react'
+import type { ToastItem } from './hooks'
 
+/**
+ * 单条提示。加了无障碍语义（U4）：普通提示 role="status"（polite），
+ * 错误提示 role="alert"（assertive），并声明 aria-atomic 让读屏整条播报。
+ */
 export function Toast({ text, error }: { text: string; error?: boolean }) {
-  return <div className={`toast${error ? ' error' : ''}`}>{text}</div>
+  return (
+    <div
+      className={`toast${error ? ' error' : ''}`}
+      role={error ? 'alert' : 'status'}
+      aria-live={error ? 'assertive' : 'polite'}
+      aria-atomic="true"
+    >
+      {text}
+    </div>
+  )
+}
+
+/**
+ * 全局提示栈（U4）：一次最多同时展示 3 条，避免并发操作时提示互相顶掉。
+ * 容器固定在右下角，内部的 .toast 不再各自 fixed（见 styles.css 的 .toast-stack）。
+ */
+export function ToastStack({ toasts }: { toasts: ToastItem[] }) {
+  if (!toasts.length) return null
+  return (
+    <div className="toast-stack">
+      {toasts.map((t) => (
+        <Toast key={t.id} text={t.text} error={t.error} />
+      ))}
+    </div>
+  )
 }
 
 export function Loading({ label }: { label?: string }) {
@@ -422,7 +451,10 @@ export function KeepAlive({
             data-page-container={key}
             style={{ display: isActive ? 'block' : 'none' }}
           >
-            {child}
+            {/* 按页隔离故障（U6）：原先整块内容区共用一个 ErrorBoundary，
+                任一页崩溃会把其它已挂载页面一起替换成 fallback。
+                这里给每个页面各自包一层；App.tsx 外层那一层保留作为最后兜底。 */}
+            <ErrorBoundary fallbackTitle={`页面「${key}」发生未捕获异常`}>{child}</ErrorBoundary>
           </div>
         )
       })}

@@ -17,7 +17,7 @@ import {
 } from 'lucide-react'
 import { api } from '../api'
 import type { MarketPlugin, ProfileView, VaultPlugin } from '../types'
-import { EmptyState, SkeletonGrid, Toast } from '../components'
+import { EmptyState, SkeletonGrid, ToastStack } from '../components'
 import { useAsyncAction, useToast } from '../hooks'
 import { usePageRefresh } from '../refresh'
 import { useI18n } from '../i18n'
@@ -152,7 +152,7 @@ export default function MarketPage() {
   // 分批渲染：初始 60，滚动/「加载更多」每次 +60
   const [visibleCount, setVisibleCount] = useState(60)
   const PAGE_STEP = 60
-  const { toast, show } = useToast()
+  const { toasts, show } = useToast()
   const { t } = useI18n()
 
   const loadVault = useCallback(async () => {
@@ -958,7 +958,7 @@ export default function MarketPage() {
         </>
       )}
 
-      {toast && <Toast text={toast.text} error={toast.error} />}
+      <ToastStack toasts={toasts} />
     </>
   )
 }

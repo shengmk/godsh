@@ -11,7 +11,7 @@ import {
 } from 'lucide-react'
 import { api } from '../api'
 import type { LauncherConfig, SettingsInfo } from '../types'
-import { Loading, Toast } from '../components'
+import { Loading, ToastStack } from '../components'
 import { useAsyncAction, useToast } from '../hooks'
 import { useI18n, type Locale } from '../i18n'
 import { applyTheme, type Theme } from '../theme'
@@ -29,7 +29,7 @@ interface Props {
 
 export default function SettingsPage({ locale, changeLocale, theme, changeTheme, onNavigate }: Props) {
   const { t } = useI18n()
-  const { toast, show } = useToast()
+  const { toasts, show } = useToast()
   const [info, setInfo] = useState<SettingsInfo | null>(null)
   const [dshHome, setDshHome] = useState('')
   const [marketEnabled, setMarketEnabled] = useState(true)
@@ -413,7 +413,7 @@ export default function SettingsPage({ locale, changeLocale, theme, changeTheme,
         </button>
       </div>
 
-      {toast && <Toast text={toast.text} error={toast.error} />}
+      <ToastStack toasts={toasts} />
     </>
   )
 }

@@ -2,7 +2,7 @@
 
 一个面向 **DeepSeek Harness（dsh）** 的图形化环境配置启动器，整体类比 **Anaconda Navigator**。
 
-> 当前版本：**v0.6.3** ｜ Windows 10 / 11 ｜ 桌面（Tauri 2）+ Web
+> 当前版本：**v0.6.4** ｜ Windows 10 / 11 ｜ 桌面（Tauri 2）+ Web
 
 | Anaconda | DSH | godsh |
 | --- | --- | --- |
@@ -46,7 +46,7 @@
 
 ### 方式一：桌面版（推荐）
 
-1. 从 [Releases](https://github.com/shengmk/godsh/releases) 下载 `godsh-0.6.3-x64-setup.exe`（安装版）或 `-x64.zip`（便携版）。
+1. 从 [Releases](https://github.com/shengmk/godsh/releases) 下载 `godsh-0.6.4-x64-setup.exe`（安装版）或 `-x64.zip`（便携版）。
 2. 运行并启动：应用会自动拉起内置 Node API 后端（端口 4780）。
 3. 首次使用建议点击「控制台」→「快速启动默认模板」（无 dsh 会自动安装 base + 初始化官方模板）。
 
@@ -65,7 +65,7 @@ pnpm serve            # 启动 API + 前端（http://127.0.0.1:4780）
 | 文档 | 说明 |
 | --- | --- |
 | [QUICKSTART.md](QUICKSTART.md) | 快速开始（安装 / 首次启动 / 三步上手） |
-| [release/RELEASE_NOTES.md](release/RELEASE_NOTES.md) | 版本发布说明（v0.6.3 详述） |
+| [release/RELEASE_NOTES.md](release/RELEASE_NOTES.md) | 版本发布说明（v0.6.4 详述） |
 | [docs/方案/更新方案2.md](docs/方案/更新方案2.md) | 仓库沙箱中枢、4 端隔离与自动化编程插件详细架构 RFC |
 | [docs/方案/更新版本方案.md](docs/方案/更新版本方案.md) | DSH 环境更新、日志常驻与控制台性能优化落地方案 |
 

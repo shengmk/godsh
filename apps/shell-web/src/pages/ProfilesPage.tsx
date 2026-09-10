@@ -24,7 +24,7 @@ import {
 } from 'lucide-react'
 import { api } from '../api'
 import type { DshInstance, Health, PortInfo, ProfileView, WorkflowTemplate, ProfilePackage, SnapshotItem } from '../types'
-import { ConfirmDialog, ContextMenu, EmptyState, Loading, SkeletonGrid, Toast, type MenuState } from '../components'
+import { ConfirmDialog, ContextMenu, EmptyState, Loading, SkeletonGrid, ToastStack, type MenuState } from '../components'
 import { useAsyncAction, useToast } from '../hooks'
 import { useI18n } from '../i18n'
 import { usePageRefresh } from '../refresh'
@@ -85,7 +85,7 @@ export default function ProfilesPage() {
   const [desktopBusy, setDesktopBusy] = useState<string | null>(null)
   const importInputRef = useRef<HTMLInputElement | null>(null)
   const logRef = useRef<HTMLDivElement | null>(null)
-  const { toast, show } = useToast()
+  const { toasts, show } = useToast()
   const { t } = useI18n()
 
   const load = useCallback(async () => {
@@ -1346,7 +1346,7 @@ export default function ProfilesPage() {
         </div>
       )}
 
-      {toast && <Toast text={toast.text} error={toast.error} />}
+      <ToastStack toasts={toasts} />
       {menu && <ContextMenu menu={menu} onClose={() => setMenu(null)} />}
     </>
   )

@@ -5,21 +5,64 @@ export interface ToastState {
   error?: boolean
 }
 
+export interface ToastItem extends ToastState {
+  id: number
+}
+
+/**
+ * 全局 Toast 队列（U4）。
+ *
+ * 起因：原先每个页面各自 `useState` 一份单槽 toast，并发操作时**后一条会把前一条顶掉**，
+ * 用户看不到先失败的那条；而且提示节点没有 `role`/`aria-live`，屏幕阅读器完全读不到。
+ *
+ * 改法：状态提升到模块级队列 + 订阅，页面侧 API 完全不变（仍是 `useToast().show(...)`），
+ * 因此 8 个页面只需把渲染那一行换成共享的 <ToastStack />。
+ * 同一时刻最多展示 3 条，错误提示停留更久（6s vs 4.2s）。
+ */
+const MAX_VISIBLE = 3
+const INFO_MS = 4200
+const ERROR_MS = 6000
+
+let items: ToastItem[] = []
+let nextId = 1
+const listeners = new Set<(list: ToastItem[]) => void>()
+
+function emit() {
+  for (const listener of Array.from(listeners)) listener(items)
+}
+
+function dismissToast(id: number) {
+  const next = items.filter((t) => t.id !== id)
+  if (next.length === items.length) return
+  items = next
+  emit()
+}
+
+function pushToast(text: string, error: boolean) {
+  const item: ToastItem = { id: nextId++, text, error }
+  items = [...items, item]
+  if (items.length > MAX_VISIBLE) items = items.slice(-MAX_VISIBLE)
+  emit()
+  setTimeout(() => dismissToast(item.id), error ? ERROR_MS : INFO_MS)
+}
+
 export function useToast() {
-  const [toast, setToast] = useState<ToastState | null>(null)
-  const timer = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const [toasts, setToasts] = useState<ToastItem[]>(items)
 
-  const show = useCallback((text: string, error = false) => {
-    setToast({ text, error })
-    if (timer.current) clearTimeout(timer.current)
-    timer.current = setTimeout(() => setToast(null), 4200)
+  useEffect(() => {
+    listeners.add(setToasts)
+    setToasts(items)
+    return () => {
+      listeners.delete(setToasts)
+    }
   }, [])
 
-  useEffect(() => () => {
-    if (timer.current) clearTimeout(timer.current)
-  }, [])
+  const show = useCallback((text: string, error = false) => pushToast(text, error), [])
 
-  return { toast, show }
+  // toast 保留为「最新一条」的兼容视图；新代码请用 toasts + <ToastStack />
+  const toast: ToastState | null = toasts.length ? toasts[toasts.length - 1]! : null
+
+  return { toast, toasts, show }
 }
 
 /** useAsyncAction 的展示配置：复用页面既有的 useToast().show，保证提示口径一致。 */

@@ -13,7 +13,7 @@ import {
 } from 'lucide-react'
 import { api } from '../api'
 import type { Allocation, DshStatus, KernelInstance, KernelTemplate, LocalPlugin, ProfileView } from '../types'
-import { Toast } from '../components'
+import { ToastStack } from '../components'
 import { useToast } from '../hooks'
 import { useI18n } from '../i18n'
 import { usePageRefresh } from '../refresh'
@@ -39,7 +39,7 @@ export default function ControllerConsolePage({ onNavigate }: { onNavigate: (p: 
   // 指标卡加载失败不再静默（bug 1）：原来是 .catch(() => {})，失败后骨架屏永久停留
   const [loadError, setLoadError] = useState<string | null>(null)
   const pollTimer = useRef<ReturnType<typeof setInterval> | null>(null)
-  const { toast } = useToast()
+  const { toasts } = useToast()
   const { t } = useI18n()
 
   async function load() {
@@ -314,7 +314,7 @@ export default function ControllerConsolePage({ onNavigate }: { onNavigate: (p: 
         </div>
       </div>
 
-      {toast && <Toast text={toast.text} error={toast.error} />}
+      <ToastStack toasts={toasts} />
     </>
   )
 }
