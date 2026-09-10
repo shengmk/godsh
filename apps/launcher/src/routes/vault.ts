@@ -72,7 +72,9 @@ export const vaultHandler: ApiHandler = async (ctx, _req, res, method, seg, body
     }
     try {
       const report = await vault.deployToProfile(pluginId, targetProfile, profilesDir, version)
-      ctx.sendJson(res, 200, report)
+      // 不再无条件 200：注入未完成时必须如实反映（互斥 → 409，其它校验失败 → 400）
+      const status = report.ok ? 200 : (report.blockedBy?.length ? 409 : 400)
+      ctx.sendJson(res, status, report)
     } catch (err) {
       ctx.sendJson(res, 400, { error: err instanceof Error ? err.message : String(err) })
     }
@@ -107,8 +109,8 @@ export const vaultHandler: ApiHandler = async (ctx, _req, res, method, seg, body
       results[prof] = {}
       for (const pid of pluginIds) {
         try {
-          await vault.deployToProfile(pid, prof, profilesDir)
-          results[prof][pid] = { ok: true }
+          const report = await vault.deployToProfile(pid, prof, profilesDir)
+          results[prof][pid] = report.ok ? { ok: true } : { ok: false, error: report.error ?? '注入未完成' }
         } catch (e) {
           results[prof][pid] = { ok: false, error: e instanceof Error ? e.message : String(e) }
         }
@@ -280,11 +282,69 @@ export const vaultHandler: ApiHandler = async (ctx, _req, res, method, seg, body
     return true
   }
 
-  // DELETE /api/vault/:id —— 从沙箱移除
+  // POST /api/vault/batch-remove  { ids: string[], mode?: 'block'|'cascade'|'force', purge?: boolean, async?: boolean }
+  // —— 批量移除沙箱插件（bug 5）。逐项独立事务，单项失败不影响其余。
+  if (seg.length === 2 && seg[0] === 'vault' && seg[1] === 'batch-remove' && method === 'POST') {
+    const payload = (body ?? {}) as {
+      ids?: unknown
+      mode?: unknown
+      purge?: unknown
+      async?: unknown
+    }
+    const ids = Array.isArray(payload.ids) ? payload.ids.filter((x): x is string => typeof x === 'string' && x.length > 0) : []
+    if (ids.length === 0) {
+      ctx.sendJson(res, 400, { error: '缺少 ids 数组（非空字符串列表）' })
+      return true
+    }
+    const mode = payload.mode === 'cascade' || payload.mode === 'force' ? payload.mode : 'block'
+    const purge = payload.purge === true
+    const isAsync = payload.async === true || url.searchParams.get('async') === 'true'
+
+    if (isAsync) {
+      const taskKey = `vault-batch-remove-${Date.now()}`
+      ctx.startInstallTask(taskKey, `${taskKey}.log`, async (log) => {
+        log(`[INFO] 批量移除 ${ids.length} 个沙箱插件（mode=${mode}${purge ? ', purge' : ''}）...\n`)
+        try {
+          const r = await vault.removeMany(ids, { mode, purge, profilesDir })
+          for (const item of r.results) {
+            const label = item.name ?? item.id
+            if (item.status === 'removed') log(`  [OK]   ${label}\n`)
+            else if (item.status === 'blocked') log(`  [SKIP] ${label} —— ${item.reason ?? '被依赖'}\n`)
+            else log(`  [FAIL] ${label} —— ${item.reason ?? '未知错误'}\n`)
+          }
+          log(`\n[SUCCESS] 完成：移除 ${r.removed}，跳过 ${r.blocked}，失败 ${r.failed}\n`)
+        } catch (err) {
+          log(`\n[ERROR] 批量移除异常中止：${err instanceof Error ? err.message : String(err)}\n`)
+          throw err
+        }
+      })
+      ctx.sendJson(res, 202, { ok: true, task: taskKey, message: '批量移除任务已启动' })
+      return true
+    }
+
+    try {
+      const r = await vault.removeMany(ids, { mode, purge, profilesDir })
+      ctx.sendJson(res, 200, { ok: r.failed === 0, ...r })
+    } catch (err) {
+      ctx.sendJson(res, 400, { error: err instanceof Error ? err.message : String(err) })
+    }
+    return true
+  }
+
+  // DELETE /api/vault/:id?mode=block|cascade|force&purge=1 —— 从沙箱移除（完整事务）
   if (seg.length === 2 && seg[0] === 'vault' && method === 'DELETE') {
     const id = decodeURIComponent(seg[1] ?? '')
-    const ok = await vault.remove(id)
-    ctx.sendJson(res, 200, { ok })
+    const rawMode = url.searchParams.get('mode')
+    const mode = rawMode === 'cascade' || rawMode === 'force' ? rawMode : 'block'
+    const purge = url.searchParams.get('purge') === '1'
+    const result = await vault.remove(id, { mode, purge, profilesDir })
+    if (!result.ok) {
+      // 未找到 → 404；被依赖而阻断 → 409。都带上 dependents 供前端提示。
+      const status = result.dependents.length > 0 ? 409 : 404
+      ctx.sendJson(res, status, result)
+      return true
+    }
+    ctx.sendJson(res, 200, result)
     return true
   }
 

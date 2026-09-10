@@ -1,9 +1,9 @@
-import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, cpSync, writeFileSync, lstatSync, statSync, symlinkSync } from 'node:fs'
-import { basename, dirname, join } from 'node:path'
+import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, cpSync, writeFileSync, lstatSync, statSync, symlinkSync, renameSync } from 'node:fs'
+import { basename, dirname, join, resolve, sep } from 'node:path'
 import { DATA_DIR, run, ensureCompatibilityShims } from '@godsh/core'
 import { auditPackage, type PluginAuditReport, type SecurityLevel } from '@godsh/security'
 import { inspectManifest } from './bundle.js'
-import { getVaultContract, detectPluginConflicts } from './vault-contract.js'
+import { getVaultContract, detectPluginConflicts, findDependentsOf } from './vault-contract.js'
 import type { PluginKind, PluginManifest } from './types.js'
 
 export interface VaultPlugin {
@@ -43,7 +43,7 @@ export interface DeploymentSnapshot {
   pluginName: string
   fromVersion?: string
   toVersion: string
-  action: 'deploy' | 'switch' | 'rollback' | 'unmount'
+  action: 'deploy' | 'switch' | 'rollback' | 'unmount' | 'remove'
 }
 
 export interface ProfileSyncResult {
@@ -106,20 +106,148 @@ function removePathSafe(p: string): void {
   }
 }
 
-function createJunctionOrCopy(src: string, dest: string): boolean {
+/** 挂载结果：`junction`（零拷贝）| `copied`（降级复制）| `failed`（未挂载）。 */
+export type LinkOutcome = 'junction' | 'copied' | 'failed'
+
+/**
+ * 建立 Junction（零拷贝）；失败时降级为目录复制。
+ *
+ * 变更（bug 2 / R7）：旧实现用 `boolean` 同时表达「复制成功」与「失败」，
+ * 调用方无法区分，于是挂了 bundles 却没有任何物理文件。
+ * 现在返回三态，调用方必须据此决定是否写入声明。
+ *
+ * 复制降级改为「先复制到暂存目录，再原子改名」，避免中断留下半个目录。
+ */
+function createJunctionOrCopy(src: string, dest: string): LinkOutcome {
   mkdirSync(dirname(dest), { recursive: true })
   removePathSafe(dest)
   try {
     symlinkSync(src, dest, 'junction')
-    return true
+    return 'junction'
   } catch {
+    /* 降级为复制 */
+  }
+  const staging = `${dest}.godsh-copy-${process.pid}-${Date.now()}`
+  try {
+    cpSync(src, staging, { recursive: true })
+    removePathSafe(dest)
+    renameSync(staging, dest)
+    return 'copied'
+  } catch {
+    removePathSafe(staging)
+    return 'failed'
+  }
+}
+
+/**
+ * 原子写 JSON：先写同目录临时文件，再 rename 覆盖。
+ *
+ * 动机（bug 2「注入后打不开」的直接成因之一）：`writeFileSync` 是**截断式覆盖**，
+ * 一旦写入过程中被中断（进程被杀 / 磁盘满 / 杀毒软件锁文件），
+ * profile 的 `package.json` 会留下半截 JSON，dsh 解析失败 → 环境打不开。
+ * 项目其它位置（dsh-heal.ts）早已采用 temp+rename，唯独注入路径没有。
+ */
+function writeJsonAtomic(filePath: string, value: unknown): void {
+  const dir = dirname(filePath)
+  mkdirSync(dir, { recursive: true })
+  const tmp = join(dir, `.${basename(filePath)}.tmp-${process.pid}-${Date.now()}`)
+  writeFileSync(tmp, JSON.stringify(value, null, 2), 'utf8')
+  try {
+    renameSync(tmp, filePath)
+  } catch {
+    // Windows 上 rename 覆盖已存在文件可能返回 EPERM/EEXIST：先删目标再重试
     try {
-      cpSync(src, dest, { recursive: true })
-      return false
-    } catch {
-      return false
+      rmSync(filePath, { force: true })
+      renameSync(tmp, filePath)
+    } catch (err) {
+      try {
+        rmSync(tmp, { force: true })
+      } catch {}
+      throw err
     }
   }
+}
+
+/**
+ * profile 级互斥队列。
+ *
+ * 动机（bug 2 / R8）：同一个 `profile/package.json` 有**三个写者**
+ * —— `VaultManager`（注入/卸载）、`UnifiedKernelManager`（每次启动都会写 bundles）、
+ * `profile-editor`（新建/修复）。三者原本毫无互斥，并发/交错时互相覆盖。
+ * 把写入路径统一挂到本队列上串行执行。
+ */
+const profileLockChains = new Map<string, Promise<unknown>>()
+
+export async function withProfileLock<T>(profileDir: string, fn: () => Promise<T>): Promise<T> {
+  const key = resolve(profileDir).toLowerCase()
+  const previous = profileLockChains.get(key) ?? Promise.resolve()
+  const run = previous.catch(() => {}).then(fn)
+  // 链尾吞掉异常，避免一次失败永久阻断后续排队
+  const tail = run.catch(() => {})
+  profileLockChains.set(key, tail)
+  try {
+    return await run
+  } finally {
+    if (profileLockChains.get(key) === tail) profileLockChains.delete(key)
+  }
+}
+
+/** Profile 的 package.json 形态（仅声明我们关心的字段）。 */
+interface ProfilePackageJson {
+  dependencies?: Record<string, string>
+  dsh?: { profile?: { bundles?: string[] } }
+  [k: string]: unknown
+}
+
+/** 读取 profile 的 package.json（解析失败返回 null，不抛错）。 */
+function readProfilePackage(profileDir: string): ProfilePackageJson | null {
+  const p = join(profileDir, 'package.json')
+  if (!existsSync(p)) return null
+  try {
+    return JSON.parse(readFileSync(p, 'utf8')) as ProfilePackageJson
+  } catch {
+    return null
+  }
+}
+
+/** 读取某物理目录 package.json 的 version（读不到返回 null）。 */
+function readPackageVersion(dir: string): string | null {
+  try {
+    const parsed = JSON.parse(readFileSync(join(dir, 'package.json'), 'utf8')) as { version?: unknown }
+    return typeof parsed.version === 'string' && parsed.version ? parsed.version : null
+  } catch {
+    return null
+  }
+}
+
+/** 某包名在 profile 的 node_modules 下是否**物理可解析**（能读到 package.json）。 */
+function isResolvableInProfile(profileDir: string, name: string): boolean {
+  return existsSync(join(profileDir, 'node_modules', ...name.split('/'), 'package.json'))
+}
+
+/**
+ * 生产/注入后的针对性校验：只检查本次涉及的包名，避免误报历史遗留问题。
+ * 校验三件事：① package.json 合法；② 每个包在 dependencies 中；③ 每个包物理可解析。
+ */
+export interface InjectVerificationIssue {
+  kind: 'invalid-json' | 'not-declared' | 'not-resolvable'
+  detail: string
+}
+
+function verifyInjectedPackages(profileDir: string, names: string[]): InjectVerificationIssue[] {
+  const issues: InjectVerificationIssue[] = []
+  const pkg = readProfilePackage(profileDir)
+  if (!pkg) return [{ kind: 'invalid-json', detail: join(profileDir, 'package.json') }]
+  const deps = (pkg.dependencies ?? {}) as Record<string, string>
+  for (const name of names) {
+    if (!Object.hasOwn(deps, name)) {
+      issues.push({ kind: 'not-declared', detail: name })
+    }
+    if (!isResolvableInProfile(profileDir, name)) {
+      issues.push({ kind: 'not-resolvable', detail: name })
+    }
+  }
+  return issues
 }
 
 function getDirectorySize(dir: string, maxFiles = 300): number {
@@ -366,19 +494,188 @@ export class VaultManager {
   }
 
   /**
-   * 从沙箱移除插件
+   * 读取沙箱内每个插件的依赖集合（dependencies + peerDependencies），
+   * 用于反向依赖判定。物理源读不到时按空集合处理。
    */
-  async remove(id: string): Promise<boolean> {
-    const data = this.readData()
-    const idx = data.plugins.findIndex((p) => p.id === id || p.name === id)
-    if (idx === -1) return false
-    data.plugins.splice(idx, 1)
-    this.saveData(data)
-    return true
+  private readDependencyIndex(data: { plugins: VaultPlugin[] }): { name: string; dependencies: Record<string, string> }[] {
+    return data.plugins.map((p) => {
+      let dependencies: Record<string, string> = {}
+      const src = this.resolvePluginSourceDir(p)
+      if (src) {
+        try {
+          const parsed = JSON.parse(readFileSync(join(src, 'package.json'), 'utf8')) as {
+            dependencies?: Record<string, string>
+            peerDependencies?: Record<string, string>
+          }
+          dependencies = { ...(parsed.dependencies ?? {}), ...(parsed.peerDependencies ?? {}) }
+        } catch {
+          /* 物理源不可读 → 视为无依赖 */
+        }
+      }
+      return { name: p.name, dependencies }
+    })
+  }
+
+  /** 判断物理目录是否位于沙箱存储池内（防止误删 profile 内的目录）。 */
+  private isInsideStoreDir(dir: string): boolean {
+    const pools = [this.storeDir]
+    if (process.env.APPDATA) pools.push(join(process.env.APPDATA, 'godsh', 'data', 'vault_store'))
+    const normalized = resolve(dir).toLowerCase()
+    return pools.some((pool) => {
+      const p = resolve(pool).toLowerCase()
+      return normalized === p || normalized.startsWith(p + sep)
+    })
   }
 
   /**
-   * 优化 1 & 2: NTFS Junction 零拷贝瞬时挂载 + 伴随自愈与互斥防线
+   * 从沙箱移除插件（**完整事务**）。
+   *
+   * 旧实现只从 `vault.json` 里 `splice` 一条记录：不卸挂载、不解除 Junction、不删物理目录，
+   * 也从不检查「谁依赖它」——这正是「删不掉」与「删了环境打不开」的根因。
+   *
+   * @param mode  `block`（默认）被依赖时拒绝；`cascade` 连同依赖者一起删；`force` 忽略依赖强删
+   * @param purge 是否同时删除 `vault_store` 中的物理目录（默认 false，交给 GC 回收更安全）
+   */
+  async remove(
+    id: string,
+    opts: { mode?: 'block' | 'cascade' | 'force'; purge?: boolean; profilesDir?: string } = {}
+  ): Promise<{
+    ok: boolean
+    name?: string
+    unmountedFrom: string[]
+    dependents: string[]
+    purged: boolean
+    error?: string
+  }> {
+    const mode = opts.mode ?? 'block'
+    const unmountedFrom: string[] = []
+
+    const data = this.readData()
+    const plugin = data.plugins.find((p) => p.id === id || p.name === id)
+    if (!plugin) {
+      return { ok: false, unmountedFrom, dependents: [], purged: false, error: `沙箱中未找到插件: ${id}` }
+    }
+
+    // ---- 反向依赖检查（bug 3）----
+    const dependents = findDependentsOf(plugin.name, this.readDependencyIndex(data)).filter((n) => n !== plugin.name)
+    if (dependents.length > 0 && mode === 'block') {
+      return {
+        ok: false,
+        name: plugin.name,
+        unmountedFrom,
+        dependents,
+        purged: false,
+        error:
+          `该插件被 ${dependents.length} 个插件依赖（${dependents.join('、')}）。` +
+          `删除它会导致这些环境因缺依赖而打不开；如确认请改用级联删除（mode=cascade）`,
+      }
+    }
+
+    const targets: VaultPlugin[] = [plugin]
+    if (mode === 'cascade') {
+      for (const name of dependents) {
+        const dep = data.plugins.find((p) => p.name === name)
+        if (dep) targets.push(dep)
+      }
+    }
+
+    // ---- 1. 先在所有挂载环境卸载（解除 Junction + 清理声明）----
+    if (opts.profilesDir) {
+      for (const t of targets) {
+        for (const prof of [...(t.installedProfiles ?? [])]) {
+          try {
+            await this.unmountFromProfile(t.id, prof, opts.profilesDir)
+            unmountedFrom.push(prof)
+          } catch {
+            /* 单个环境卸载失败不应阻断整体删除，但会在 history 里留痕 */
+          }
+        }
+      }
+    }
+
+    // ---- 2. 再移除索引 ----
+    const removing = new Set(targets.map((t) => t.name))
+    data.plugins = data.plugins.filter((p) => !removing.has(p.name))
+    this.saveData(data)
+
+    // ---- 3. 可选物理回收（仅限沙箱池内，绝不触碰 profile 目录）----
+    let purged = false
+    if (opts.purge) {
+      for (const t of targets) {
+        const src = this.resolvePluginSourceDir(t)
+        if (src && this.isInsideStoreDir(src)) {
+          removePathSafe(src)
+          purged = true
+        }
+      }
+    }
+
+    const history = this.readHistory()
+    history.push({
+      id: `snap-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+      timestamp: Date.now(),
+      profile: unmountedFrom.join(',') || '-',
+      pluginId: plugin.id,
+      pluginName: plugin.name,
+      toVersion: plugin.version,
+      action: 'remove',
+    })
+    this.saveHistory(history)
+
+    return { ok: true, name: plugin.name, unmountedFrom, dependents, purged }
+  }
+
+  /**
+   * 批量移除（bug 5）：逐项独立事务，单项失败不影响其余。
+   * 返回逐项结果，供任务中心与前端精确展示。
+   */
+  async removeMany(
+    ids: string[],
+    opts: { mode?: 'block' | 'cascade' | 'force'; purge?: boolean; profilesDir?: string } = {}
+  ): Promise<{
+    results: { id: string; name?: string; status: 'removed' | 'blocked' | 'failed'; reason?: string; dependents?: string[] }[]
+    removed: number
+    blocked: number
+    failed: number
+  }> {
+    const results: { id: string; name?: string; status: 'removed' | 'blocked' | 'failed'; reason?: string; dependents?: string[] }[] = []
+    for (const id of ids) {
+      try {
+        const r = await this.remove(id, opts)
+        if (r.ok) {
+          results.push({ id, name: r.name, status: 'removed' })
+        } else if (r.dependents.length > 0) {
+          results.push({ id, name: r.name, status: 'blocked', reason: r.error, dependents: r.dependents })
+        } else {
+          results.push({ id, name: r.name, status: 'failed', reason: r.error })
+        }
+      } catch (err) {
+        results.push({ id, status: 'failed', reason: err instanceof Error ? err.message : String(err) })
+      }
+    }
+    return {
+      results,
+      removed: results.filter((r) => r.status === 'removed').length,
+      blocked: results.filter((r) => r.status === 'blocked').length,
+      failed: results.filter((r) => r.status === 'failed').length,
+    }
+  }
+
+  /**
+   * 沙箱插件注入目标 Profile（NTFS Junction 零拷贝 + 伴随自愈 + 互斥防线）。
+   *
+   * 本批（bug 2）重写写入路径，核心保证：**任何时刻磁盘上的 Profile 都必须自洽可启动**。
+   *
+   * 与旧实现的关键差异：
+   * 1. 全程持有 profile 级锁，杜绝三个写者（vault / unified-kernel / profile-editor）互相覆盖；
+   * 2. **前置干跑校验**：物理源必须存在、不得自引用、版本必须匹配、伴随插件必须全部就绪；
+   * 3. **先物理、后声明**：先建 Junction 并确认可解析，再原子写 package.json。
+   *    这样「已声明但取不到」这个致命中间态从流程上不可能出现
+   *    （反向的「有目录未声明」dsh 会直接忽略，无害）；
+   * 4. `bundles` **门控**：只有物理可解析的包才写入（旧实现无条件写入，声明了不存在的 bundle）；
+   * 5. `package.json` **原子写**（temp+rename），中断不再留下半截 JSON；
+   * 6. **注入后校验 + 失败回滚**：校验不通过则回滚声明并移除本次新建的链接；
+   * 7. 失败返回 `ok:false` 与 `error`，**不再恒返回 `ok:true`**。
    */
   async deployToProfile(
     id: string,
@@ -392,6 +689,10 @@ export class VaultManager {
     isJunction: boolean
     shimsApplied: number
     conflicts: string[]
+    /** 失败原因（`ok:false` 时给出） */
+    error?: string
+    /** 因互斥被阻断时给出冲突插件名 */
+    blockedBy?: string[]
   }> {
     const data = this.readData()
     const plugin = data.plugins.find((p) => p.id === id || p.name === id)
@@ -401,107 +702,190 @@ export class VaultManager {
     const pkgJsonPath = join(profileDir, 'package.json')
     if (!existsSync(pkgJsonPath)) throw new Error(`目标环境未找到 package.json: ${profileDir}`)
 
-    const pkg = JSON.parse(readFileSync(pkgJsonPath, 'utf8')) as {
-      dependencies?: Record<string, string>
-      dsh?: { profile?: { bundles?: string[] } }
-    }
-    pkg.dependencies = pkg.dependencies || {}
+    const fail = (error: string, extra: { blockedBy?: string[]; conflicts?: string[] } = {}) => ({
+      ok: false as const,
+      deployed: [] as string[],
+      companionAdded: [] as string[],
+      isJunction: false,
+      shimsApplied: 0,
+      conflicts: extra.conflicts ?? [],
+      error,
+      ...(extra.blockedBy ? { blockedBy: extra.blockedBy } : {}),
+    })
 
-    const targetVersion = overrideVersion || plugin.activeVersion || plugin.version
-    const deployed: string[] = [plugin.name]
-    const companionAdded: string[] = []
+    // 整个写入过程在同一 profile 锁内串行
+    return withProfileLock(profileDir, async () => {
+      const pkg = readProfilePackage(profileDir)
+      if (!pkg) {
+        return fail('目标环境的 package.json 无法解析（可能已损坏）。请先对该环境执行「体检 / 自愈」再注入')
+      }
 
-    // 检查互斥冲突
-    const currentInstalled = Object.keys(pkg.dependencies)
-    const conflicts = detectPluginConflicts(plugin.name, currentInstalled)
+      const deps: Record<string, string> = { ...(pkg.dependencies ?? {}) }
+      const targetVersion = overrideVersion || plugin.activeVersion || plugin.version
+      const profileNm = join(profileDir, 'node_modules')
 
-    // 1. 尝试使用 NTFS Directory Junction 实现零拷贝毫秒级注入
-    const sourceDir = this.resolvePluginSourceDir(plugin, targetVersion)
-    let isJunction = false
+      // ---------- 1. 干跑校验（此阶段绝不写盘） ----------
+      const OFFICIAL_BUNDLES = new Set([
+        '@deepseek-ai/dsh-base',
+        '@deepseek-ai/dsh-web-app',
+        '@deepseek-ai/dsh-headless',
+      ])
+      if (OFFICIAL_BUNDLES.has(plugin.name)) {
+        return fail(`官方内置 bundle 不允许也不需要通过沙箱注入：${plugin.name}`)
+      }
 
-    const profileNm = join(profileDir, 'node_modules')
-    const destJunctionPath = join(profileNm, ...plugin.name.split('/'))
+      const conflicts = detectPluginConflicts(plugin.name, Object.keys(deps))
+      if (conflicts.length > 0) {
+        return fail(`与已安装插件互斥：${conflicts.join('、')}`, { blockedBy: conflicts, conflicts })
+      }
 
-    if (sourceDir && existsSync(sourceDir)) {
-      isJunction = createJunctionOrCopy(sourceDir, destJunctionPath)
-    }
+      const sourceDir = this.resolvePluginSourceDir(plugin, targetVersion)
+      if (!sourceDir || !existsSync(join(sourceDir, 'package.json'))) {
+        return fail(
+          `未找到可用的物理源（版本 ${targetVersion}）。请先在沙箱对该插件执行「更新」下载物理包，或改用「从环境收割」`
+        )
+      }
 
-    // 2. 注入目标插件至 package.json
-    const previousVersion = pkg.dependencies[plugin.name]
-    pkg.dependencies[plugin.name] = targetVersion.startsWith('^') ? targetVersion : `^${targetVersion}`
+      const destPath = join(profileNm, ...plugin.name.split('/'))
+      // 自引用：物理源就是目标环境自身时，建链会先 removePathSafe(源) 把插件包抹掉（bug 2 实际主因）
+      if (resolve(sourceDir).toLowerCase() === resolve(destPath).toLowerCase()) {
+        return fail(
+          '该插件的物理源就是目标环境自身（sourcePath 指向 profile 的 node_modules）。请先在沙箱「收割」把它规范到沙箱池，再注入'
+        )
+      }
 
-    // 3. 伴随依赖契约自愈（例如 dsh-web-search-pro 自动伴随 @anweat/dsh-browser）
-    const contract = getVaultContract(plugin.name)
-    const companions = contract?.companions || []
-
-    for (const comp of companions) {
-      if (!pkg.dependencies[comp.pkg]) {
-        pkg.dependencies[comp.pkg] = comp.version
-        companionAdded.push(comp.pkg)
-
-        // 尝试从沙箱也通过 Junction 直连伴随插件
-        const compPlugin = data.plugins.find((p) => p.name === comp.pkg)
-        if (compPlugin) {
-          const compSrc = this.resolvePluginSourceDir(compPlugin)
-          if (compSrc) {
-            const compDest = join(profileNm, ...comp.pkg.split('/'))
-            createJunctionOrCopy(compSrc, compDest)
-          }
+      // 版本精确性：仅在显式指定精确版本时强校验，避免 latest / 范围写法误伤
+      if (overrideVersion && /^\d+\.\d+\.\d+/.test(overrideVersion)) {
+        const srcVer = readPackageVersion(sourceDir)
+        if (srcVer && srcVer !== overrideVersion) {
+          return fail(`物理源版本(${srcVer})与请求版本(${overrideVersion})不一致，拒绝注入以免声明与实际不符`)
         }
       }
-    }
 
-    // 4. 维护 bundles 数组
-    const bundles = new Set(pkg.dsh?.profile?.bundles || [])
-    if (plugin.kind === 'bundle' || plugin.kind === 'both') {
-      bundles.add(plugin.name)
-    }
-    for (const comp of companions) {
-      if (comp.isBundle) bundles.add(comp.pkg)
-    }
+      // 伴随插件必须在写盘前全部解析就绪
+      const contract = getVaultContract(plugin.name)
+      const companions = contract?.companions || []
+      const companionPlans: { name: string; version: string; isBundle: boolean; src: string }[] = []
+      for (const comp of companions) {
+        if (Object.hasOwn(deps, comp.pkg) && isResolvableInProfile(profileDir, comp.pkg)) continue
+        const compPlugin = data.plugins.find((p) => p.name === comp.pkg)
+        const compSrc = compPlugin ? this.resolvePluginSourceDir(compPlugin) : null
+        if (!compSrc || !existsSync(join(compSrc, 'package.json'))) {
+          return fail(`伴随依赖 ${comp.pkg} 不在沙箱中或物理缺失，拒绝注入（否则环境将因缺依赖而打不开）`)
+        }
+        const compDest = join(profileNm, ...comp.pkg.split('/'))
+        if (resolve(compSrc).toLowerCase() === resolve(compDest).toLowerCase()) {
+          return fail(`伴随依赖 ${comp.pkg} 的物理源就是目标环境自身，拒绝注入`)
+        }
+        companionPlans.push({ name: comp.pkg, version: comp.version, isBundle: Boolean(comp.isBundle), src: compSrc })
+      }
 
-    pkg.dsh = pkg.dsh || {}
-    pkg.dsh.profile = pkg.dsh.profile || {}
-    pkg.dsh.profile.bundles = [...bundles]
+      // ---------- 2. 先落物理（可回滚） ----------
+      const originalRaw = readFileSync(pkgJsonPath, 'utf8')
+      const created: string[] = []
+      const rollback = () => {
+        for (const p of created) removePathSafe(p)
+        try {
+          writeJsonAtomic(pkgJsonPath, JSON.parse(originalRaw) as unknown)
+        } catch {}
+      }
 
-    writeFileSync(pkgJsonPath, JSON.stringify(pkg, null, 2), 'utf8')
+      let linkOutcome: LinkOutcome
+      try {
+        linkOutcome = createJunctionOrCopy(sourceDir, destPath)
+        if (linkOutcome === 'failed') {
+          return fail(`物理挂载失败：无法为 ${plugin.name} 建立 Junction 或复制目录`)
+        }
+        created.push(destPath)
 
-    // 5. 自动打入 ESM 兼容自愈垫片（防止 0.1.2 导出缺失导致崩溃）
-    let shimsApplied = 0
-    try {
-      shimsApplied = ensureCompatibilityShims(null, profileNm)
-    } catch {}
+        for (const plan of companionPlans) {
+          const compDest = join(profileNm, ...plan.name.split('/'))
+          const outcome = createJunctionOrCopy(plan.src, compDest)
+          if (outcome === 'failed') {
+            rollback()
+            return fail(`伴随依赖 ${plan.name} 物理挂载失败，已回滚`)
+          }
+          created.push(compDest)
+        }
+      } catch (err) {
+        rollback()
+        return fail(`物理挂载异常，已回滚：${err instanceof Error ? err.message : String(err)}`)
+      }
 
-    // 6. 更新已分配状态
-    plugin.installedProfiles = plugin.installedProfiles || []
-    if (!plugin.installedProfiles.includes(targetProfile)) {
-      plugin.installedProfiles.push(targetProfile)
-    }
-    plugin.isJunctionLinked = isJunction
-    this.saveData(data)
+      // ---------- 3. 物理就绪后再计算 bundles（门控） ----------
+      const previousVersion = deps[plugin.name]
+      deps[plugin.name] = targetVersion.startsWith('^') ? targetVersion : `^${targetVersion}`
+      const companionAdded = companionPlans.map((c) => c.name)
+      for (const c of companionPlans) deps[c.name] = c.version
 
-    // 7. 记录部署快照历史（供多版本回滚）
-    const history = this.readHistory()
-    history.push({
-      id: `snap-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
-      timestamp: Date.now(),
-      profile: targetProfile,
-      pluginId: plugin.id,
-      pluginName: plugin.name,
-      fromVersion: previousVersion,
-      toVersion: targetVersion,
-      action: previousVersion ? 'switch' : 'deploy',
+      const bundles = new Set<string>(pkg.dsh?.profile?.bundles || [])
+      const addBundleIfReady = (name: string) => {
+        if (isResolvableInProfile(profileDir, name)) bundles.add(name)
+      }
+      if (plugin.kind === 'bundle' || plugin.kind === 'both') addBundleIfReady(plugin.name)
+      for (const c of companionPlans) if (c.isBundle) addBundleIfReady(c.name)
+      // 顺带剔除「已声明但物理不存在」的历史遗留 bundle，避免继续用坏状态启动
+      for (const b of [...bundles]) {
+        if (!OFFICIAL_BUNDLES.has(b) && !isResolvableInProfile(profileDir, b)) bundles.delete(b)
+      }
+
+      // ---------- 4. 原子写声明 ----------
+      const nextPkg: ProfilePackageJson = {
+        ...pkg,
+        dependencies: deps,
+        dsh: { ...(pkg.dsh ?? {}), profile: { ...(pkg.dsh?.profile ?? {}), bundles: [...bundles] } },
+      }
+      try {
+        writeJsonAtomic(pkgJsonPath, nextPkg)
+      } catch (err) {
+        rollback()
+        return fail(`写入 package.json 失败，已回滚：${err instanceof Error ? err.message : String(err)}`)
+      }
+
+      // ---------- 5. 注入后校验（不通过则完整回滚） ----------
+      const verifyIssues = verifyInjectedPackages(profileDir, [plugin.name, ...companionAdded])
+      if (verifyIssues.length > 0) {
+        rollback()
+        const detail = verifyIssues.map((i) => `${i.kind}:${i.detail}`).join('; ')
+        return fail(`注入后校验未通过，已回滚（${detail}）`)
+      }
+
+      // ---------- 6. 兼容垫片 ----------
+      let shimsApplied = 0
+      try {
+        shimsApplied = ensureCompatibilityShims(null, profileNm)
+      } catch {}
+
+      // ---------- 7. 索引与历史 ----------
+      plugin.installedProfiles = plugin.installedProfiles || []
+      if (!plugin.installedProfiles.includes(targetProfile)) {
+        plugin.installedProfiles.push(targetProfile)
+      }
+      plugin.isJunctionLinked = linkOutcome === 'junction'
+      this.saveData(data)
+
+      const history = this.readHistory()
+      history.push({
+        id: `snap-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+        timestamp: Date.now(),
+        profile: targetProfile,
+        pluginId: plugin.id,
+        pluginName: plugin.name,
+        fromVersion: previousVersion,
+        toVersion: targetVersion,
+        action: previousVersion ? 'switch' : 'deploy',
+      })
+      this.saveHistory(history)
+
+      return {
+        ok: true,
+        deployed: [plugin.name, ...companionAdded],
+        companionAdded,
+        isJunction: linkOutcome === 'junction',
+        shimsApplied,
+        conflicts: [] as string[],
+      }
     })
-    this.saveHistory(history)
-
-    return {
-      ok: true,
-      deployed,
-      companionAdded,
-      isJunction,
-      shimsApplied,
-      conflicts,
-    }
   }
 
   /**

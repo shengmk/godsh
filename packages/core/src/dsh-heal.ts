@@ -1193,6 +1193,40 @@ export async function diagnoseProfile(
 /**
  * 启动前 Pre-flight 毫秒级门禁拦截校验
  */
+/** 官方内置 bundle：不参与「社区 bundle 可解析性」门禁。 */
+const OFFICIAL_BUNDLE_IDS = new Set([
+  '@deepseek-ai/dsh-base',
+  '@deepseek-ai/dsh-web-app',
+  '@deepseek-ai/dsh-headless',
+])
+
+/**
+ * 返回 `dsh.profile.bundles` 中「非官方且物理不可解析」的 id 列表。
+ *
+ * 动机（bug 2/3 治本）：旧门禁 `runPreflightCheck` 只校验官方 dsh-base/dsh-web-app，
+ * 因此「沙箱注入写入了 bundles 但物理包缺失」这种情况会被**放行**，
+ * 随后 spawn 失败、表现为「环境打不开」。此函数把社区 bundle 纳入硬门禁。
+ */
+export function findUnresolvableProfileBundles(dshHome: string, profileName: string): string[] {
+  const profDir = join(dshHome, 'profiles', profileName)
+  let bundles: string[] = []
+  try {
+    const pkg = JSON.parse(readFileSync(join(profDir, 'package.json'), 'utf8')) as {
+      dsh?: { profile?: { bundles?: unknown } }
+    }
+    const raw = pkg.dsh?.profile?.bundles
+    if (Array.isArray(raw)) bundles = raw.filter((x): x is string => typeof x === 'string')
+  } catch {
+    return [] // package.json 不可读由其它层负责报错
+  }
+  const missing: string[] = []
+  for (const id of bundles) {
+    if (OFFICIAL_BUNDLE_IDS.has(id)) continue
+    if (!existsSync(join(profDir, 'node_modules', ...id.split('/'), 'package.json'))) missing.push(id)
+  }
+  return missing
+}
+
 export async function runPreflightCheck(
   dshHome: string,
   profileName: string,
@@ -1200,6 +1234,18 @@ export async function runPreflightCheck(
   activeDshBin?: string
 ): Promise<PreflightResult> {
   const report = await diagnoseProfile(dshHome, profileName, expectedPort, activeDshBin)
+
+  // 社区 bundle 可解析性门禁（bug 2/3 治本）：缺失即前置拦截，而不是放行后 spawn 失败
+  const unresolvableBundles = findUnresolvableProfileBundles(dshHome, profileName)
+  if (unresolvableBundles.length > 0) {
+    return {
+      ok: false,
+      reason: `以下 bundle 在环境中无法解析，启动会失败：${unresolvableBundles.join('、')}`,
+      canAutoHeal: true,
+      report,
+    }
+  }
+
   if (report.overall === 'CRITICAL') {
     let reason = '检测到严重配置或依赖隐患'
     if (report.layers.layer3_config.invalidPlaceholders.length > 0) {

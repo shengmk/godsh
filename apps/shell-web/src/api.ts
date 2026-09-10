@@ -82,12 +82,15 @@ async function probeBackend(): Promise<string | null> {
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms))
 
 /** 带 HTTP 状态码的错误：让调用方能区分「确定性失败（4xx）」与「可重试失败（5xx/网络）」。 */
-class ApiError extends Error {
+export class ApiError extends Error {
   readonly status: number
-  constructor(message: string, status: number) {
+  /** 后端 409（被依赖阻断）响应体中的依赖方插件名列表，便于 UI 给出可操作提示。 */
+  readonly dependents: string[]
+  constructor(message: string, status: number, dependents: string[] = []) {
     super(message)
     this.name = 'ApiError'
     this.status = status
+    this.dependents = dependents
   }
 }
 
@@ -97,8 +100,11 @@ async function requestOnce<T>(base: string, path: string, init?: RequestInit): P
     headers: init?.body ? { 'Content-Type': 'application/json' } : undefined,
     ...init,
   })
-  const data = (await res.json().catch(() => ({}))) as T & { error?: string }
-  if (!res.ok) throw new ApiError(data.error ?? `请求失败 (${res.status})`, res.status)
+  const data = (await res.json().catch(() => ({}))) as T & { error?: string; dependents?: string[] }
+  if (!res.ok) {
+    const dependents = Array.isArray(data.dependents) ? data.dependents : []
+    throw new ApiError(data.error ?? `请求失败 (${res.status})`, res.status, dependents)
+  }
   return data
 }
 
@@ -147,6 +153,43 @@ async function req<T>(path: string, init?: RequestInit): Promise<T> {
     }
   }
   throw lastErr instanceof Error ? lastErr : new Error('请求失败')
+}
+
+/** 沙箱移除模式：block 被依赖时拒绝（默认）；cascade 级联移除依赖方；force 强制仅摘除索引记录。 */
+export type VaultRemoveMode = 'block' | 'cascade' | 'force'
+
+/** 仓库沙箱：单插件移除响应（200 成功；404 未找到 / 409 被依赖阻断时由 ApiError 抛出）。 */
+export interface VaultRemoveResult {
+  ok: boolean
+  name?: string
+  unmountedFrom?: string[]
+  dependents?: string[]
+  purged?: boolean
+}
+
+/** 仓库沙箱：批量移除中单个插件的处理结果。 */
+export interface VaultBatchRemoveItemResult {
+  id: string
+  name?: string
+  status: 'removed' | 'blocked' | 'failed'
+  reason?: string
+  dependents?: string[]
+}
+
+/** 仓库沙箱：批量移除同步响应（逐项结果）。 */
+export interface VaultBatchRemoveResult {
+  ok: boolean
+  results: VaultBatchRemoveItemResult[]
+  removed: number
+  blocked: number
+  failed: number
+}
+
+/** 仓库沙箱：批量移除异步受理响应（202，需经 vaultTaskProgress 轮询）。 */
+export interface VaultBatchRemoveAccepted {
+  ok: true
+  task: string
+  message: string
 }
 
 export const api = {
@@ -513,9 +556,41 @@ export const api = {
       method: 'POST',
     }),
 
-  /** 仓库沙箱：移除插件 */
-  vaultRemove: (id: string) =>
-    req<{ ok: boolean }>(`/vault/${encodeURIComponent(id)}`, { method: 'DELETE' }),
+  /**
+   * 仓库沙箱：移除插件。
+   * mode 默认 block（被其他插件依赖时返回 409 并拒绝）；cascade 级联移除依赖方；force 强制移除。
+   * purge=1 时同时清理磁盘上的实体包。
+   */
+  vaultRemove: (
+    id: string,
+    opts?: { mode?: VaultRemoveMode; purge?: boolean },
+  ) => {
+    const params = new URLSearchParams()
+    if (opts?.mode) params.set('mode', opts.mode)
+    if (opts?.purge) params.set('purge', '1')
+    const qs = params.toString()
+    return req<VaultRemoveResult>(`/vault/${encodeURIComponent(id)}${qs ? `?${qs}` : ''}`, { method: 'DELETE' })
+  },
+
+  /**
+   * 仓库沙箱：批量移除插件。
+   * 未指定 async（或 false）时同步返回逐项结果（removed / blocked / failed）；
+   * async 为 true 时后端 202 受理，返回 task，可经 vaultTaskProgress 轮询进度。
+   */
+  vaultBatchRemove: (
+    ids: string[],
+    opts?: { mode?: VaultRemoveMode; purge?: boolean; async?: boolean },
+  ) =>
+    req<VaultBatchRemoveResult | VaultBatchRemoveAccepted>('/vault/batch-remove', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        ids,
+        ...(opts?.mode ? { mode: opts.mode } : {}),
+        ...(opts?.purge ? { purge: true } : {}),
+        ...(opts?.async ? { async: true } : {}),
+      }),
+    }),
 
   /** 仓库沙箱：批量静默比对更新 */
   vaultCheckUpdates: () =>

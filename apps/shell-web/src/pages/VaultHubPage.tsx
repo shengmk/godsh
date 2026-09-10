@@ -21,7 +21,7 @@ import {
   ArrowUpCircle,
   HelpCircle,
 } from 'lucide-react'
-import { api } from '../api'
+import { api, ApiError } from '../api'
 import { EmptyState, SkeletonTable } from '../components'
 import { taskManager } from '../tasks'
 import type { DeploymentSnapshot, DiskSavingsReport, PluginAuditReport, ProfileView, VaultPlugin } from '../types'
@@ -251,6 +251,98 @@ export default function VaultHubPage() {
     }
   }
 
+  // 单插件永久移除（默认 block 模式；被依赖时提供级联移除二次确认）
+  async function handleRemovePlugin(p: VaultPlugin) {
+    if (!window.confirm(`确定从沙箱中永久删除 ${p.name} 吗？`)) return
+    setActionLoading(`remove-${p.id}`)
+    try {
+      const res = await api.vaultRemove(p.id, { mode: 'block' })
+      const unmounted =
+        res.unmountedFrom && res.unmountedFrom.length > 0 ? `，并已从环境 ${res.unmountedFrom.join('、')} 卸载` : ''
+      showNotice(`已移除 ${p.name}${unmounted}`, 'ok')
+      await loadData()
+    } catch (e) {
+      const dependents = e instanceof ApiError ? e.dependents : []
+      const blocked = (e instanceof ApiError && e.status === 409) || dependents.length > 0
+      if (!blocked) {
+        showNotice(`移除失败: ${e instanceof Error ? e.message : String(e)}`, 'err')
+        return
+      }
+      // 被其他插件依赖：给出依赖方数量与清单，并询问是否改用级联移除
+      const detail =
+        dependents.length > 0
+          ? `\n该插件正被以下 ${dependents.length} 个插件依赖：${dependents.join('、')}`
+          : '\n该插件仍被其他插件依赖，无法直接移除。'
+      const goCascade = window.confirm(
+        `无法移除 ${p.name}：${e instanceof Error ? e.message : '被其他插件依赖'}${detail}\n\n是否改用「级联移除」（连同依赖它的插件一并删除）？`,
+      )
+      if (!goCascade) {
+        showNotice(`已取消移除：${p.name} 仍被其他插件依赖，可改用级联移除`, 'warn')
+        return
+      }
+      try {
+        await api.vaultRemove(p.id, { mode: 'cascade' })
+        showNotice(
+          `已级联移除 ${p.name}${dependents.length > 0 ? ` 及其 ${dependents.length} 个依赖方` : ''}`,
+          'ok',
+        )
+        await loadData()
+      } catch (e2) {
+        showNotice(`级联移除失败: ${e2 instanceof Error ? e2.message : String(e2)}`, 'err')
+      }
+    } finally {
+      setActionLoading(null)
+    }
+  }
+
+  // 批量永久移除选中插件（同步逐项结果：默认 block 模式，被依赖的插件跳过并列出依赖方）
+  async function handleBatchRemove() {
+    const ids = Array.from(selectedIds)
+    if (ids.length === 0) return
+    if (
+      !window.confirm(
+        `确定从沙箱中永久删除选中的 ${ids.length} 个插件吗？\n被其他插件依赖的将自动跳过（不会级联删除依赖方）。`,
+      )
+    )
+      return
+    setActionLoading('batch-remove')
+    try {
+      const res = await api.vaultBatchRemove(ids, { mode: 'block' })
+      if (!('results' in res)) {
+        // 异步受理分支（当前未使用 async: true）
+        showNotice(`批量删除任务已派发，可在右下角任务中心查看进度：${res.message}`, 'ok')
+        setSelectedIds(new Set())
+        await loadData()
+        return
+      }
+
+      const blockedItems = res.results.filter((r) => r.status === 'blocked')
+      const failedItems = res.results.filter((r) => r.status === 'failed')
+      let msg = `已移除 ${res.removed} 个，跳过 ${res.blocked} 个（被依赖），失败 ${res.failed} 个`
+      if (blockedItems.length > 0) {
+        const labels = blockedItems.map(
+          (r) =>
+            `${r.name || r.id}${r.dependents && r.dependents.length > 0 ? `（被 ${r.dependents.join('、')} 依赖）` : ''}`,
+        )
+        const shown = labels.slice(0, 5)
+        msg += `\n被依赖跳过：${shown.join('；')}${labels.length > shown.length ? ` 等 ${labels.length} 个` : ''}`
+      }
+      if (failedItems.length > 0) {
+        msg += `\n失败：${failedItems.map((r) => `${r.name || r.id}（${r.reason || '未知原因'}）`).join('；')}`
+      }
+      showNotice(msg, res.failed > 0 ? 'err' : res.blocked > 0 ? 'warn' : 'ok')
+
+      // 已成功移除的项取消勾选；被跳过/失败的保留选中，便于用户改用级联移除重试
+      const removedIds = new Set(res.results.filter((r) => r.status === 'removed').map((r) => r.id))
+      setSelectedIds(new Set(ids.filter((id) => !removedIds.has(id))))
+      await loadData()
+    } catch (e) {
+      showNotice(`批量移除失败: ${e instanceof Error ? e.message : String(e)}`, 'err')
+    } finally {
+      setActionLoading(null)
+    }
+  }
+
   // 导入本地插件
   async function handleImportLocal() {
     if (!importModal.targetPath.trim()) return
@@ -452,6 +544,7 @@ export default function VaultHubPage() {
             color: notice.type === 'ok' ? 'var(--ok)' : notice.type === 'warn' ? 'var(--warn)' : 'var(--err)',
             border: '1px solid currentColor',
             fontSize: '0.9rem',
+            whiteSpace: 'pre-line',
           }}
         >
           {notice.msg}
@@ -558,6 +651,23 @@ export default function VaultHubPage() {
             style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}
           >
             <Rocket size={12} /> 广播批量挂载
+          </button>
+          <button
+            className="btn sm danger"
+            disabled={selectedIds.size === 0 || actionLoading === 'batch-remove'}
+            onClick={() => void handleBatchRemove()}
+            title="批量永久删除选中的沙箱插件（被其他插件依赖的将跳过并列出依赖方）"
+            style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}
+          >
+            {actionLoading === 'batch-remove' ? (
+              <>
+                <RefreshCw size={12} className="animate-spin" /> 正在批量删除…
+              </>
+            ) : (
+              <>
+                <Trash2 size={12} /> 批量删除
+              </>
+            )}
           </button>
         </div>
 
@@ -950,17 +1060,17 @@ export default function VaultHubPage() {
                             <ShieldCheck size={11} /> 审计
                           </button>
                           <button
-                            className="btn sm"
-                            onClick={async () => {
-                              if (!window.confirm(`确定从沙箱中永久删除 ${p.name} 吗？`)) return
-                              await api.vaultRemove(p.id)
-                              showNotice(`已移除 ${p.name}`, 'ok')
-                              await loadData()
-                            }}
+                            className="btn danger sm"
+                            onClick={() => void handleRemovePlugin(p)}
+                            disabled={actionLoading === `remove-${p.id}`}
                             style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}
-                            title="永久删除"
+                            title="永久删除（被其他插件依赖时将提示改用级联移除）"
                           >
-                            <Trash2 size={12} />
+                            {actionLoading === `remove-${p.id}` ? (
+                              <RefreshCw size={12} className="animate-spin" />
+                            ) : (
+                              <Trash2 size={12} />
+                            )}
                           </button>
                         </div>
                       </td>

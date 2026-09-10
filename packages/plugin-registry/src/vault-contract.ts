@@ -69,3 +69,37 @@ export function detectPluginConflicts(pluginName: string, installedPlugins: stri
   if (!contract?.conflictsWith) return []
   return contract.conflictsWith.filter((p) => installedPlugins.includes(p))
 }
+
+/**
+ * 反向依赖（契约表口径）：返回所有把 `targetName` 当作伴随插件（companion）的插件名。
+ *
+ * 动机（bug 3）：删除一个「被别人依赖的子插件」会让环境因缺依赖而打不开。
+ * 删除前必须知道「谁依赖它」。实测运行态 82 个沙箱插件之间存在 39 条真实依赖边，
+ * 而契约表只覆盖其中 1 条，因此本函数只是**一环**，完整判定见 `findDependentsOf`。
+ */
+export function findDependents(targetName: string): string[] {
+  const out: string[] = []
+  for (const [name, contract] of Object.entries(KNOWN_CONTRACTS)) {
+    if (name === targetName) continue
+    if (contract.companions?.some((c) => c.pkg === targetName)) out.push(name)
+  }
+  return out
+}
+
+/**
+ * 反向依赖（契约表 + 实测 package.json 双口径）。
+ *
+ * @param targetName 待删除的插件名
+ * @param installed  沙箱内全部插件与其 package.json 依赖集合（由调用方读取，本模块保持无 IO）
+ */
+export function findDependentsOf(
+  targetName: string,
+  installed: { name: string; dependencies: Record<string, string> }[],
+): string[] {
+  const out = new Set<string>(findDependents(targetName))
+  for (const p of installed) {
+    if (p.name === targetName) continue
+    if (Object.hasOwn(p.dependencies, targetName)) out.add(p.name)
+  }
+  return [...out].sort()
+}

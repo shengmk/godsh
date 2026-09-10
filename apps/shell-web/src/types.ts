@@ -85,7 +85,7 @@ export interface DeploymentSnapshot {
   pluginName: string
   fromVersion?: string
   toVersion: string
-  action: 'deploy' | 'switch' | 'rollback' | 'unmount'
+  action: 'deploy' | 'switch' | 'rollback' | 'unmount' | 'remove'
 }
 
 export interface DiskSavingsReport {
