@@ -274,6 +274,186 @@ export function readPkgVersion(pkgDir: string): string | null {
   }
 }
 
+/** 把 `x.y.z` 解析成三段数字；带预发布后缀（如 1.0.0-rc.1）时取主干。 */
+function parseVersion(v: string): [number, number, number] | null {
+  const m = /^v?(\d+)\.(\d+)\.(\d+)/.exec(v.trim())
+  if (!m) return null
+  return [Number(m[1]), Number(m[2]), Number(m[3])]
+}
+
+function compareVersion(a: [number, number, number], b: readonly [number, number, number]): number {
+  for (let i = 0; i < 3; i++) {
+    const x = a[i] as number
+    const y = b[i] as number
+    if (x !== y) return x < y ? -1 : 1
+  }
+  return 0
+}
+
+/**
+ * 极简语义化版本范围判定，只覆盖本项目实际会用到的写法（`^`、`~`、`>=`、`>`、`=`，可 `||` 并列）。
+ *
+ * 为什么不引第三方 semver：这个判定要在**用户自己的 dsh 目录**里跑，
+ * 「为了修一个依赖问题而再引入一个依赖」是把修复本身变成新的风险点。
+ */
+export function satisfiesVersionRange(version: string, range: string): boolean {
+  const v = parseVersion(version)
+  if (!v) return false
+  return range.split('||').some((part) => {
+    const m = /^(\^|~|>=|>|=)?\s*v?(\d+)\.(\d+)\.(\d+)/.exec(part.trim())
+    if (!m) return false
+    const op = m[1] ?? '='
+    const lo = [Number(m[2]), Number(m[3]), Number(m[4])] as const
+    const cmp = compareVersion(v, lo)
+    if (op === '^') {
+      // 主版本非 0：允许到下一个主版本之前；主版本为 0 时按次版本锁（与 npm 行为一致）
+      if (lo[0] > 0) return cmp >= 0 && v[0] === lo[0]
+      return cmp >= 0 && v[0] === 0 && v[1] === lo[1]
+    }
+    if (op === '~') return cmp >= 0 && v[0] === lo[0] && v[1] === lo[1]
+    if (op === '>=') return cmp >= 0
+    if (op === '>') return cmp > 0
+    return cmp === 0
+  })
+}
+
+/** 读取某个 content-type 目录的版本（不存在返回 null）。 */
+function contentTypeVersionAt(dir: string): string | null {
+  return existsSync(join(dir, 'package.json')) ? readPkgVersion(dir) : null
+}
+
+function samePath(a: string, b: string): boolean {
+  return process.platform === 'win32'
+    ? join(a).toLowerCase() === join(b).toLowerCase()
+    : join(a) === join(b)
+}
+
+/**
+ * 列出「依赖树的声明与解析点不一致」这类问题，供诊断层报出。
+ *
+ * 目前只覆盖一类，但它是**真实事故**：`negotiator@1.x` 声明 `content-type: ^2.1.0`，
+ * 而 npm 的提升算法把顶层 `content-type` 定在 1.0.5（被 express 一线占用），
+ * `negotiator/node_modules` 下又没有嵌套副本 —— 于是 dsh 的第一个 HTTP 请求
+ * （带 Accept-Encoding 的任意请求）会在 `WebServer.gzip` 里抛
+ * `TypeError: invalid media type`，**异常未被捕获，进程直接退出**。
+ * 外部表现就是「启动成功、网页打不开、随即变为未启动」。
+ */
+export function diagnoseDepTreeConsistency(dshNodeModules: string): string[] {
+  const problems: string[] = []
+  const negDir = join(dshNodeModules, 'negotiator')
+  const negPkg = join(negDir, 'package.json')
+  if (!existsSync(negPkg)) return problems
+
+  let range: string | null = null
+  let negVer = '未知'
+  try {
+    const json = JSON.parse(readFileSync(negPkg, 'utf8')) as {
+      version?: string
+      dependencies?: Record<string, string>
+    }
+    negVer = typeof json.version === 'string' ? json.version : '未知'
+    const raw = json.dependencies?.['content-type']
+    if (typeof raw === 'string') range = raw
+  } catch {
+    return problems
+  }
+  if (!range) return problems
+
+  const nestedDir = join(negDir, 'node_modules', 'content-type')
+  const nestedVer = contentTypeVersionAt(nestedDir)
+  if (nestedVer && satisfiesVersionRange(nestedVer, range)) return problems
+  const topVer = contentTypeVersionAt(join(dshNodeModules, 'content-type'))
+  if (!nestedVer && topVer && satisfiesVersionRange(topVer, range)) return problems
+
+  const resolved = nestedVer ?? topVer ?? '缺失'
+  problems.push(
+    `依赖树不自洽：negotiator@${negVer} 声明 content-type ${range}，` +
+      `但解析点上的版本是 ${resolved}（嵌套副本${nestedVer ? '不合规' : '不存在'}）`
+  )
+  problems.push(
+    '后果：dsh 的首个 HTTP 请求会在 WebServer.gzip 里抛 TypeError: invalid media type 并退出进程，' +
+      '表现为「启动成功、网页打不开、随即变为未启动」'
+  )
+  return problems
+}
+
+/**
+ * 兼容性垫片 5：把 `negotiator` 需要的 `content-type` 副本放到它自己的解析点上。
+ *
+ * 修法刻意保守：**只在 `negotiator/node_modules/` 下新增一份副本，绝不改写顶层包**，
+ * 也不动任何其它包 —— 因此对依赖树里其它消费者是零影响，复原只需删掉这个嵌套目录。
+ * 取材一律来自**用户机器上已经存在的合规副本**（各 profile 的 node_modules、godsh 的
+ * 模块缓存），不下载、不联网、不凭空生成。
+ *
+ * 返回实际施加的垫片数（0 或 1）；找不到可用来源时返回 0（由诊断层负责把话说清楚）。
+ */
+export function shimNegotiatorContentType(dshNodeModules: string, candidateRoots: string[] = []): number {
+  const negDir = join(dshNodeModules, 'negotiator')
+  const negPkg = join(negDir, 'package.json')
+  if (!existsSync(negPkg)) return 0
+
+  let range: string | null = null
+  try {
+    const json = JSON.parse(readFileSync(negPkg, 'utf8')) as { dependencies?: Record<string, string> }
+    const raw = json.dependencies?.['content-type']
+    if (typeof raw === 'string') range = raw
+  } catch {
+    return 0
+  }
+  if (!range) return 0
+
+  const nestedDir = join(negDir, 'node_modules', 'content-type')
+  const nestedVer = contentTypeVersionAt(nestedDir)
+  if (nestedVer && satisfiesVersionRange(nestedVer, range)) return 0 // 已经自洽，幂等返回 0
+  const topVer = contentTypeVersionAt(join(dshNodeModules, 'content-type'))
+  if (!nestedVer && topVer && satisfiesVersionRange(topVer, range)) return 0 // 顶层就能满足，无需垫片
+
+  for (const root of candidateRoots) {
+    if (!root) continue
+    const ver = contentTypeVersionAt(root)
+    if (!ver || !satisfiesVersionRange(ver, range)) continue
+    if (samePath(root, nestedDir)) return 0
+    try {
+      // 只替换我们自己的嵌套副本；即使已存在一个不合规副本也在此处被合规副本覆盖
+      if (existsSync(nestedDir)) rmSync(nestedDir, { recursive: true, force: true })
+      // 注意：copyDir 的既有约定是「只创建子目录、不创建目标根本身」，
+      // 所以目标根必须由调用方先建好，否则 writeFileSync 会 ENOENT（单测已覆盖此坑）
+      mkdirSync(nestedDir, { recursive: true })
+      copyDir(root, nestedDir)
+      return 1
+    } catch {
+      return 0
+    }
+  }
+  return 0
+}
+
+/**
+ * 收集「可用于修复的 content-type 合规副本」候选位置。
+ *
+ * 取材优先级刻意从「最贴近用户实际环境」开始：
+ * 1. 当前 profile 的 node_modules（用户自己装过就一定有）；
+ * 2. **其它 profile** 的 node_modules —— 事故里 webtest 恰好有一份合规副本，
+ *    而 web 环境是链接到全局树的，所以必须跨 profile 取材，否则 web 环境修不了；
+ * 3. godsh 自己的模块缓存（DSH Desktop asar 提取出来的那一份）。
+ */
+export function collectContentTypeCandidates(profileNm?: string): string[] {
+  const roots: string[] = []
+  const profilesDir = join(homedir(), '.dsh', 'profiles')
+  if (profileNm) roots.push(join(profilesDir, profileNm, 'node_modules', 'content-type'))
+  try {
+    for (const p of readdirSync(profilesDir)) {
+      roots.push(join(profilesDir, p, 'node_modules', 'content-type'))
+    }
+  } catch {
+    /* 没有 profiles 目录就跳过这一来源 */
+  }
+  const cache = dshModulesCacheDir()
+  roots.push(join(cache, 'content-type'))
+  roots.push(join(cache, 'negotiator', 'node_modules', 'content-type'))
+  return roots
+}
+
 /**
  * 解析当前活跃的 DSH CLI 官方依赖目录（node_modules/@deepseek-ai）。
  * 优先使用实际执行环境（npm 全局 / 指定 bin 所在包），解决 DSH Desktop 内置版本与驱动 CLI 不匹配问题。
@@ -358,6 +538,9 @@ export function bundleResolvable(profileDir: string, pkg = '@deepseek-ai/dsh-bas
  * 3. undici: 为 undici 8 补充 lib/handler/wrap-handler.js 与 unwrap-handler.js，避免 jsdom 崩溃
  * 4. @deepseek-ai/dsh-client-connection: 补充 loopback（127.0.0.1/localhost）免 token 自动签名授权与 303 会话重定向，
  *    彻底根除从浏览器/godsh 打开 web 时提示 "dsh web authentication required; reopen the URL printed by dsh web." 的 401 拦截
+ * 5. negotiator: 它声明需要 content-type ^2.1.0，但 npm 提升后解析点上可能是 1.0.5（顶层被 express 一线占用），
+ *    此时 dsh 的首个 HTTP 请求就会抛 invalid media type 并退出进程。垫片只在 negotiator 自己的
+ *    node_modules 下补一份合规副本，既不改顶层包也不影响其它消费者
  */
 export function ensureCompatibilityShims(activeDshNodeModules?: string | null, profileNm?: string): number {
   let shimmed = 0
@@ -374,7 +557,17 @@ export function ensureCompatibilityShims(activeDshNodeModules?: string | null, p
     sources.push(cacheDir)
   }
 
+  // 取材来源只算一次：跨 profile 取材，否则「web 环境链接到全局树」这种情形修不了
+  const contentTypeCandidates = collectContentTypeCandidates(profileNm)
+
   for (const src of sources) {
+    // 5. negotiator 声明所需的 content-type 副本（见 shimNegotiatorContentType 的注释）
+    try {
+      shimmed += shimNegotiatorContentType(src, contentTypeCandidates)
+    } catch {
+      /* 单个垫片失败不影响其它垫片 */
+    }
+
     // 1. @deepseek-ai/dsh-settings 补充 settingsNamespace 和 installSettingsSection
     const settingsIdx = join(src, '@deepseek-ai', 'dsh-settings', 'lib', 'index.js')
     if (existsSync(settingsIdx)) {
@@ -1042,6 +1235,13 @@ export async function diagnoseProfile(
     issuesFound++
   } else {
     cliVer = readPkgVersion(join(globalCli, '@deepseek-ai', 'dsh-base'))
+    // commander 在 ≠ 依赖树能用：声明与解析点不一致时，dsh 会在首个请求上直接退出
+    const depProblems = diagnoseDepTreeConsistency(globalCli)
+    if (depProblems.length > 0) {
+      cliOk = false
+      cliProblems.push(...depProblems)
+      issuesFound++
+    }
   }
 
   // Layer 1: Network

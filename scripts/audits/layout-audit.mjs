@@ -103,25 +103,58 @@ const kill = document.createElement('style')
 kill.textContent = '*,*::before,*::after{transition:none !important;animation:none !important}'
 document.head.appendChild(kill)
 const wait = (ms) => new Promise((r) => setTimeout(r, ms))
-const navItems = () => Array.from(document.querySelectorAll('.nav-item'))
+/* 页面切换必须按 **hash 路由 key**，不能用导航文本子串匹配。
+   为什么：侧栏 `.nav-item` 的文本是「标签 + 描述」拼接，'任务' 会命中插件市场页的描述、
+   '设置' 会命中系统任务页，'沙箱'/'市场' 互相命中 —— 于是「9 页」实测只覆盖 5 页，
+   横向溢出与长列表的结论都建立在缺失的页面上（假达标）。
+   App.tsx 的 NAV 给出稳定 key，getPageFromHash 接受 `#/key`，因此这里只写 key；
+   到位判定看 KeepAlive 的 `[data-page-container=key]` 是否可见，不依赖任何文案，
+   切换语言时覆盖面也不会静默缩水。 */
+const PAGES = ['console', 'profiles', 'tasks', 'market', 'vault', 'allocations', 'kernels', 'dsh-envs', 'settings']
 const pageLabel = () => (document.querySelector('.nav-item.active')?.textContent ?? 'current').trim().slice(0, 12)
-async function gotoTab(kw) {
-  const t = navItems().find((n) => (n.textContent ?? '').includes(kw))
-  if (!t) return false
-  t.click()
-  await wait(1000)
-  return true
+
+const isOnPage = (key) => {
+  const box = document.querySelector(`[data-page-container="${key}"]`)
+  return !!box && box.style.display !== 'none'
+}
+
+async function gotoTab(key) {
+  if (location.hash.replace(/^#\/?/, '') !== key) location.hash = `#/${key}`
+  for (let i = 0; i < 40; i++) {
+    await wait(150)
+    if (isOnPage(key)) {
+      await wait(800)
+      return true
+    }
+  }
+  return false
 }
 
 const pages = []
-const record = (label) => pages.push({ page: label, overflow: overflowReport(), longList: longListReport() })
-record(pageLabel())
-for (const kw of ['环境', '沙箱', '分配', '市场', '任务', '设置', '内核', '控制台']) {
-  if (await gotoTab(kw)) record(pageLabel())
+const visited = ['console']
+const record = (key) => pages.push({ key, page: pageLabel(), overflow: overflowReport(), longList: longListReport() })
+record('console')
+for (const key of PAGES) {
+  if (key === 'console') continue
+  if (!(await gotoTab(key))) {
+    visited.push(`MISS:${key}`)
+    continue
+  }
+  visited.push(key)
+  record(key)
 }
+
+const distinctVisited = Array.from(new Set(visited.filter((v) => !String(v).startsWith('MISS:'))))
 
 return {
   viewport: { w: innerWidth, h: innerHeight, dpr: devicePixelRatio },
+  coverage: {
+    requested: PAGES,
+    visited,
+    distinctVisited,
+    distinctCount: distinctVisited.length,
+    complete9: distinctVisited.length === PAGES.length && visited.every((v) => !String(v).startsWith('MISS:')),
+  },
   font: fontReport(),
   pages,
 }

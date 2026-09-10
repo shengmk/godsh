@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync, symlinkSync } from 'node:fs'
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync, symlinkSync, existsSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import {
@@ -11,6 +11,9 @@ import {
   safePurgeProfileJunctions,
   diagnoseProfile,
   runPreflightCheck,
+  satisfiesVersionRange,
+  shimNegotiatorContentType,
+  diagnoseDepTreeConsistency,
 } from './dsh-heal.js'
 
 
@@ -222,6 +225,99 @@ test('diagnoseProfile & runPreflightCheck: 正确识别非法占位符死链并�
     assert.equal(preflightGood.report.layers.layer3_config.invalidPlaceholders.length, 0)
   } finally {
     rmSync(tmpRoot, { recursive: true, force: true })
+  }
+})
+
+test('satisfiesVersionRange: 覆盖 ^ ~ >= 与并列写法（垫片 5 的判定基础）', () => {
+  // 事故原样：negotiator@1.1.0 声明的是 ^2.1.0，而解析点上是 1.0.5
+  assert.equal(satisfiesVersionRange('2.1.0', '^2.1.0'), true)
+  assert.equal(satisfiesVersionRange('2.1.5', '^2.1.0'), true)
+  assert.equal(satisfiesVersionRange('2.0.0', '^2.1.0'), false)
+  assert.equal(satisfiesVersionRange('1.0.5', '^2.1.0'), false)
+  assert.equal(satisfiesVersionRange('3.0.0', '^2.1.0'), false)
+  assert.equal(satisfiesVersionRange('1.0.5', '~1.0.0'), true)
+  assert.equal(satisfiesVersionRange('1.1.0', '~1.0.0'), false)
+  assert.equal(satisfiesVersionRange('2.0.0', '>=2.0.0'), true)
+  assert.equal(satisfiesVersionRange('1.9.9', '^1.0.0 || ^2.0.0'), true)
+  // 版本号不可解析时必须判为不满足，不能"乐观放行"
+  assert.equal(satisfiesVersionRange('不是版本号', '^2.1.0'), false)
+  assert.equal(satisfiesVersionRange('2.1.0', '不是范围'), false)
+})
+
+/** 复刻事故现场：negotiator 声明 ^2.1.0，但解析点上只有顶层 content-type@1.0.5，且没有嵌套副本。 */
+function makeBrokenNegotiatorTree(root: string): string {
+  const dshNm = join(root, 'dsh-node_modules')
+  mkdirSync(join(dshNm, 'negotiator'), { recursive: true })
+  writeFileSync(
+    join(dshNm, 'negotiator', 'package.json'),
+    JSON.stringify({ name: 'negotiator', version: '1.1.0', dependencies: { 'content-type': '^2.1.0' } })
+  )
+  mkdirSync(join(dshNm, 'content-type'), { recursive: true })
+  writeFileSync(join(dshNm, 'content-type', 'package.json'), JSON.stringify({ name: 'content-type', version: '1.0.5' }))
+  writeFileSync(join(dshNm, 'content-type', 'index.js'), '/* 顶层 1.0.5：垫片不许碰它 */\n')
+  return dshNm
+}
+
+function makeContentTypeCandidate(root: string, version: string): string {
+  const dir = join(root, `candidate-content-type-${version}`)
+  mkdirSync(dir, { recursive: true })
+  writeFileSync(join(dir, 'package.json'), JSON.stringify({ name: 'content-type', version }))
+  writeFileSync(join(dir, 'index.js'), `/* ${version} 合规副本 */\n`)
+  return dir
+}
+
+test('diagnoseDepTreeConsistency: 报出「声明与解析点不一致」并说清后果', () => {
+  const root = mkdtempSync(join(tmpdir(), 'dsh-dep-diag-'))
+  try {
+    const problems = diagnoseDepTreeConsistency(makeBrokenNegotiatorTree(root))
+    assert.ok(problems.length >= 1, '必须报出问题')
+    assert.ok(
+      problems.some((p) => p.includes('content-type') && p.includes('^2.1.0')),
+      '必须同时给出声明的范围与解析点上的版本，否则用户无从判断'
+    )
+    assert.ok(
+      problems.some((p) => p.includes('invalid media type')),
+      '必须说清后果（首个请求即退出），否则「网页打不开」会被误当成网络问题'
+    )
+  } finally {
+    rmSync(root, { recursive: true, force: true })
+  }
+})
+
+test('shimNegotiatorContentType: 只新增嵌套副本、绝不动顶层包、可幂等重跑', () => {
+  const root = mkdtempSync(join(tmpdir(), 'dsh-dep-shim-'))
+  try {
+    const nm = makeBrokenNegotiatorTree(root)
+    const cand = makeContentTypeCandidate(root, '2.1.0')
+    const topBefore = readFileSync(join(nm, 'content-type', 'index.js'), 'utf8')
+
+    assert.equal(shimNegotiatorContentType(nm, [cand]), 1, '应施加 1 个垫片')
+    const nested = join(nm, 'negotiator', 'node_modules', 'content-type')
+    assert.equal(readPkgVersion(nested), '2.1.0', '嵌套副本必须是声明所需的版本')
+    assert.equal(readFileSync(join(nested, 'index.js'), 'utf8'), '/* 2.1.0 合规副本 */\n', '内容必须来自候选副本')
+    assert.equal(readFileSync(join(nm, 'content-type', 'index.js'), 'utf8'), topBefore, '顶层包必须一字未改')
+    assert.equal(diagnoseDepTreeConsistency(nm).length, 0, '修好后诊断必须干净')
+    assert.equal(shimNegotiatorContentType(nm, [cand]), 0, '第二次调用必须返回 0（幂等）')
+  } finally {
+    rmSync(root, { recursive: true, force: true })
+  }
+})
+
+test('shimNegotiatorContentType: 找不到合规来源或来源版本不合规时都不动手', () => {
+  const root = mkdtempSync(join(tmpdir(), 'dsh-dep-nosrc-'))
+  try {
+    const nm = makeBrokenNegotiatorTree(root)
+    const nested = join(nm, 'negotiator', 'node_modules', 'content-type')
+
+    assert.equal(shimNegotiatorContentType(nm, []), 0, '没有来源时不得凭空造包')
+    assert.equal(existsSync(nested), false, '不得留下空目录')
+    assert.ok(diagnoseDepTreeConsistency(nm).length >= 1, '诊断仍须如实报出问题')
+
+    const bad = makeContentTypeCandidate(root, '1.0.5')
+    assert.equal(shimNegotiatorContentType(nm, [bad]), 0, '来源版本不合规时不得复制')
+    assert.equal(existsSync(nested), false)
+  } finally {
+    rmSync(root, { recursive: true, force: true })
   }
 })
 

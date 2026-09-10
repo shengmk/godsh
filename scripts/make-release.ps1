@@ -135,10 +135,34 @@ Compress-Archive -Path (Join-Path $stage "*") -DestinationPath $zip -Compression
 
 $bundleDir = Join-Path $srcRelease "bundle"
 if (Test-Path $bundleDir) {
-  Get-ChildItem $bundleDir -Recurse -Include *.exe,*.msi -File | ForEach-Object {
-    $destName = if ($_.Name -match 'setup') { "godsh-$Version-x64-setup.exe" } else { "godsh-$Version-x64.msi" }
-    Copy-Item $_.FullName (Join-Path $releaseDir $destName) -Force
-    Write-Host "  安装器: $destName"
+  # 只取与**本轮 $Version 匹配**的安装器，而不是把 bundle 下所有安装器都拷成同一个名字。
+  #
+  # 为什么必须这样改（2026-09-11 实测）：tauri 的 bundle/nsis 会累积历史产物，本机当时躺着 9 个
+  # （0.5.2 / 0.5.3 / 0.5.5 / 0.6.0 / 0.6.1 / 0.6.2 / 0.6.3 / 0.6.4 / 本轮）。旧实现按 `*.exe,*.msi`
+  # 全量遍历、循环内一律拷成 `godsh-$Version-x64-setup.exe`，于是**谁最后被枚举到谁就赢** ——
+  # 本轮的 0.6.5 只是恰好按文件名升序排在最后才胜出（日志里那行"安装器:"重复打印了 9 次）。
+  # 一旦枚举顺序变化，就会把上一版的安装包当成新版发布出去，正是"自报旧版本"那一类事故。
+  #
+  # 因此这里改为：按版本号筛出候选 → 数量不对就**直接失败**（宁可发不出去，也不能发错包）。
+  $allBundleArtifacts = Get-ChildItem $bundleDir -Recurse -Include *.exe,*.msi -File
+  $matched = @($allBundleArtifacts | Where-Object { $_.Name -like "*_$Version`_*" })
+  $setups = @($matched | Where-Object { $_.Extension -eq '.exe' -and $_.Name -match 'setup' })
+  $msis = @($matched | Where-Object { $_.Extension -eq '.msi' })
+
+  if ($setups.Count -ne 1) {
+    $found = ($matched | ForEach-Object { '    ' + $_.Name }) -join "`n"
+    throw "期望恰好 1 个与 $Version 匹配的 setup 安装器，实际 $($setups.Count) 个。候选：`n$found`n（bundle 目录：$bundleDir）"
+  }
+  $setupDest = Join-Path $releaseDir "godsh-$Version-x64-setup.exe"
+  Copy-Item $setups[0].FullName $setupDest -Force
+  Write-Host "  安装器: godsh-$Version-x64-setup.exe  ← $($setups[0].Name)"
+
+  if ($msis.Count -gt 1) {
+    throw "找到 $($msis.Count) 个与 $Version 匹配的 msi，无法确定该用哪个"
+  }
+  if ($msis.Count -eq 1) {
+    Copy-Item $msis[0].FullName (Join-Path $releaseDir "godsh-$Version-x64.msi") -Force
+    Write-Host "  安装器: godsh-$Version-x64.msi  ← $($msis[0].Name)"
   }
 } else {
   Write-Host "警告: 未找到 tauri bundle 目录，跳过安装器" -ForegroundColor Yellow

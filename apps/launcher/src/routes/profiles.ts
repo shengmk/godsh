@@ -1,6 +1,6 @@
 import { join } from 'node:path'
 import { mkdirSync, readFileSync, writeFileSync, existsSync } from 'node:fs'
-import { readLogTail, extractDshWebUrl, spawnWebProfile, stopWeb, waitForPort, waitForWebUrl, hasAuthToken, isPortListening, findPidByPort, findProcessName, invalidatePortProbe, ensureProfileBundles, ensureCacheIntegrity, killAllProfileProcesses, verifyProfileDeps, runPreflightCheck } from '@godsh/core'
+import { readLogTail, extractDshWebUrl, spawnWebProfile, stopWeb, waitForPort, waitForWebUrl, probeWebUrl, hasAuthToken, isPortListening, findPidByPort, findProcessName, invalidatePortProbe, ensureProfileBundles, ensureCacheIntegrity, ensureCompatibilityShims, resolveActiveDshNodeModules, killAllProfileProcesses, verifyProfileDeps, runPreflightCheck } from '@godsh/core'
 import { createProfile, removeProfile, scanProfiles, setProfileBundles, exportProfilePackage, importProfilePackage, type ProfilePackage } from '@godsh/profile-manager'
 import { run } from '@godsh/core'
 import { pluginAction, PLUGIN_ACTION_TIMEOUT_MS, resolveInstallArg } from '@godsh/marketplace'
@@ -19,6 +19,25 @@ function enqueueStart<T>(task: () => Promise<T>): Promise<T> {
     () => {},
   )
   return run
+}
+
+/**
+ * 启动前的依赖树自愈（只增不改，见 ensureCompatibilityShims 的垫片 5）。
+ *
+ * 为什么不只在进程启动时做一次：依赖树可能在 **godsh 已经起来之后**才被 npm/pnpm 弄坏
+ * ——webtest 事故的时间线正是如此（godsh 先启动，之后全局 dsh 树被改动），
+ * 那样进程启动时跑过的垫片已经过期。每次启动前重跑一次，成本只有几次文件存在性判断。
+ *
+ * 返回是否**真的施加了**垫片（已自洽时为 false，幂等）。
+ */
+function healDepTreeForStart(profileName: string, dshBin?: string): boolean {
+  try {
+    const nm = resolveActiveDshNodeModules(dshBin)
+    if (!nm) return false
+    return ensureCompatibilityShims(nm, profileName) > 0
+  } catch {
+    return false
+  }
 }
 
 /**
@@ -312,6 +331,9 @@ export const profilesHandler: ApiHandler = async (ctx, _req, res, method, seg, b
       } catch {
         /* 缓存修复失败不阻断，dsh 会给出具体报错 */
       }
+      if (healDepTreeForStart(name, dshBin)) {
+        console.log(`[godsh] 启动前依赖树自愈：已为 ${name} 补齐 negotiator 所需的 content-type 副本`)
+      }
       ctx.ensureUnifiedKernel(name)
       const isCustom = Boolean(body.port && Number(body.port) > 0)
       const preferredPort = isCustom ? Number(body.port) : undefined
@@ -357,13 +379,28 @@ export const profilesHandler: ApiHandler = async (ctx, _req, res, method, seg, b
       })
       void (async () => {
         const ready = await waitForPort(port, 60_000)
-        if (running.get(name) === proc) {
-          if (ready) proc.status = 'running'
-          else {
-            proc.status = 'error'
-            proc.error = `启动超时：端口 ${port} 在 60 秒内未就绪，请查看日志诊断`
-          }
+        if (running.get(name) !== proc) return
+        if (!ready) {
+          proc.status = 'error'
+          proc.error = `启动超时：端口 ${port} 在 60 秒内未就绪，请查看日志诊断`
+          ctx.persistRuntime()
+          return
         }
+        // 端口就绪 ≠ 进程活着：dsh 可能在第一个请求上就退出（实测：negotiator 与 content-type
+        // 版本不自洽时抛 invalid media type，异常未被捕获）。先真的打一次请求再宣布 running，
+        // 否则界面会「先显示启动成功、随即翻回未启动」。
+        const probe = await probeWebUrl(`http://127.0.0.1:${port}/`)
+        if (running.get(name) !== proc) return
+        if (probe.ok) {
+          proc.status = 'running'
+        } else {
+          const healed = healDepTreeForStart(name, dshBin)
+          proc.status = 'error'
+          proc.error =
+            `端口 ${port} 已就绪但进程无法响应（${probe.reason ?? '探活失败'}）` +
+            (healed ? '；已就地修复依赖树，请重新启动环境' : '')
+        }
+        ctx.persistRuntime()
       })()
 
       // 可选「等到认证地址就绪」（bug 6）：快速启动场景传 ?wait=15000，
@@ -372,7 +409,32 @@ export const profilesHandler: ApiHandler = async (ctx, _req, res, method, seg, b
       const waitMs = waitRaw ? Math.min(Math.max(Number.parseInt(waitRaw, 10) || 0, 0), 60_000) : 0
       if (waitMs > 0) {
         const readyUrl = await waitForWebUrl(info, waitMs)
-        if (readyUrl) {
+        // 拿到认证地址只说明「它打印了地址」，还要确认它**还能响应**（同上：端口在、进程已崩）
+        const alive = readyUrl ? await probeWebUrl(readyUrl) : null
+        if (readyUrl && alive && !alive.ok) {
+          const healed = healDepTreeForStart(name, dshBin)
+          if (running.get(name) === proc) {
+            proc.status = 'error'
+            proc.error =
+              `认证地址已生成但进程无法响应（${alive.reason ?? '探活失败'}）` +
+              (healed ? '；已就地修复依赖树，请重新启动环境' : '')
+            ctx.persistRuntime()
+          }
+          ctx.sendJson(res, 202, {
+            status: 'error',
+            profile: name,
+            port,
+            pid: child.pid ?? null,
+            url: null,
+            error: proc.error,
+          })
+          return
+        }
+        if (readyUrl && alive && alive.ok) {
+          if (running.get(name) === proc) {
+            proc.status = 'running'
+            ctx.persistRuntime()
+          }
           ctx.sendJson(res, 200, { status: 'running', profile: name, port, pid: child.pid ?? null, url: readyUrl })
         } else {
           ctx.sendJson(res, 202, {
@@ -420,6 +482,9 @@ export const profilesHandler: ApiHandler = async (ctx, _req, res, method, seg, b
       try {
         ensureCacheIntegrity(dshBin)
       } catch {}
+      if (healDepTreeForStart(name, dshBin)) {
+        console.log(`[godsh] 启动前依赖树自愈：已为 ${name} 补齐 negotiator 所需的 content-type 副本`)
+      }
       ctx.ensureUnifiedKernel(name)
 
       const isCustom = Boolean(body.port && Number(body.port) > 0)
@@ -452,13 +517,28 @@ export const profilesHandler: ApiHandler = async (ctx, _req, res, method, seg, b
       })
       void (async () => {
         const ready = await waitForPort(port, 60_000)
-        if (running.get(name) === proc) {
-          if (ready) proc.status = 'running'
-          else {
-            proc.status = 'error'
-            proc.error = `启动超时：端口 ${port} 在 60 秒内未就绪，请查看日志诊断`
-          }
+        if (running.get(name) !== proc) return
+        if (!ready) {
+          proc.status = 'error'
+          proc.error = `启动超时：端口 ${port} 在 60 秒内未就绪，请查看日志诊断`
+          ctx.persistRuntime()
+          return
         }
+        // 端口就绪 ≠ 进程活着：dsh 可能在第一个请求上就退出（实测：negotiator 与 content-type
+        // 版本不自洽时抛 invalid media type，异常未被捕获）。先真的打一次请求再宣布 running，
+        // 否则界面会「先显示启动成功、随即翻回未启动」。
+        const probe = await probeWebUrl(`http://127.0.0.1:${port}/`)
+        if (running.get(name) !== proc) return
+        if (probe.ok) {
+          proc.status = 'running'
+        } else {
+          const healed = healDepTreeForStart(name, dshBin)
+          proc.status = 'error'
+          proc.error =
+            `端口 ${port} 已就绪但进程无法响应（${probe.reason ?? '探活失败'}）` +
+            (healed ? '；已就地修复依赖树，请重新启动环境' : '')
+        }
+        ctx.persistRuntime()
       })()
 
       // 可选「等到认证地址就绪」（bug 6）：快速启动场景传 ?wait=15000，
@@ -467,7 +547,32 @@ export const profilesHandler: ApiHandler = async (ctx, _req, res, method, seg, b
       const waitMs = waitRaw ? Math.min(Math.max(Number.parseInt(waitRaw, 10) || 0, 0), 60_000) : 0
       if (waitMs > 0) {
         const readyUrl = await waitForWebUrl(info, waitMs)
-        if (readyUrl) {
+        // 拿到认证地址只说明「它打印了地址」，还要确认它**还能响应**（同上：端口在、进程已崩）
+        const alive = readyUrl ? await probeWebUrl(readyUrl) : null
+        if (readyUrl && alive && !alive.ok) {
+          const healed = healDepTreeForStart(name, dshBin)
+          if (running.get(name) === proc) {
+            proc.status = 'error'
+            proc.error =
+              `认证地址已生成但进程无法响应（${alive.reason ?? '探活失败'}）` +
+              (healed ? '；已就地修复依赖树，请重新启动环境' : '')
+            ctx.persistRuntime()
+          }
+          ctx.sendJson(res, 202, {
+            status: 'error',
+            profile: name,
+            port,
+            pid: child.pid ?? null,
+            url: null,
+            error: proc.error,
+          })
+          return
+        }
+        if (readyUrl && alive && alive.ok) {
+          if (running.get(name) === proc) {
+            proc.status = 'running'
+            ctx.persistRuntime()
+          }
           ctx.sendJson(res, 200, { status: 'running', profile: name, port, pid: child.pid ?? null, url: readyUrl })
         } else {
           ctx.sendJson(res, 202, {

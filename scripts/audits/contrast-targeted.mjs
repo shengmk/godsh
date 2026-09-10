@@ -115,14 +115,33 @@ kill.textContent = '*,*::before,*::after{transition:none !important;animation:no
 document.head.appendChild(kill)
 
 const wait = (ms) => new Promise((r) => setTimeout(r, ms))
-const navItems = () => Array.from(document.querySelectorAll('.nav-item'))
 
-async function gotoTab(keyword) {
-  const target = navItems().find((n) => (n.textContent ?? '').includes(keyword))
-  if (!target) return false
-  target.click()
-  await wait(1200)
-  return true
+const currentPageLabel = () => {
+  const active = document.querySelector('.nav-item.active')
+  return (active?.textContent ?? 'current').trim().slice(0, 12)
+}
+
+/* 页面切换同样按 **hash 路由 key**，不能用导航文本子串匹配。
+   为什么：侧栏 `.nav-item` 的文本是「标签 + 描述」拼接，'任务' 会命中插件市场页的描述、
+   '设置' 会命中系统任务页，'沙箱'/'市场' 互相命中 —— 实际只覆盖 5 个页面，
+   结论会假达标（本 payload 与 contrast-sweep / layout-audit 是同一处缺陷）。
+   到位判定看 KeepAlive 的 `[data-page-container=key]` 是否可见，不依赖任何文案。 */
+const PAGES = ['console', 'profiles', 'tasks', 'market', 'vault', 'allocations', 'kernels', 'dsh-envs', 'settings']
+const isOnPage = (key) => {
+  const box = document.querySelector(`[data-page-container="${key}"]`)
+  return !!box && box.style.display !== 'none'
+}
+
+async function gotoTab(key) {
+  if (location.hash.replace(/^#\/?/, '') !== key) location.hash = `#/${key}`
+  for (let i = 0; i < 40; i++) {
+    await wait(150)
+    if (isOnPage(key)) {
+      await wait(900)
+      return true
+    }
+  }
+  return false
 }
 
 function measurePage(pageLabel, theme) {
@@ -163,27 +182,26 @@ function measurePage(pageLabel, theme) {
 }
 
 const all = []
-// 首页（默认落在哪页先看看），再依次切到有表格与徽章的页面
-all.push(...measurePage(currentPageLabel(), 'dark'))
-all.push(...measurePage(currentPageLabel(), 'light'))
-
-function currentPageLabel() {
-  const active = document.querySelector('.nav-item.active')
-  return (active?.textContent ?? 'current').trim().slice(0, 12)
+const coverage = []
+/** 首页（hash 未设置时默认 console），再依次切到其余页面。 */
+const record = (key) => {
+  all.push(...measurePage(currentPageLabel(), 'dark'))
+  all.push(...measurePage(currentPageLabel(), 'light'))
+  if (!coverage.includes(key)) coverage.push(key)
 }
+record('console')
 
-for (const kw of ['环境', '沙箱', '内核', '市场', '分配', '设置', '任务', '控制台']) {
-  const ok = await gotoTab(kw)
-  if (!ok) continue
-  const label = currentPageLabel()
-  all.push(...measurePage(label, 'dark'))
-  all.push(...measurePage(label, 'light'))
+for (const key of PAGES) {
+  if (key === 'console') continue
+  if (!(await gotoTab(key))) continue
+  record(key)
 }
 
 const failures = all.filter((r) => !r.pass)
 return {
   url: location.href,
   viewport: { w: innerWidth, h: innerHeight },
+  coverage: { requested: PAGES, visited: coverage, distinctCount: coverage.length, complete9: coverage.length === PAGES.length },
   sampled: all.length,
   failures: failures.length,
   failList: failures.map((f) => `${f.page}/${f.theme}/${f.sel} = ${f.ratio}（需 ${f.threshold}）`),

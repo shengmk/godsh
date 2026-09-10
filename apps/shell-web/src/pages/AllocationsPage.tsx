@@ -25,6 +25,7 @@ import { ContextMenu, EmptyState, ToastStack, type MenuState } from '../componen
 import { useAsyncAction, useToast } from '../hooks'
 import { useI18n } from '../i18n'
 import { usePageRefresh } from '../refresh'
+import { useConfirm } from '../use-confirm'
 import { taskManager } from '../tasks'
 
 /** 统一列表条目：已分配卡片 或 可用插件 */
@@ -177,6 +178,9 @@ export default function AllocationsPage() {
   // 注册到全局刷新总线：顶栏刷新按钮（以及 KeepAlive 页面数据过期后重新可见）都会重新加载本页
   usePageRefresh(load, 'allocations')
 
+  // U5：本页原先的 6 处 window.confirm 统一走自研确认框，dialog 在下方 JSX 渲染一次
+  const { confirm, dialog } = useConfirm()
+
   // ---------- 用户触发操作的统一包装（bug 1：可见进度 + 真实错误提示） ----------
 
   /** 本地插件导入（弹窗确认按钮） */
@@ -303,7 +307,7 @@ export default function AllocationsPage() {
   async function assignCategory(profile: string, category: string, zh: string) {
     const count = (addableByCategory[profile] ?? []).find((g) => g.category === category)?.items.length ?? 0
     if (count === 0) return
-    if (!window.confirm(`确定把 ${zh}（${count} 个）全部分配到环境 ${profile}？`)) return
+    if (!(await confirm({ message: `确定把 ${zh}（${count} 个）全部分配到环境 ${profile}？` }))) return
     await withBusy(`assign:${profile}:${category}`, async () => {
       try {
         const r = await api.assignCategory(profile, category)
@@ -665,7 +669,7 @@ export default function AllocationsPage() {
       }
     }
     if (allocIds.length === 0) return
-    if (!window.confirm(`确定从环境中批量移除选中的 ${allocIds.length} 项分配？`)) return
+    if (!(await confirm({ message: `确定从环境中批量移除选中的 ${allocIds.length} 项分配？` }))) return
     await batchRemoveAction.run(allocIds)
   }
 
@@ -800,7 +804,7 @@ export default function AllocationsPage() {
 
   async function updateAll(profile: string) {
     if (updatingProfile) return show(`正在更新 ${updatingProfile}，请稍候`, true)
-    if (!window.confirm(`确定更新环境 ${profile} 的全部插件？`)) return
+    if (!(await confirm({ message: `确定更新环境 ${profile} 的全部插件？` }))) return
     markBusy(`updateAll:${profile}`, true)
     setUpdatingProfile(profile)
     setUpdateLog('准备中…\n')
@@ -850,7 +854,7 @@ export default function AllocationsPage() {
     const hint = isWebApp
       ? '卸载 @deepseek-ai/dsh-web-app 后，该环境将失去 Web 界面（仅保留命令行能力）。确定继续？'
       : `确定从环境 ${a.profile} 卸载插件 ${a.pluginId}？`
-    if (!window.confirm(hint)) return
+    if (!(await confirm({ message: hint }))) return
     await withBusy(`uninstall:${a.id}`, async () => {
       try {
         const r = await api.uninstallPlugin(a.profile, a.pluginId)
@@ -901,7 +905,7 @@ export default function AllocationsPage() {
   }
 
   async function handleRemoveVault(id: string) {
-    if (!window.confirm('确定将该插件从仓库沙箱中移除？（不影响已分配的 Profile）')) return
+    if (!(await confirm({ message: '确定将该插件从仓库沙箱中移除？（不影响已分配的 Profile）' }))) return
     await withBusy(`vaultRemove:${id}`, async () => {
       try {
         await api.vaultRemove(id)
@@ -919,7 +923,7 @@ export default function AllocationsPage() {
       const r = await api.vaultCheckUpdates()
       const updated = (r.updates || []).filter((x) => x.hasUpdate).length
       if (updated > 0) {
-        if (window.confirm(`已比对，发现 ${updated} 个沙箱插件有新版本更新！是否立即自动全量拉取升级并同步挂载环境？`)) {
+        if (await confirm({ message: `已比对，发现 ${updated} 个沙箱插件有新版本更新！是否立即自动全量拉取升级并同步挂载环境？` })) {
           show(`已将沙箱全量更新任务提交至右下角任务中心...`)
           await taskManager.startVaultUpdateAllTask((ok) => {
             if (ok) {
@@ -993,7 +997,10 @@ export default function AllocationsPage() {
             <span style={{ display: 'inline-flex', alignItems: 'center' }}>
               {vaultExpanded ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
             </span>
-            <div className="card-title" style={{ margin: 0, color: 'var(--brand-primary)', display: 'flex', alignItems: 'center', gap: 6 }}>
+            {/* 用 --brand-text 而不是 --brand-primary：后者是「当背景/当描边」的强调色，
+                深色下 #6366f1 当 14px 卡片标题只有 3.5:1（实测，审计报 4.13:1 是背景取样不同），
+                达不到小字 4.5:1；--brand-text 就是为「品牌色当文字」标定的那一档（深色 6.5:1、浅色 6.0:1）。 */}
+            <div className="card-title" style={{ margin: 0, color: 'var(--brand-text)', display: 'flex', alignItems: 'center', gap: 6 }}>
               <Package size={16} />
               <span>插件仓库沙箱中枢 (Plugin Vault)</span>
             </div>
@@ -1698,6 +1705,7 @@ export default function AllocationsPage() {
       )}
 
       <ToastStack toasts={toasts} />
+      {dialog}
       {menu && <ContextMenu menu={menu} onClose={() => setMenu(null)} />}
     </>
   )

@@ -66,7 +66,9 @@ function backgroundCandidates(el) {
 }
 
 const hasOwnText = (el) =>
-  Array.from(el.childNodes).some((n) => n.nodeType === 3 && (n.textContent ?? '').trim().length > 1)
+  // 阈值从 >1 放宽到 >=1：单字符文本（统计卡片里的 "0" / "1"、CJK 单字）同样是真实文字，
+  // 原来会被静默跳过 —— vault 统计区那些「浅底浅字」的数字就是这样漏过审计的。
+  Array.from(el.childNodes).some((n) => n.nodeType === 3 && (n.textContent ?? '').trim().length >= 1)
 
 const kill = document.createElement('style')
 kill.textContent = '*,*::before,*::after{transition:none !important;animation:none !important}'
@@ -92,15 +94,36 @@ function sweep(pageLabel, theme) {
     // WCAG：大字号阈值 24px，或 18.66px 且加粗
     const large = fontPx >= 24 || (fontPx >= 18.66 && bold)
     const threshold = large ? 3.0 : 4.5
-    const cands = backgroundCandidates(el)
+    // 渐变文字（background-clip: text）：真正的「文字色」是那块渐变，不是 computed color
+    // （后者被 -webkit-text-fill-color: transparent 置空，只是个继承来的占位）。原实现会把
+    // 渐变当成**背景**层参与合成，再用占位色去比 —— 既可能误报也可能漏报。
+    // 正确做法：渐变各色标才是前景，逐一与元素**真正背后的**底色比，取最差值。
+    const clip = cs.webkitBackgroundClip || cs.getPropertyValue('-webkit-background-clip')
+    const fill = (cs.webkitTextFillColor ?? cs.getPropertyValue('-webkit-text-fill-color')) || 'rgba(0, 0, 0, 0)'
+    const fillC = parseColor(fill)
+    const isGradientText = clip === 'text' && cs.backgroundImage !== 'none' && (!fillC || fillC.a === 0)
+    const gradStops = []
+    if (isGradientText) {
+      for (const m of cs.backgroundImage.matchAll(/rgba?\([^)]+\)/gi)) {
+        const c = parseColor(m[0])
+        if (c && c.a > 0) gradStops.push(c)
+      }
+    }
+    // 渐变文字时要把元素自身的渐变层排除出「背景候选」，否则底色会被自己的字色污染
+    const cands = isGradientText ? backgroundCandidates(el.parentElement ?? el) : backgroundCandidates(el)
+    const fgs = isGradientText && gradStops.length ? gradStops : [fg]
     let worst = Infinity
     let worstBg = null
+    let worstFg = fgs[0]
     for (const c of cands) {
-      const fgOn = fg.a < 1 ? over(fg, c) : fg
-      const r = contrast(fgOn, c)
-      if (r < worst) {
-        worst = r
-        worstBg = c
+      for (const f of fgs) {
+        const fgOn = f.a < 1 ? over(f, c) : f
+        const r = contrast(fgOn, c)
+        if (r < worst) {
+          worst = r
+          worstBg = c
+          worstFg = f
+        }
       }
     }
     const key = `${theme}|${cs.color}|${rgbStr(worstBg)}|${Math.round(fontPx)}|${bold}`
@@ -109,7 +132,7 @@ function sweep(pageLabel, theme) {
       theme,
       sel: el.className && typeof el.className === 'string' ? `.${el.className.trim().split(/\s+/).slice(0, 2).join('.')}` : el.tagName.toLowerCase(),
       sample: (el.textContent ?? '').trim().slice(0, 16),
-      fg: cs.color,
+      fg: isGradientText ? `${rgbStr(worstFg)} (渐变文字最差色标)` : cs.color,
       bg: rgbStr(worstBg),
       fontPx: Math.round(fontPx * 10) / 10,
       bold,
@@ -123,29 +146,65 @@ function sweep(pageLabel, theme) {
   return { page: pageLabel, theme, scanned, entries: Array.from(seen.values()) }
 }
 
-const navItems = () => Array.from(document.querySelectorAll('.nav-item'))
+/* 页面切换必须按 **hash 路由 key**，不能用导航文本子串匹配。
+   为什么：侧栏 `.nav-item` 的文本是「标签 + 描述」拼接（App.tsx 里 nav-label + nav-desc），
+   实测 '沙箱' 与 '市场' 互相命中、'设置' 命中系统任务页、'任务' 命中市场页描述，
+   9 个页面只走到 5 个，审计会**假达标**（layout-audit 同样中招）。
+   App.tsx 的 NAV 给出稳定 key，getPageFromHash 接受 `#/key`，因此这里只写 key。
+   判定「真的到了」也不看文案，而看 KeepAlive 渲染出的 `[data-page-container=key]` 是否可见，
+   这样切换语言（i18n）也不会让覆盖面静默缩水 —— 上一版正是踩了「按中文标签反查」的坑，
+   '插件分配' 与 '分配' 不相等，导致 allocations / kernels 两页被误判为不可达。 */
+const PAGES = ['console', 'profiles', 'tasks', 'market', 'vault', 'allocations', 'kernels', 'dsh-envs', 'settings']
 const currentPageLabel = () => (document.querySelector('.nav-item.active')?.textContent ?? 'current').trim().slice(0, 14)
-async function gotoTab(keyword) {
-  const t = navItems().find((n) => (n.textContent ?? '').includes(keyword))
-  if (!t) return false
-  t.click()
-  await wait(1200)
-  return true
+
+/** 页面真的挂载且可见：KeepAlive 只把非活动页设成 display:none，故可见即为当前页。 */
+const isOnPage = (key) => {
+  const box = document.querySelector(`[data-page-container="${key}"]`)
+  return !!box && box.style.display !== 'none'
 }
 
+async function gotoTab(key) {
+  if (location.hash.replace(/^#\/?/, '') !== key) location.hash = `#/${key}`
+  // 等 hashchange → setPage → KeepAlive 挂载/显隐 → 该页异步数据落定
+  for (let i = 0; i < 40; i++) {
+    await wait(150)
+    if (isOnPage(key)) {
+      await wait(900) // 页面内异步数据（列表/日志）落定
+      return true
+    }
+  }
+  return false
+}
+
+const visited = []
 const rounds = []
-rounds.push(sweep(currentPageLabel(), 'dark'))
-rounds.push(sweep(currentPageLabel(), 'light'))
-for (const kw of ['环境', '沙箱', '市场', '设置']) {
-  if (!(await gotoTab(kw))) continue
-  rounds.push(sweep(currentPageLabel(), 'dark'))
-  rounds.push(sweep(currentPageLabel(), 'light'))
+rounds.push({ ...sweep(currentPageLabel(), 'dark'), key: 'console' })
+rounds.push({ ...sweep(currentPageLabel(), 'light'), key: 'console' })
+visited.push('console')
+for (const key of PAGES) {
+  if (key === 'console') continue
+  if (!(await gotoTab(key))) {
+    visited.push(`MISS:${key}`)
+    continue
+  }
+  visited.push(key)
+  rounds.push({ ...sweep(currentPageLabel(), 'dark'), key })
+  rounds.push({ ...sweep(currentPageLabel(), 'light'), key })
 }
 
 const all = rounds.flatMap((r) => r.entries)
 const failures = all.filter((e) => e.ratio < e.threshold)
+// 覆盖自证：实际访问到的页面 key 列表，必须 9 个互不相同（否则就是又一次假达标）
+const distinctVisited = Array.from(new Set(visited.filter((v) => !String(v).startsWith('MISS:'))))
 return {
-  rounds: rounds.map((r) => ({ page: r.page, theme: r.theme, scanned: r.scanned, distinct: r.entries.length })),
+  coverage: {
+    requested: PAGES,
+    visited,
+    distinctVisited,
+    distinctCount: distinctVisited.length,
+    complete9: distinctVisited.length === PAGES.length && visited.every((v) => !String(v).startsWith('MISS:')),
+  },
+  rounds: rounds.map((r) => ({ key: r.key, page: r.page, theme: r.theme, scanned: r.scanned, distinct: r.entries.length })),
   distinctTextStyles: all.length,
   failures: failures.length,
   failList: failures

@@ -17,6 +17,7 @@ import { PageSkeleton, ToastStack } from '../components'
 import { useAsyncAction, useToast } from '../hooks'
 import { useI18n } from '../i18n'
 import { usePageRefresh } from '../refresh'
+import { useConfirm } from '../use-confirm'
 
 const KIND_LABEL: Record<string, string> = { base: 'base 主环境', managed: '并列环境', external: '外部检测' }
 
@@ -79,6 +80,9 @@ export default function DshEnvsPage() {
 
   // bug 7：把本页既有的 load 注册到全局刷新总线（不新增任何请求逻辑）
   usePageRefresh(load, 'dsh-envs')
+
+  // U5：本页原先的 1 处 window.confirm 改走自研确认框，dialog 在下方 JSX 渲染一次
+  const { confirm, dialog } = useConfirm()
 
   // bug 1：清空日志 —— 置忙（按钮禁用 + 进度提示），失败弹出真实错误信息
   const { run: clearTaskLogs, loading: clearingTasks } = useAsyncAction(
@@ -169,7 +173,7 @@ export default function DshEnvsPage() {
   }
 
   async function removeEnv(env: DshEnv) {
-    if (!window.confirm(`确定删除并列环境 ${env.id}（${env.dir}）？此操作不可撤销。`)) return
+    if (!(await confirm({ message: `确定删除并列环境 ${env.id}（${env.dir}）？此操作不可撤销。` }))) return
     await runBusy(`remove-${env.id}`, async () => {
       try {
         await api.dshEnvRemove(env.id)
@@ -509,6 +513,7 @@ export default function DshEnvsPage() {
       </div>
 
       <ToastStack toasts={toasts} />
+      {dialog}
     </>
   )
 }

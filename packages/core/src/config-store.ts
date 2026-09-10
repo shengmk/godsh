@@ -9,7 +9,7 @@ const DEFAULT_CONFIG: LauncherConfig = {
   launcher: { name: 'godsh', version: APP_VERSION },
   dsh: { home: '', bin: 'dsh', profilesDir: 'profiles', instances: {}, activeVersion: '', byProfile: {}, dirs: [] },
   runtime: { node: 'node', pnpm: 'pnpm' },
-  webKernel: { defaultTemplateId: 'web-default', defaultPort: 3080, allowMultiPort: false },
+  webKernel: { defaultTemplateId: 'web-default', allowMultiPort: false },
   pluginMarket: { enabled: true, indexUrl: 'https://awesome-dsh-plugin.com/plugins.json' },
   // 默认白名单包含 Tauri 桌面端来源与本地固定开发/生产端口（避免泛 localhost 通配导致 CSRF 隐患）
   allowedOrigins: [
@@ -21,6 +21,22 @@ const DEFAULT_CONFIG: LauncherConfig = {
     'http://127.0.0.1:4780',
   ],
   dataDir: './data',
+}
+
+/**
+ * 剔除已废弃的 `webKernel.defaultPort`（清单 ④ 的 U10）。
+ *
+ * 为什么删：它曾经被当成「Web 内核默认端口」的出口，但全仓检索确认**没有任何读取点** ——
+ * 真正决定端口的是内核模板自己的 `defaultPort`（`kernel-process.ts`）以及每个环境记录的端口。
+ * 留着它只会让人以为"改这个能生效"，属于会误导人的死配置。
+ *
+ * 为什么要显式剔除而不是只从默认值里删掉：老版本写下的 `data/config.json` 里可能仍带着它，
+ * 若只删默认值，它会被对象展开原样带进 API 返回的配置里，等于"以为删了其实还在"。
+ * 这里按已知字段重建，旧配置因此被静默忽略（不报错、不阻断启动）。
+ */
+function stripLegacyWebKernel(webKernel: LauncherConfig['webKernel']): LauncherConfig['webKernel'] {
+  const { defaultTemplateId, allowMultiPort } = webKernel
+  return { defaultTemplateId, ...(allowMultiPort === undefined ? {} : { allowMultiPort }) }
 }
 
 /**
@@ -69,7 +85,7 @@ export class ConfigStore {
         byProfile: { ...DEFAULT_CONFIG.dsh.byProfile, ...(cfg.dsh?.byProfile ?? {}) },
       },
       runtime: { ...DEFAULT_CONFIG.runtime, ...cfg.runtime },
-      webKernel: { ...DEFAULT_CONFIG.webKernel, ...cfg.webKernel },
+      webKernel: stripLegacyWebKernel({ ...DEFAULT_CONFIG.webKernel, ...cfg.webKernel }),
       pluginMarket: { ...DEFAULT_CONFIG.pluginMarket, ...cfg.pluginMarket },
       // 用户未配置时回退默认白名单（必须含 Tauri 桌面端来源，否则前端跨域请求被浏览器拦截 → failed to fetch）
       allowedOrigins: Array.isArray(cfg.allowedOrigins)

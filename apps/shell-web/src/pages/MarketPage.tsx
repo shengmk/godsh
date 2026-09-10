@@ -20,6 +20,7 @@ import type { MarketPlugin, ProfileView, VaultPlugin } from '../types'
 import { EmptyState, SkeletonGrid, ToastStack } from '../components'
 import { useAsyncAction, useToast } from '../hooks'
 import { usePageRefresh } from '../refresh'
+import { useConfirm } from '../use-confirm'
 import { useI18n } from '../i18n'
 
 function desc(p: MarketPlugin): string {
@@ -178,6 +179,9 @@ export default function MarketPage() {
   )
 
   usePageRefresh(loadMarket, 'market')
+
+  // U5：本页原先的 1 处 window.confirm 改走自研确认框，dialog 在下方 JSX 渲染一次
+  const { confirm, dialog } = useConfirm()
 
   // 单卡片操作占用标记（按包名）：启动时登记、结束时清除，供按钮禁用与进度文案使用
   function markCardAction(pkg: string, kind: 'install' | 'update' | 'remove') {
@@ -387,7 +391,7 @@ export default function MarketPage() {
 
   async function remove(pkg: string, display: string) {
     if (!profile) return show('请先选择目标 Profile', true)
-    if (!window.confirm(`确定从 ${profile} 卸载 ${display}？`)) return
+    if (!(await confirm({ message: `确定从 ${profile} 卸载 ${display}？` }))) return
     markCardAction(pkg, 'remove')
     try {
       const r = await api.uninstallPlugin(profile, pkg)
@@ -959,6 +963,7 @@ export default function MarketPage() {
       )}
 
       <ToastStack toasts={toasts} />
+      {dialog}
     </>
   )
 }

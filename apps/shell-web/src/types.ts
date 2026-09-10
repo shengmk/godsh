@@ -115,6 +115,17 @@ export interface VaultPlugin {
   securityScore?: number
   auditReport?: PluginAuditReport
   isJunctionLinked?: boolean
+  /**
+   * 子插件归属：存在即表示本条记录是某个父插件的附属子依赖，值为父插件的 id。
+   *
+   * 与 `kind` 是正交的两个维度（`kind` 说的是「这是什么插件」，`parentId` 说的是「这条记录归谁」），
+   * 后端「依赖捆绑规则第三条」会为共同占有同一依赖的每个父各复制一份副本，因此**同名的子条目可能有多条**。
+   */
+  parentId?: string
+  /** 子副本来源：standalone=池里那份唯一副本直接归到该父名下；shared-copy=为共同占有而按父复制的独立副本 */
+  childOrigin?: 'standalone' | 'shared-copy'
+  /** 仅根插件使用：本插件名下已捆绑的子依赖名 */
+  bundledDeps?: string[]
 }
 
 
@@ -243,7 +254,7 @@ export interface LauncherConfig {
     dirs?: string[]
   }
   runtime: { node: string; pnpm: string }
-  webKernel: { defaultTemplateId: string; defaultPort: number; allowMultiPort?: boolean }
+  webKernel: { defaultTemplateId: string; allowMultiPort?: boolean }
   pluginMarket: { enabled: boolean; indexUrl: string }
   /** 允许跨域访问 API 的来源（默认空 = 仅同源） */
   allowedOrigins?: string[]

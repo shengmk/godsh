@@ -148,6 +148,19 @@ export async function startApiServer(ctx: CliContext, opts: ApiServerOptions): P
   } catch (err) {
     console.warn(`[godsh] 悬空索引清理跳过: ${err instanceof Error ? err.message : String(err)}`)
   }
+  // 一次性迁移：把升级前遗留的「共享子依赖仍以根条目存在」的沙箱结构，重排成
+  // 「独占 standalone / 共同占有按父复制」。幂等（没有可迁移项时什么都不做）。
+  // 这里**await** 而不是 fire-and-forget：迁移会重写 vault.json，若与用户随后的注入并发，
+  // 两份内存快照互相覆盖会丢数据（本项目踩过这个坑）。失败也绝不阻断启动——
+  // 旧结构本身仍可用，只是删除父插件时子副本不会被连带回收。
+  try {
+    const migrated = await vault.migrateSharedChildren()
+    if (migrated.bundled.length > 0) {
+      console.log(`[godsh] 已完成沙箱共享子依赖迁移: ${migrated.bundled.length} 个子依赖已按父归并/复制`)
+    }
+  } catch (err) {
+    console.warn(`[godsh] 共享子依赖迁移跳过: ${err instanceof Error ? err.message : String(err)}`)
+  }
 
   // 会话内运行中的 dsh web 进程（profile → 进程）
   const running = new Map<string, RuntimeProc>()

@@ -343,6 +343,66 @@ export async function waitForWebUrl(
   return hasAuthToken(info.url) ? info.url : null
 }
 
+export interface WebProbeResult {
+  /** 只要收到了 HTTP 响应就算活着（200 / 303 / 401 都算），连接被重置或超时算失败 */
+  ok: boolean
+  statusCode: number | null
+  /** 失败原因；ok 为 true 时为 null */
+  reason: string | null
+}
+
+/**
+ * 探活：端口在监听**不等于**进程活着。
+ *
+ * 实测事故（2026-09-10，webtest 环境）：dsh 已经打印出带 token 的地址（所以前端先显示「启动成功」），
+ * 但**第一个 HTTP 请求**就让它在 `WebServer.gzip` 里抛出 `TypeError: invalid media type` 且无人捕获，
+ * 进程直接退出 —— 端口随即消失，界面翻回「未启动」。
+ * 也就是说，只探测「端口是否监听」的判定**必然会先误报一次成功**。
+ *
+ * 刻意带上 `Accept-Encoding`：正是这个头部触发了那次崩溃，不带它探活等于没探。
+ */
+export async function probeWebUrl(url: string, timeoutMs = 5000): Promise<WebProbeResult> {
+  return await new Promise<WebProbeResult>((resolveProbe) => {
+    let settled = false
+    const finish = (r: WebProbeResult): void => {
+      if (settled) return
+      settled = true
+      resolveProbe(r)
+    }
+    try {
+      const u = new URL(url)
+      const req = http.request(
+        {
+          protocol: u.protocol,
+          hostname: u.hostname,
+          port: u.port || (u.protocol === 'https:' ? 443 : 80),
+          path: `${u.pathname}${u.search}`,
+          method: 'GET',
+          headers: { 'accept-encoding': 'gzip, deflate, br', accept: 'text/html,*/*' },
+          timeout: timeoutMs,
+        },
+        (res) => {
+          res.resume()
+          res.on('end', () => finish({ ok: true, statusCode: res.statusCode ?? null, reason: null }))
+          res.on('error', (e: Error) => finish({ ok: false, statusCode: null, reason: `响应中断：${e.message}` }))
+        }
+      )
+      req.on('timeout', () => {
+        finish({ ok: false, statusCode: null, reason: `请求在 ${timeoutMs}ms 内无响应` })
+        try {
+          req.destroy()
+        } catch {
+          /* 已断开 */
+        }
+      })
+      req.on('error', (e: Error) => finish({ ok: false, statusCode: null, reason: `连接失败：${e.message}` }))
+      req.end()
+    } catch (e) {
+      finish({ ok: false, statusCode: null, reason: e instanceof Error ? e.message : String(e) })
+    }
+  })
+}
+
 /**
  * 构造「按 Profile 反查进程」的 PowerShell 查询串（导出仅为可回归测试）。
  *

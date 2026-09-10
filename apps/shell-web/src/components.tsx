@@ -43,21 +43,6 @@ export function Loading({ label }: { label?: string }) {
   )
 }
 
-export function ErrorText({ message, onRetry }: { message: string; onRetry?: () => void }) {
-  return (
-    <div className="error-banner-card">
-      <AlertTriangle size={15} className="error-icon" />
-      <span className="error-message">{message}</span>
-      {onRetry && (
-        <button className="btn sm" onClick={onRetry} style={{ marginLeft: 'auto' }}>
-          <RotateCcw size={12} />
-          <span>重试</span>
-        </button>
-      )}
-    </div>
-  )
-}
-
 export interface SkeletonBoxProps {
   width?: string | number
   height?: string | number
@@ -315,7 +300,11 @@ export function ConfirmDialog({
   onCancel,
 }: ConfirmDialogProps) {
   const [input, setInput] = useState('')
-  const valid = requireText === '' || input.trim() === requireText
+  // requireText 为空表示「普通确认」（与原生 confirm 等价）：此时**不该出现**任何
+  // 「请输入 xx 以确认」的提示与输入框。U5 把 19 处 window.confirm 统一到这里之后
+  // 才暴露出来——原实现无条件渲染那行，于是界面上会出现「请输入 `` 以确认：」这种空要求。
+  const needsInput = requireText !== ''
+  const valid = !needsInput || input.trim() === requireText
 
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
@@ -327,27 +316,49 @@ export function ConfirmDialog({
 
   return (
     <div className="modal-overlay" onClick={onCancel}>
-      <div className="modal glass" onClick={(e) => e.stopPropagation()}>
-        <h3 className="modal-title">{title}</h3>
+      <div
+        className="modal glass"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="godsh-confirm-title"
+        onClick={(e) => e.stopPropagation()}
+        // 无输入框时 Enter 直接确认（原生 confirm 的习惯），否则键盘用户会找不到确认方式
+        onKeyDown={(e) => {
+          if (!needsInput && e.key === 'Enter' && !busy) onConfirm()
+        }}
+      >
+        <h3 className="modal-title" id="godsh-confirm-title">
+          {title}
+        </h3>
         <p className="modal-msg">{message}</p>
-        <p className="modal-hint">
-          请输入 <code className="modal-code">{requireText}</code> 以确认：
-        </p>
-        <input
-          className="input modal-input"
-          autoFocus
-          value={input}
-          placeholder={placeholder ?? requireText}
-          onChange={(e) => setInput(e.target.value)}
-          onKeyDown={(e) => {
-            if (e.key === 'Enter' && valid && !busy) onConfirm()
-          }}
-        />
+        {needsInput && (
+          <>
+            <p className="modal-hint">
+              请输入 <code className="modal-code">{requireText}</code> 以确认：
+            </p>
+            <input
+              className="input modal-input"
+              autoFocus
+              value={input}
+              placeholder={placeholder ?? requireText}
+              onChange={(e) => setInput(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' && valid && !busy) onConfirm()
+              }}
+            />
+          </>
+        )}
         <div className="modal-actions">
           <button className="btn" onClick={onCancel}>
             取消
           </button>
-          <button className={`btn ${danger ? 'danger' : 'primary'}`} disabled={!valid || busy} onClick={onConfirm}>
+          <button
+            className={`btn ${danger ? 'danger' : 'primary'}`}
+            // 无输入框时把焦点交给确认按钮：键盘用户不必先 Tab 一圈才能确认
+            autoFocus={!needsInput}
+            disabled={!valid || busy}
+            onClick={onConfirm}
+          >
             {busy ? '处理中…' : (confirmLabel ?? '确认')}
           </button>
         </div>

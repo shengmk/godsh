@@ -69,8 +69,13 @@ export const settingsHandler: ApiHandler = async (ctx, _req, res, method, seg, b
     return true
   }
 
-  // POST /api/backup/restore
-  if (seg.length === 2 && seg[0] === 'backup' && seg[1] === 'restore' && method === 'POST') {
+  // POST /api/backup/import —— 导入一份完整备份（config/kernels/allocations/unifiedKernel）
+  //
+  // 路径刻意不叫 /backup/restore：那个路径已经被 backup.ts 的「回滚到某个环境快照」占用，
+  // 而且 backupHandler 在 routeHandlers 里注册在 settingsHandler **之前**，
+  // 于是本处理器曾经**永远不可达** —— 前端调用它只会收到
+  // 「缺少 profile 或 snapshotId 参数」（实测确认）。两个字面量相同的路由必须改名，不能靠顺序赌运气。
+  if (seg.length === 2 && seg[0] === 'backup' && seg[1] === 'import' && method === 'POST') {
     const b = body.backup as Record<string, unknown> | undefined
     if (!b || typeof b !== 'object') {
       ctx.sendJson(res, 400, { error: 'body 需要 { backup }' })

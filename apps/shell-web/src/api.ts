@@ -375,7 +375,7 @@ export const api = {
   backup: () => req<Record<string, unknown>>('/backup'),
 
   restoreBackup: (backup: Record<string, unknown>) =>
-    req<{ ok: boolean; restored: string[] }>('/backup/restore', {
+    req<{ ok: boolean; restored: string[] }>('/backup/import', {
       method: 'POST',
       body: JSON.stringify({ backup }),
     }),

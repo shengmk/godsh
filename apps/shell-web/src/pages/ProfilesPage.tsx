@@ -30,6 +30,7 @@ import { useI18n } from '../i18n'
 import { usePageRefresh } from '../refresh'
 import { isTauri, openDshWeb, openDshDesktop as openDshDesktopFn, openExternal } from '../tauri'
 import { taskManager } from '../tasks'
+import { useConfirm } from '../use-confirm'
 
 /**
  * 只有带 token 的地址才是可用的 dsh web 认证地址（bug 6）：
@@ -126,6 +127,10 @@ export default function ProfilesPage() {
 
   // bug 7：把本页的重新加载注册到全局刷新总线
   usePageRefresh(handleRefresh, 'profiles')
+
+  // U5：本页原先的 3 处 window.confirm 改走自研确认框（与下方两处原有 ConfirmDialog 同一套范式），
+  // dialog 在下方 JSX 渲染一次
+  const { confirm, dialog } = useConfirm()
 
   // Esc 键层级关闭模态框、日志、选择
   useEffect(() => {
@@ -348,7 +353,7 @@ export default function ProfilesPage() {
 
   async function handleRestoreSnapshot(snapId: string) {
     if (!snapshotModalProfile) return
-    if (!window.confirm(`确定要将环境 ${snapshotModalProfile} 回滚到快照 ${snapId} 吗？当前配置将被快照覆盖。`)) return
+    if (!(await confirm({ message: `确定要将环境 ${snapshotModalProfile} 回滚到快照 ${snapId} 吗？当前配置将被快照覆盖。` }))) return
     setSnapshotBusy(`restore:${snapId}`)
     try {
       await api.backupRestore(snapshotModalProfile, snapId)
@@ -364,7 +369,7 @@ export default function ProfilesPage() {
 
   async function handleDeleteSnapshot(snapId: string) {
     if (!snapshotModalProfile) return
-    if (!window.confirm(`确定删除快照 ${snapId} 吗？`)) return
+    if (!(await confirm({ message: `确定删除快照 ${snapId} 吗？` }))) return
     setSnapshotBusy(`delete:${snapId}`)
     try {
       await api.backupDelete(snapshotModalProfile, snapId)
@@ -496,7 +501,7 @@ export default function ProfilesPage() {
   async function handleBatchSync() {
     if (!syncFromProfile || !syncToProfile) return show('请选择源环境与目标环境', true)
     if (syncFromProfile === syncToProfile) return show('源环境与目标环境不能相同', true)
-    if (!window.confirm(`确定将环境 ${syncFromProfile} 的全部 bundles 与插件分配规则同步到 ${syncToProfile}？`)) return
+    if (!(await confirm({ message: `确定将环境 ${syncFromProfile} 的全部 bundles 与插件分配规则同步到 ${syncToProfile}？` }))) return
     setWfSubmitting(true)
     try {
       const r = await api.syncProfileAllocations(syncFromProfile, syncToProfile)
@@ -1347,6 +1352,7 @@ export default function ProfilesPage() {
       )}
 
       <ToastStack toasts={toasts} />
+      {dialog}
       {menu && <ContextMenu menu={menu} onClose={() => setMenu(null)} />}
     </>
   )

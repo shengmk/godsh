@@ -120,10 +120,27 @@
   --warn-surface: #f59e0b;
   --on-warn: #0f172a;
 
+  /* 琥珀当**小字文字色**用的取值。
+     为什么不能直接用 --warn-surface：它是「实底」档，明亮刺眼，压在 12% 半透明琥珀底上
+     当 12px 文字会太抢眼、也不像「提示」。也不能直接用 --warn：深色下它更暗，实测只有 2.9:1。
+     基座 = 深色主题取值 #fbbf24；浅色主题在下方 [data-theme='light'] 块覆盖为 #92400e。
+     注意：浅色块必须排在本文件**最后**（当前顺序：:root → [data-theme='dark'] → [data-theme='light']），
+     否则同特异性下后写者胜，浅色取值会被深色块盖掉（本项目已踩过这个坑）。 */
+  --warn-text: #fbbf24;
+
   /* 品牌色当**实底**用的取值与它的前景。白字配 --brand-1(#6366f1) 实测只有 4.47:1，
      差一点点不达标；改用更深的 #4f46e5 后是 6.29:1。与琥珀那对一样，把「实底」和「前景」显式配成一对。 */
   --brand-surface: #4f46e5;
   --on-brand: #ffffff;
+
+  /* 「永远黑底」的极客终端表面 + 它的前景配对。
+     为什么必须单独一组：`.terminal-panel` 是**刻意**写死黑底（防眩光，产品决策，不随主题翻转），
+     但它的子元素（标题 / 复选框文字 / 按钮）用的是随主题翻转的 --text-* 令牌 ——
+     浅色主题下这些令牌变深，压在黑底上直接塌到 1.09~2.57:1（实测）。
+     所以给这类表面配一组「永远浅色」的前景，主题只用来决定「要不要覆盖子元素」。
+     深色主题本来就应该用这套浅色前景，故基座即终值，`[data-theme='dark']` 无需覆盖。 */
+  --terminal-surface: #050508;
+  --on-terminal: #e2e8f0;
 }
 
 [data-theme='dark'] {
@@ -173,6 +190,9 @@
   --ok: #047857;
   --ok-glow: rgba(5, 150, 105, 0.18);
   --warn: #b45309;
+  /* 比 --warn 再深一档：#b45309 压在 12% 琥珀底（浅色卡片上实测约 #f8ece4）只有 4.33:1，
+     差一点点不达标；#92400e 实测 6.11:1（截图取像素）。 */
+  --warn-text: #92400e;
   --warn-glow: rgba(217, 119, 6, 0.18);
   --err: #b91c1c;
   --err-glow: rgba(220, 38, 38, 0.18);
@@ -347,7 +367,9 @@
 [data-theme='light'] .btn-danger-outline {
   background: rgba(220, 38, 38, 0.06);
   border-color: rgba(220, 38, 38, 0.3);
-  color: #dc2626;
+  /* 原为 #dc2626：叠上半透明底 + 页面顶部径向渐变后，实测底色约 rgb(230,221,238)，
+     13px 的文字只剩 3.65:1。改用 --err 的浅色档（#b91c1c）后 5.2:1，仍是同一个红色语义。 */
+  color: var(--err);
 }
 
 [data-theme='light'] .table th,
@@ -451,7 +473,10 @@
 }
 
 [data-theme='light'] .pill-btn {
-  color: #64748b;
+  /* 原为 #64748b，在 .tab-pill-group 的浅灰底（叠在页面底色上实测约 #eff1f3）上
+     只有 4.05:1，差一点点不达标。改用 --text-secondary（浅色下 #475569）后实测 5.9:1，
+     仍是「未选中 = 次要」的观感。 */
+  color: var(--text-secondary);
 }
 
 [data-theme='light'] .pill-btn:hover:not(.active) {
@@ -1089,6 +1114,19 @@ body {
   cursor: not-allowed;
   transform: none !important;
   box-shadow: none !important;
+}
+
+/* 浅色主题禁用态：浏览器把 opacity 烘焙进 getComputedStyle 的颜色里，
+   0.45 的透明度会把「浅底深字」压成中灰对中灰 —— 实测终端里的禁用「复制」
+   按钮只剩 2.99:1（黑底上尤其糟）。这里不再用透明度表达禁用，而是直接给一对
+   对比达标的实色（#e2e8f0 底 vs #1e293b 字 = 10.9:1），并用 :not(:disabled)
+   的 hover 规则保持「不可点」的语义只由 cursor / 无按压反馈承担。 */
+[data-theme='light'] .btn:disabled,
+[data-theme='light'] .btn-secondary:disabled {
+  opacity: 1;
+  background: #e2e8f0;
+  border-color: rgba(0, 0, 0, 0.18);
+  color: #1e293b;
 }
 
 /* 全局可点击控件阻尼按压 */
@@ -2676,11 +2714,63 @@ button,
   flex-direction: column;
   height: 100%;
   max-height: calc(100vh - 170px);
-  background: #050508 !important;
+  /* 刻意写死黑底（极客终端防眩光，深色下就是这个观感）—— 产品决策，不随主题翻转。
+     浅色主题要修的不是这块底，而是压在上面的前景色，见下方 [data-theme='light'] 的覆盖。 */
+  background: var(--terminal-surface) !important;
   border: 1px solid rgba(255, 255, 255, 0.08);
   border-radius: var(--radius);
   overflow: hidden;
   position: relative;
+}
+
+/* 浅色主题下终端仍是黑底，但前景必须换成「永远浅色」的那一组。
+   为什么覆盖在 `.terminal-panel` 这一层而不是逐个改 .terminal-title / .checkbox-label：
+   子元素用的是随主题翻转的 --text-* 令牌，逐个改会漏（本次实测就漏出了
+   「复制」按钮 1.21:1 与「自动滚动」1.09:1）。在这里统一给出浅色前景后，
+   子元素上的令牌色把继承盖掉，所以必须带 !important 才能真正接管。 */
+[data-theme='light'] .terminal-panel {
+  color: var(--on-terminal) !important;
+  border-color: rgba(255, 255, 255, 0.14);
+}
+
+/* 终端里的次要文字（标题、复选框说明）刻意比正文暗一档，但仍在黑底上达标：
+   #94a3b8 vs #050508 实测 7.3:1（小字要求 4.5:1）。 */
+[data-theme='light'] .terminal-panel .terminal-title,
+[data-theme='light'] .terminal-panel .checkbox-label {
+  color: #94a3b8;
+}
+
+/* 终端里的按钮：浅色主题的浅白底 + 深字在黑底上依然达标（约 13:1），
+   保持「终端工具条」观感，不改成品牌渐变按钮。 */
+[data-theme='light'] .terminal-panel .btn,
+[data-theme='light'] .terminal-panel .btn-secondary {
+  background: #e2e8f0;
+  border-color: rgba(255, 255, 255, 0.22);
+  color: #0f172a;
+}
+
+[data-theme='light'] .terminal-panel .btn:hover:not(:disabled) {
+  background: #f1f5f9;
+  color: #0f172a;
+}
+
+/* 禁用态必须沿用上面那条全局浅色禁用规则（#e2e8f0 底 / #1e293b 字 = 10.9:1）。
+   这里不要再写 background：本选择器特异性更高，会把全局规则的浅底换成深灰底，
+   实测 3.07:1 —— 正是上一版留下的失败项。 */
+[data-theme='light'] .terminal-panel .btn:disabled {
+  background: #e2e8f0;
+  border-color: rgba(255, 255, 255, 0.18);
+  color: #1e293b;
+}
+
+/* 终端内的徽章（任务类型等）：浅色主题的浅底浅字在黑底上只有 1:1 上下，
+   统一改成「半透明白底 + 浅字」，约 7.4:1。 */
+[data-theme='light'] .terminal-panel .badge,
+[data-theme='light'] .terminal-panel .task-badge,
+[data-theme='light'] .terminal-panel .status-pill {
+  background: rgba(255, 255, 255, 0.14);
+  color: var(--on-terminal);
+  border-color: rgba(255, 255, 255, 0.2);
 }
 
 /* 终端 CRT 水平扫描线 */
@@ -2902,6 +2992,29 @@ button,
   box-shadow: 0 4px 24px rgba(0, 0, 0, 0.35);
 }
 
+/* 浅色主题的空状态卡：原来**没有**任何主题分支，深色半透明底叠在浅色页面上
+   渲染成 #808186 中灰（截图取像素实测），其上的 --text-primary/--text-secondary
+   分别是 3.63:1 与 1.54:1 —— 小字全部不达标。这里补上浅色分支：用与 .card 同族的
+   浅底，文字沿用既有令牌（#0f172a 白底 17.8:1、#475569 白底 7.6:1）。
+   深色主题不在此覆盖，外观与修复前完全一致。 */
+[data-theme='light'] .empty-card {
+  background: rgba(255, 255, 255, 0.88);
+  border-color: rgba(0, 0, 0, 0.14);
+  box-shadow: 0 4px 18px rgba(0, 0, 0, 0.05);
+}
+
+[data-theme='light'] .empty-card:hover {
+  background: #ffffff;
+  border-color: rgba(79, 70, 229, 0.35);
+  box-shadow: 0 8px 24px rgba(79, 70, 229, 0.08), 0 2px 6px rgba(0, 0, 0, 0.04);
+}
+
+/* 浅色主题下空状态卡内若出现链接：浏览器默认链接色（#0000EE）在浅底上虽然达标，
+   但与项目配色不一致，统一成 --brand-text（#4f46e5，白底 6.3:1）。 */
+[data-theme='light'] .empty-card a {
+  color: var(--brand-text);
+}
+
 .empty-card.compact {
   padding: 24px 16px;
   margin: 8px 0;
@@ -3025,31 +3138,6 @@ button,
   align-items: center;
   justify-content: center;
   flex-wrap: wrap;
-}
-
-/* ---------- 错误条幅 (Error Banner Card) ---------- */
-.error-banner-card {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  padding: 12px 16px;
-  background: rgba(239, 68, 68, 0.1);
-  border: 1px solid rgba(239, 68, 68, 0.25);
-  border-radius: var(--radius-sm);
-  color: var(--err);
-  font-size: 13px;
-  margin: 12px 0;
-}
-
-.error-banner-card .error-icon {
-  color: var(--err);
-  flex-shrink: 0;
-}
-
-.error-banner-card .error-message {
-  flex: 1;
-  min-width: 0;
-  word-break: break-word;
 }
 
 /* ---------- 加载态动效 (Loading State) ---------- */
@@ -3203,5 +3291,91 @@ button:active:not(:disabled),
 *::-webkit-scrollbar-thumb:hover {
   background: rgba(94, 106, 210, 0.55);
   box-shadow: 0 0 10px rgba(94, 106, 210, 0.75);
+}
+
+/* ============================================================
+   沙箱父子条目折叠 (Vault Bundled Children)
+   为什么单独成节而不是改上面的表格规则：上面那些规则服务全站所有列表，
+   而"父行可展开、子行缩进只读"只是沙箱页的局部语义。
+   ============================================================ */
+
+/* 展开/收起开关：刻意做小，避免与插件名的视觉权重打架 */
+.vault-expand-toggle {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  line-height: 1;
+  border: 1px solid var(--card-border);
+  border-radius: 4px;
+  background: var(--surface-soft);
+  color: var(--text-dim);
+  cursor: pointer;
+}
+
+.vault-expand-toggle:hover {
+  color: var(--text-primary);
+  border-color: var(--border-subtle);
+}
+
+.vault-expand-toggle:focus-visible {
+  outline: 2px solid var(--border-focus);
+  outline-offset: 1px;
+}
+
+/* 父行的「含 N 个子插件 · 合并体积」概览行 */
+.vault-bundle-meta {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 4px;
+  font-size: 0.72rem;
+  color: var(--text-secondary);
+}
+
+.vault-bundle-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  padding: 1px 6px;
+  border: 1px solid var(--card-border);
+  border-radius: 4px;
+  background: rgba(99, 102, 241, 0.12);
+  color: var(--brand-text);
+  font-weight: 600;
+}
+
+/* 子副本行：用「缩进 + 左侧竖向导线」表达归属，而不是叠一层新底色 ——
+   行背景已被选中态占用，再叠底色会和选中反馈互相干扰 */
+.vault-child-row > td {
+  background: var(--surface-soft);
+}
+
+.vault-child-row > td:first-child {
+  box-shadow: inset 2px 0 0 var(--brand-primary);
+}
+
+.vault-child-name {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding-left: 26px;
+}
+
+.vault-child-desc {
+  margin-top: 3px;
+  padding-left: 26px;
+  font-size: 0.78rem;
+  color: var(--text-dim);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
 }
 

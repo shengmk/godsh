@@ -3,8 +3,10 @@ import assert from 'node:assert/strict'
 import { spawn } from 'node:child_process'
 import { mkdtempSync, rmSync, writeFileSync, existsSync } from 'node:fs'
 import { tmpdir } from 'node:os'
+import http from 'node:http'
+import type { AddressInfo } from 'node:net'
 import { join } from 'node:path'
-import { findProcessesByProfile, killAllProfileProcesses, extractDshWebUrl, hasAuthToken, buildProfileProcessQuery } from './process-manager.js'
+import { findProcessesByProfile, killAllProfileProcesses, extractDshWebUrl, hasAuthToken, buildProfileProcessQuery, probeWebUrl } from './process-manager.js'
 import { ConfigStore } from './config-store.js'
 import { run } from './run.js'
 
@@ -93,15 +95,27 @@ test('killAllProfileProcesses: 端口快路径不 spawn PowerShell（?06 回归�
   const dir = mkdtempSync(join(tmpdir(), 'godsh-pid-fast-'))
   try {
     // 登记一个不存在的 PID：快路径只应读 pid 文件 + netstat，绝不启 PowerShell
-    writeFileSync(join(dir, 'service-pid-45999.txt'), '9999998', 'utf8')
-    const t0 = Date.now()
-    const res = await killAllProfileProcesses(dir, 'web', { ports: [45999] })
-    const ms = Date.now() - t0
+    //
+    // 为什么最多测 3 次取最小值：这是**计时型**守卫，而「快路径」底层是 netstat 子进程，
+    // 机器一忙（例如同时还在跑另一整套测试）单次就能飘到 3 秒以上，把快路径误判成 PowerShell 深扫。
+    // 实测：单独跑 259ms；与另一整套测试并行跑时曾达 3302ms 而误报。
+    // 取最小值既保留了「必须远离 PowerShell 量级」的原判据，又不会被单次抖动带偏 ——
+    // 真要是每次都回退深扫，三次都会慢，依然会被抓住。
+    let best = Number.POSITIVE_INFINITY
+    let killedTotal = 0
+    for (let attempt = 0; attempt < 3; attempt++) {
+      writeFileSync(join(dir, 'service-pid-45999.txt'), '9999998', 'utf8')
+      const t0 = Date.now()
+      const res = await killAllProfileProcesses(dir, 'web', { ports: [45999] })
+      best = Math.min(best, Date.now() - t0)
+      killedTotal += res.killed
+      assert.equal(existsSync(join(dir, 'service-pid-45999.txt')), false, '死进程的登记文件应被清理')
+      if (best < 1500) break // 已经足够快，不必再测
+    }
 
-    assert.equal(res.killed, 0)
-    assert.equal(existsSync(join(dir, 'service-pid-45999.txt')), false, '死进程的登记文件应被清理')
+    assert.equal(killedTotal, 0)
     // 本机实测 powershell.exe 空跑需 3.2–7.3 秒；快路径必须远离这个量级
-    assert.ok(ms < 3000, `端口快路径耗时 ${ms}ms，疑似回退到 PowerShell 深扫`)
+    assert.ok(best < 3000, `端口快路径最快一次也要 ${best}ms，疑似回退到 PowerShell 深扫`)
   } finally {
     rmSync(dir, { recursive: true, force: true })
   }
@@ -202,5 +216,98 @@ test('hasAuthToken: 只有含 token 的地址才视为可用（bug 6 的核心�
   assert.equal(hasAuthToken(undefined), false)
   // 近似但非 token 的参数名不应误判
   assert.equal(hasAuthToken('http://127.0.0.1:3296/?tokenizer=X'), false)
+})
+
+test('probeWebUrl: 真的带上 Accept-Encoding 发请求，并据响应判定存活', async () => {
+  const seen: string[] = []
+  const server = http.createServer((req, res) => {
+    seen.push(String(req.headers['accept-encoding'] ?? ''))
+    res.writeHead(200, { 'content-type': 'text/html' })
+    res.end('ok')
+  })
+  await new Promise<void>((r) => server.listen(0, '127.0.0.1', () => r()))
+  const port = (server.address() as AddressInfo).port
+  try {
+    const r = await probeWebUrl(`http://127.0.0.1:${port}/?token=X`)
+    assert.equal(r.ok, true)
+    assert.equal(r.statusCode, 200)
+    assert.equal(r.reason, null)
+    assert.equal(seen.length, 1)
+    // 正是这个头部触发了事故里的崩溃：探活不带它就等于没探
+    assert.ok(seen[0]!.includes('gzip'), '必须带上浏览器会发的 Accept-Encoding')
+  } finally {
+    await new Promise<void>((r) => server.close(() => r()))
+  }
+})
+
+test('probeWebUrl: 401 也算活着（探活只问「进程还在吗」，不问「有没有权限」）', async () => {
+  const server = http.createServer((_req, res) => {
+    res.writeHead(401)
+    res.end('unauthorized')
+  })
+  await new Promise<void>((r) => server.listen(0, '127.0.0.1', () => r()))
+  const port = (server.address() as AddressInfo).port
+  try {
+    const r = await probeWebUrl(`http://127.0.0.1:${port}/`)
+    assert.equal(r.ok, true, '认不出 token 只说明没权限，不说明进程死了')
+    assert.equal(r.statusCode, 401)
+  } finally {
+    await new Promise<void>((r) => server.close(() => r()))
+  }
+})
+
+test('probeWebUrl: 见到请求就断开连接 → 判定失败（复刻 webtest 事故）', async () => {
+  const server = http.createServer((req) => {
+    req.socket.destroy()
+  })
+  await new Promise<void>((r) => server.listen(0, '127.0.0.1', () => r()))
+  const port = (server.address() as AddressInfo).port
+  try {
+    const r = await probeWebUrl(`http://127.0.0.1:${port}/`)
+    assert.equal(r.ok, false, '连接被重置绝不能算活着')
+    assert.ok(r.reason && r.reason.length > 0, '必须给出失败原因，否则用户只看到「未启动」')
+  } finally {
+    await new Promise<void>((r) => server.close(() => r()))
+  }
+})
+
+test('probeWebUrl: 端口无人监听时快速失败并给出原因', async () => {
+  // 先占一个端口再释放，保证这个端口确实是空的（不硬编码端口号）
+  const server = http.createServer()
+  await new Promise<void>((r) => server.listen(0, '127.0.0.1', () => r()))
+  const port = (server.address() as AddressInfo).port
+  await new Promise<void>((r) => server.close(() => r()))
+
+  const t0 = Date.now()
+  const r = await probeWebUrl(`http://127.0.0.1:${port}/`, 3000)
+  assert.equal(r.ok, false)
+  assert.ok(r.reason && r.reason.length > 0)
+  assert.ok(Date.now() - t0 < 3000, '不该等满超时才失败')
+})
+
+test('ConfigStore: 旧配置里的 webKernel.defaultPort 被忽略，也不再出现在读出的配置里（U10）', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'godsh-cfg-legacy-'))
+  try {
+    const store = new ConfigStore(dir)
+    // 模拟老版本写下的 config.json：里面还带着已被移除的 defaultPort
+    writeFileSync(
+      join(dir, 'config.json'),
+      JSON.stringify(
+        {
+          webKernel: { defaultTemplateId: 'web-default', defaultPort: 3080, allowMultiPort: true },
+        },
+        null,
+        2
+      )
+    )
+    const cfg = store.readConfig()
+    // 同级的其它字段必须照常生效（旧配置不能被一刀切地丢掉）
+    assert.equal(cfg.webKernel.allowMultiPort, true)
+    assert.equal(cfg.webKernel.defaultTemplateId, 'web-default')
+    // 废弃字段不得被对象展开原样带出来——否则等于"以为删了其实还在"
+    assert.equal((cfg.webKernel as unknown as Record<string, unknown>).defaultPort, undefined)
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
 })
 

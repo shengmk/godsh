@@ -35,7 +35,6 @@ export interface LauncherConfig {
   runtime: { node: string; pnpm: string }
   webKernel: {
     defaultTemplateId: string
-    defaultPort: number
     /** 是否允许同一 Profile 在自定义多端口下并发运行（默认 false，严格单环境单端口互斥） */
     allowMultiPort?: boolean
   }

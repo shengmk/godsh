@@ -5,7 +5,10 @@ $server = Join-Path $root 'apps\launcher\dist\server.mjs'
 $work = Join-Path $env:TEMP 'dshl-smoke-p2'
 $failed = @()
 
-function Get-Json($url) { (Invoke-WebRequest -Uri $url -UseBasicParsing -TimeoutSec 5).Content | ConvertFrom-Json }
+# 注意超时给到 30 秒而不是 5 秒：实测 /api/settings 的**首次**调用是冷启动开销较大的一个
+# （同一实例上实测首次 4365ms、第二次 70ms），机器一忙就会顶到 5 秒超时，
+# 表现成"接口坏了"其实只是探得太急。这是测试侧的容忍度，不是产品行为。
+function Get-Json($url) { (Invoke-WebRequest -Uri $url -UseBasicParsing -TimeoutSec 30).Content | ConvertFrom-Json }
 function Check($name, $cond) {
   if ($cond) { Write-Host "[PASS] $name" } else { Write-Host "[FAIL] $name"; $script:failed += $name }
 }
@@ -38,7 +41,25 @@ try {
   if (-not $up) { throw 'API 未就绪' }
 
   # 1. 启动失败诊断：broken profile（bundle 不存在 → dsh 进程快速退出）
-  $null = Invoke-RestMethod -Method Post -Uri 'http://127.0.0.1:47902/api/profiles/broken/start' -ContentType 'application/json' -Body '{"port":39250}'
+  #
+  # 结清 ?13 遗留项（这个脚本此前在基线快照上也失败，且从未被诊断）：
+  # 原先这里直接 POST /start 就往下走，但产品后来加了「社区 bundle 物理不可解析 → 硬门禁拦截」
+  # （bug 2/3 的治本，见 findUnresolvableProfileBundles），于是会先收到 400，
+  # 后面 D1-D4 想验证的「启动失败诊断」根本不会发生。
+  # 所以改成两步：① 先验证门禁确实拦得住；② 再用 force 绕过门禁，验证真正的失败诊断链路。
+  $blocked = $null
+  try {
+    $null = Invoke-RestMethod -Method Post -Uri 'http://127.0.0.1:47902/api/profiles/broken/start' -ContentType 'application/json' -Body '{"port":39250}'
+  } catch {
+    $resp = $_.Exception.Response
+    if ($resp) {
+      $reader = New-Object System.IO.StreamReader($resp.GetResponseStream())
+      $blocked = $reader.ReadToEnd() | ConvertFrom-Json
+    }
+  }
+  Check 'D0 不可解析的 bundle 被硬门禁拦截（400 + preflightBlocked）' ($null -ne $blocked -and $blocked.preflightBlocked -eq $true)
+
+  $null = Invoke-RestMethod -Method Post -Uri 'http://127.0.0.1:47902/api/profiles/broken/start' -ContentType 'application/json' -Body '{"port":39250,"force":true}'
   $st = $null
   for ($i = 0; $i -lt 30; $i++) {
     Start-Sleep -Seconds 1
@@ -69,8 +90,22 @@ try {
   $before = (Get-Json 'http://127.0.0.1:47902/api/allocations').allocations.Count
   Check 'B2 修改后分配数>0' ($before -gt 0)
   # 导入旧备份 → 恢复
+  # 注意：PowerShell 5.1 用 `-Body <字符串>` 发 JSON 时按本地代码页编码，非 ASCII 会被弄坏，
+  # 而且失败时只抛一句 "400 Bad Request"、看不到服务端到底在抱怨什么。
+  # 所以这里改成「UTF-8 落盘 + -InFile 发送」，并在失败时把响应体打出来。
   $restoreBody = @{ backup = $b1 } | ConvertTo-Json -Depth 30
-  $r = Invoke-RestMethod -Method Post -Uri 'http://127.0.0.1:47902/api/backup/restore' -ContentType 'application/json' -Body $restoreBody
+  $restoreFile = Join-Path $env:TEMP 'dshl-smoke-p2-restore.json'
+  [System.IO.File]::WriteAllText($restoreFile, $restoreBody, (New-Object Text.UTF8Encoding($false)))
+  try {
+    $r = Invoke-RestMethod -Method Post -Uri 'http://127.0.0.1:47902/api/backup/import' -ContentType 'application/json; charset=utf-8' -InFile $restoreFile
+  } catch {
+    $resp = $_.Exception.Response
+    if ($resp) {
+      $rd = New-Object System.IO.StreamReader($resp.GetResponseStream())
+      Write-Host "  恢复失败，服务端响应: $($rd.ReadToEnd())"
+    }
+    throw
+  }
   Check 'B3 restore 成功' ($r.ok -eq $true)
   $after = (Get-Json 'http://127.0.0.1:47902/api/allocations').allocations.Count
   Check 'B4 分配已恢复为空' ($after -eq 0)

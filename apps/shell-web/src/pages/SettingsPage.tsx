@@ -16,6 +16,7 @@ import { useAsyncAction, useToast } from '../hooks'
 import { useI18n, type Locale } from '../i18n'
 import { applyTheme, type Theme } from '../theme'
 import { usePageRefresh } from '../refresh'
+import { useConfirm } from '../use-confirm'
 
 type PageKey = 'console' | 'profiles' | 'market' | 'allocations' | 'kernels' | 'dsh-envs' | 'settings'
 
@@ -63,6 +64,9 @@ export default function SettingsPage({ locale, changeLocale, theme, changeTheme,
 
   // bug 7：把本页既有的 load() 注册到全局刷新总线（顶栏全局刷新按钮 → triggerRefresh → load）
   usePageRefresh(load, 'settings')
+
+  // U5：本页原先的 2 处 window.confirm 统一走自研确认框，dialog 在下方 JSX 渲染一次
+  const { confirm, dialog } = useConfirm()
 
   async function save() {
     setSaving(true)
@@ -118,8 +122,13 @@ export default function SettingsPage({ locale, changeLocale, theme, changeTheme,
     errorPrefix: '导入失败：',
   })
 
-  /** 重置确认（提示语与确认方式保持原样），返回是否继续执行 */
-  function confirmReset(): boolean {
+  /**
+   * 重置确认（提示语保持原样），返回是否继续执行。
+   *
+   * U5：确认框从 window.confirm 换成自研 dialog 后必须等待用户选择，因此本函数改为 async；
+   * 返回语义（true=继续，false=取消）完全不变，只是从同步布尔值变成了 Promise<boolean>。
+   */
+  async function confirmReset(): Promise<boolean> {
     const warn =
       resetScope === 'dsh-all'
         ? '「dsh 全删除」将卸载全局 dsh、删除整个 DSH_HOME（profiles/sessions/storages 等所有内容）与全部数据，且会停止所有环境。此操作不可恢复！请输入 DELETE 确认。'
@@ -127,6 +136,7 @@ export default function SettingsPage({ locale, changeLocale, theme, changeTheme,
           ? '将删除所有 Profile 目录并重置全部数据，不可恢复。确定继续？'
           : '将重置全部数据（config / kernels / allocations / unified-kernel / dsh-envs），保留 Profile 目录。确定继续？'
     if (resetScope === 'dsh-all') {
+      // 这一支原本就是 window.prompt 的「输入 DELETE 才继续」，不属于 window.confirm，行为保持原样
       const typed = window.prompt(warn)
       if (typed !== 'DELETE') {
         show('已取消：未输入 DELETE 确认', true)
@@ -134,7 +144,7 @@ export default function SettingsPage({ locale, changeLocale, theme, changeTheme,
       }
       return true
     }
-    return window.confirm(warn)
+    return await confirm({ message: warn })
   }
 
   /** 执行重置：破坏性长操作，由 useAsyncAction 保证按钮置忙 + 真实错误提示 */
@@ -365,8 +375,11 @@ export default function SettingsPage({ locale, changeLocale, theme, changeTheme,
             className="btn danger"
             disabled={resetting}
             onClick={() => {
-              if (!confirmReset()) return
-              void runResetAll()
+              // confirmReset 现在需要等待对话框，用 async 包一层以保证「确认后才执行重置」的顺序不变
+              void (async () => {
+                if (!(await confirmReset())) return
+                void runResetAll()
+              })()
             }}
             style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}
           >
@@ -388,8 +401,10 @@ export default function SettingsPage({ locale, changeLocale, theme, changeTheme,
             className="btn danger"
             disabled={uninstalling}
             onClick={() => {
-              if (!window.confirm('将调用 uninstall.exe 卸载本应用，确定继续？')) return
-              void runUninstall()
+              void (async () => {
+                if (!(await confirm({ message: '将调用 uninstall.exe 卸载本应用，确定继续？' }))) return
+                void runUninstall()
+              })()
             }}
             style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}
           >
@@ -414,6 +429,7 @@ export default function SettingsPage({ locale, changeLocale, theme, changeTheme,
       </div>
 
       <ToastStack toasts={toasts} />
+      {dialog}
     </>
   )
 }
