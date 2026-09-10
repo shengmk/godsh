@@ -56,6 +56,10 @@ jobs:
           $v = "${{ github.ref_name }}".TrimStart('v')
           $env:Path = "C:\msys64\mingw64\bin;" + $env:Path
           pwsh -File scripts/make-release.ps1 -Version $v
+          # 版本一致性守卫：放在打包之后，这样它不只比对源码声明，
+          # 还会断言**刚产出的** server.mjs 里注入的版本与 SSOT 一致
+          # （v0.6.1 安装包自报 0.5.5 那类事故就是从这里溜出去的）。
+          pnpm verify:version
 
       - name: Upload Release Assets
         uses: softprops/action-gh-release@v2
