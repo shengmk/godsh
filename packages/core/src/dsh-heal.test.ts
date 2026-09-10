@@ -14,6 +14,10 @@ import {
   satisfiesVersionRange,
   shimNegotiatorContentType,
   diagnoseDepTreeConsistency,
+  clearOrphanCredentialLock,
+  diagnoseCredentialLock,
+  readLockHolderPid,
+  isProcessAlive,
 } from './dsh-heal.js'
 
 
@@ -318,6 +322,79 @@ test('shimNegotiatorContentType: 找不到合规来源或来源版本不合规�
     assert.equal(existsSync(nested), false)
   } finally {
     rmSync(root, { recursive: true, force: true })
+  }
+})
+
+test('clearOrphanCredentialLock: 只有能证明持有者已死才删锁（2026-09-11 地址未就绪事故）', () => {
+  const home = mkdtempSync(join(tmpdir(), 'dsh-lock-'))
+  try {
+    const lock = join(home, '.credentials.yaml.lock')
+
+    // ① 锁里是死 PID → 真孤儿，必须清理（否则 dsh 在打印认证地址前就退出）
+    writeFileSync(lock, '9999998\n')
+    let r = clearOrphanCredentialLock(home)
+    assert.deepEqual(r.removed, [lock], '持有者已不存在时必须清理')
+    assert.equal(existsSync(lock), false)
+
+    // ② 锁里是活 PID（用本测试进程自己）→ 真的有人在写，绝不删
+    writeFileSync(lock, `${process.pid}\n`)
+    r = clearOrphanCredentialLock(home)
+    assert.deepEqual(r.kept, [lock], '持有者仍在运行时绝不允许删锁')
+    assert.equal(existsSync(lock), true, '活锁必须原样保留')
+
+    // ③ 读不出 PID → 无法证明是孤儿，不猜，交给诊断层
+    writeFileSync(lock, 'not-a-pid')
+    r = clearOrphanCredentialLock(home)
+    assert.deepEqual(r.unknown, [lock], '读不出归属时不得猜')
+    assert.equal(existsSync(lock), true)
+    assert.ok(diagnoseCredentialLock(home).length >= 1, '诊断必须报出无法判定的锁')
+
+    // ④ 没有锁时应是纯空操作（幂等，启动前每次都跑）
+    rmSync(lock, { force: true })
+    assert.deepEqual(clearOrphanCredentialLock(home), { removed: [], kept: [], unknown: [] })
+  } finally {
+    rmSync(home, { recursive: true, force: true })
+  }
+})
+
+test('diagnoseCredentialLock: 把「地址未就绪」背后的真实原因说清楚', () => {
+  const home = mkdtempSync(join(tmpdir(), 'dsh-lock-diag-'))
+  try {
+    assert.deepEqual(diagnoseCredentialLock(home), [], '没有锁时必须保持沉默')
+
+    const lock = join(home, '.credentials.yaml.lock')
+    // 孤儿锁：必须同时给出「PID 已不存在」与「表现为地址未就绪」这两件事，
+    // 否则用户看到的仍然只是「未就绪」，无从判断
+    writeFileSync(lock, '9999998\n')
+    const orphan = diagnoseCredentialLock(home).join('\n')
+    assert.ok(orphan.includes('9999998'), '要报出持有者 PID')
+    assert.ok(orphan.includes('已不存在'), '要说明持有者已死')
+    assert.ok(orphan.includes('地址未就绪'), '要把它与用户看到的现象对上')
+
+    // 活锁：不得建议删除，只说清是谁持有
+    writeFileSync(lock, `${process.pid}\n`)
+    const alive = diagnoseCredentialLock(home).join('\n')
+    assert.ok(alive.includes(String(process.pid)))
+    assert.ok(alive.includes('仍在运行'))
+  } finally {
+    rmSync(home, { recursive: true, force: true })
+  }
+})
+
+test('readLockHolderPid / isProcessAlive: 基础语义', () => {
+  const home = mkdtempSync(join(tmpdir(), 'dsh-lock-pid-'))
+  try {
+    const lock = join(home, '.credentials.yaml.lock')
+    assert.equal(readLockHolderPid(join(home, 'nope.lock')), null, '文件不存在返回 null')
+    writeFileSync(lock, '   12345  \nsecond line')
+    assert.equal(readLockHolderPid(lock), 12345, '容忍前后空白，只取第一行')
+    writeFileSync(lock, 'abc\n')
+    assert.equal(readLockHolderPid(lock), null, '非数字必须判为读不出')
+
+    assert.equal(isProcessAlive(process.pid), true, '本进程必然存活')
+    assert.equal(isProcessAlive(9999998), false, '不存在的 PID 必须判为已死')
+  } finally {
+    rmSync(home, { recursive: true, force: true })
   }
 })
 

@@ -1,6 +1,6 @@
 import { join } from 'node:path'
 import { mkdirSync, readFileSync, writeFileSync, existsSync } from 'node:fs'
-import { readLogTail, extractDshWebUrl, spawnWebProfile, stopWeb, waitForPort, waitForWebUrl, probeWebUrl, hasAuthToken, isPortListening, findPidByPort, findProcessName, invalidatePortProbe, ensureProfileBundles, ensureCacheIntegrity, ensureCompatibilityShims, resolveActiveDshNodeModules, killAllProfileProcesses, verifyProfileDeps, runPreflightCheck } from '@godsh/core'
+import { readLogTail, extractDshWebUrl, spawnWebProfile, stopWeb, waitForPort, waitForWebUrl, probeWebUrl, hasAuthToken, isPortListening, findPidByPort, findProcessName, invalidatePortProbe, ensureProfileBundles, ensureCacheIntegrity, ensureCompatibilityShims, resolveActiveDshNodeModules, clearOrphanCredentialLock, killAllProfileProcesses, verifyProfileDeps, runPreflightCheck } from '@godsh/core'
 import { createProfile, removeProfile, scanProfiles, setProfileBundles, exportProfilePackage, importProfilePackage, type ProfilePackage } from '@godsh/profile-manager'
 import { run } from '@godsh/core'
 import { pluginAction, PLUGIN_ACTION_TIMEOUT_MS, resolveInstallArg } from '@godsh/marketplace'
@@ -28,16 +28,34 @@ function enqueueStart<T>(task: () => Promise<T>): Promise<T> {
  * ——webtest 事故的时间线正是如此（godsh 先启动，之后全局 dsh 树被改动），
  * 那样进程启动时跑过的垫片已经过期。每次启动前重跑一次，成本只有几次文件存在性判断。
  *
- * 返回是否**真的施加了**垫片（已自洽时为 false，幂等）。
+ * 顺带清理**孤儿凭据写锁**（2026-09-11 实测定位）：dsh 的 connection 插件在**插件树加载期**就要写
+ * `$DSH_HOME/.credentials.yaml`，而那次写入的互斥锁是 `wx` 创建的兄弟文件（内容为持有者 PID），
+ * 上游 `dsh-atomic-write` **刻意不自动回收**（注释：文件年龄无法证明持有者已死，孤儿回收属人工操作）。
+ * 一旦残留，dsh 会在**打印认证地址之前**就退出 → 前端只显示「地址未就绪」，用户无从自查。
+ * 这里按「**只有能证明持有者已死才删**」的保守判据清理。
+ *
+ * 返回是否**真的做了事**（施加了垫片或清理了锁）；已干净时为 false（幂等）。
  */
-function healDepTreeForStart(profileName: string, dshBin?: string): boolean {
+function healDepTreeForStart(profileName: string, dshBin?: string, dshHome?: string): boolean {
+  let did = false
   try {
     const nm = resolveActiveDshNodeModules(dshBin)
-    if (!nm) return false
-    return ensureCompatibilityShims(nm, profileName) > 0
+    if (nm && ensureCompatibilityShims(nm, profileName) > 0) did = true
   } catch {
-    return false
+    /* 垫片失败不阻断启动 */
   }
+  try {
+    if (dshHome) {
+      const cleared = clearOrphanCredentialLock(dshHome)
+      if (cleared.removed.length > 0) {
+        console.log(`[godsh] 启动前自愈：已清理孤儿凭据写锁 ${cleared.removed.join(', ')}`)
+        did = true
+      }
+    }
+  } catch {
+    /* 锁清理失败不阻断启动（诊断层仍会把问题报出来） */
+  }
+  return did
 }
 
 /**
@@ -331,7 +349,7 @@ export const profilesHandler: ApiHandler = async (ctx, _req, res, method, seg, b
       } catch {
         /* 缓存修复失败不阻断，dsh 会给出具体报错 */
       }
-      if (healDepTreeForStart(name, dshBin)) {
+      if (healDepTreeForStart(name, dshBin, ctx.env.dshHome)) {
         console.log(`[godsh] 启动前依赖树自愈：已为 ${name} 补齐 negotiator 所需的 content-type 副本`)
       }
       ctx.ensureUnifiedKernel(name)
@@ -394,7 +412,7 @@ export const profilesHandler: ApiHandler = async (ctx, _req, res, method, seg, b
         if (probe.ok) {
           proc.status = 'running'
         } else {
-          const healed = healDepTreeForStart(name, dshBin)
+          const healed = healDepTreeForStart(name, dshBin, ctx.env.dshHome)
           proc.status = 'error'
           proc.error =
             `端口 ${port} 已就绪但进程无法响应（${probe.reason ?? '探活失败'}）` +
@@ -412,7 +430,7 @@ export const profilesHandler: ApiHandler = async (ctx, _req, res, method, seg, b
         // 拿到认证地址只说明「它打印了地址」，还要确认它**还能响应**（同上：端口在、进程已崩）
         const alive = readyUrl ? await probeWebUrl(readyUrl) : null
         if (readyUrl && alive && !alive.ok) {
-          const healed = healDepTreeForStart(name, dshBin)
+          const healed = healDepTreeForStart(name, dshBin, ctx.env.dshHome)
           if (running.get(name) === proc) {
             proc.status = 'error'
             proc.error =
@@ -482,7 +500,7 @@ export const profilesHandler: ApiHandler = async (ctx, _req, res, method, seg, b
       try {
         ensureCacheIntegrity(dshBin)
       } catch {}
-      if (healDepTreeForStart(name, dshBin)) {
+      if (healDepTreeForStart(name, dshBin, ctx.env.dshHome)) {
         console.log(`[godsh] 启动前依赖树自愈：已为 ${name} 补齐 negotiator 所需的 content-type 副本`)
       }
       ctx.ensureUnifiedKernel(name)
@@ -532,7 +550,7 @@ export const profilesHandler: ApiHandler = async (ctx, _req, res, method, seg, b
         if (probe.ok) {
           proc.status = 'running'
         } else {
-          const healed = healDepTreeForStart(name, dshBin)
+          const healed = healDepTreeForStart(name, dshBin, ctx.env.dshHome)
           proc.status = 'error'
           proc.error =
             `端口 ${port} 已就绪但进程无法响应（${probe.reason ?? '探活失败'}）` +
@@ -550,7 +568,7 @@ export const profilesHandler: ApiHandler = async (ctx, _req, res, method, seg, b
         // 拿到认证地址只说明「它打印了地址」，还要确认它**还能响应**（同上：端口在、进程已崩）
         const alive = readyUrl ? await probeWebUrl(readyUrl) : null
         if (readyUrl && alive && !alive.ok) {
-          const healed = healDepTreeForStart(name, dshBin)
+          const healed = healDepTreeForStart(name, dshBin, ctx.env.dshHome)
           if (running.get(name) === proc) {
             proc.status = 'error'
             proc.error =

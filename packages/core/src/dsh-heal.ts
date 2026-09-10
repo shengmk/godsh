@@ -455,6 +455,110 @@ export function collectContentTypeCandidates(profileNm?: string): string[] {
 }
 
 /**
+ * dsh 的凭据写锁文件名（与 `$DSH_HOME/.credentials.yaml` 同级）。
+ *
+ * 它是 `@deepseek-ai/dsh-atomic-write` 的 `withFileLock()` 用 `wx` 创建出来的兄弟文件，
+ * **内容就是持有者的 PID**。`@deepseek-ai/dsh-client-connection` 在**插件树加载期**就要写凭据，
+ * 所以任何一次启动期崩溃或被强制终止（例如安装升级时的强杀）都会把它留下。
+ */
+const CREDENTIAL_LOCK_NAME = '.credentials.yaml.lock'
+
+/** 读取锁文件里的持有者 PID（第一行）；读不出数字返回 null。 */
+export function readLockHolderPid(lockFile: string): number | null {
+  try {
+    const raw = readFileSync(lockFile, 'utf8')
+    const first = raw.split(/\r?\n/)[0] ?? ''
+    const m = /^\s*(\d+)\s*$/.exec(first)
+    if (!m) return null
+    const pid = Number.parseInt(m[1] as string, 10)
+    return Number.isFinite(pid) && pid > 0 ? pid : null
+  } catch {
+    return null
+  }
+}
+
+/**
+ * 该 PID 是否仍存活。
+ *
+ * 用 `process.kill(pid, 0)` 做「存在性探测」（信号 0 不真的发信号）。
+ * **只有 ESRCH 才判定为已死**；EPERM 之类的答复说明进程存在但我们没有权限，
+ * 必须保守地当作"活着"——宁可不清锁，也不能删掉别人正在持有的锁。
+ */
+export function isProcessAlive(pid: number): boolean {
+  try {
+    process.kill(pid, 0)
+    return true
+  } catch (e) {
+    return (e as NodeJS.ErrnoException).code !== 'ESRCH'
+  }
+}
+
+/**
+ * 清理 `$DSH_HOME/.credentials.yaml.lock` 这个「孤儿写锁」。
+ *
+ * 为什么必须由 godsh 来做：上游 `dsh-atomic-write` **刻意不自动删锁**，注释写明
+ * 「文件年龄无法证明持有者已经死了，孤儿锁的回收是 operator action」。
+ * 而 godsh 就是那个 operator —— 不清理的后果极难自查（2026-09-11 实测定位）：
+ * 启动会在 `boot()` 里抛 `atomic-write: timed out waiting for the writer lock`，
+ * 进程**在打印 `dsh web: …?token=…` 之前就退出**，前端只能显示「地址未就绪」，
+ * 用户完全看不出真实原因。
+ *
+ * 判据刻意保守，**只有能证明持有者已死才删**：
+ * - 读出 PID 且进程已不存在 → 删（真孤儿）；
+ * - 读出 PID 且进程仍存活 → 留（真的有人在写）；
+ * - 读不出 PID / 文件为空 → 留（无法证明是孤儿），交给诊断层报出。
+ */
+export function clearOrphanCredentialLock(dshHome: string): {
+  removed: string[]
+  kept: string[]
+  unknown: string[]
+} {
+  const removed: string[] = []
+  const kept: string[] = []
+  const unknown: string[] = []
+  const lockFile = join(dshHome, CREDENTIAL_LOCK_NAME)
+  if (!existsSync(lockFile)) return { removed, kept, unknown }
+
+  const pid = readLockHolderPid(lockFile)
+  if (pid === null) {
+    unknown.push(lockFile)
+    return { removed, kept, unknown }
+  }
+  if (isProcessAlive(pid)) {
+    kept.push(lockFile)
+    return { removed, kept, unknown }
+  }
+  try {
+    rmSync(lockFile, { force: true })
+    removed.push(lockFile)
+  } catch {
+    // 删不掉也不能让启动失败：交给诊断层下次继续报
+    unknown.push(lockFile)
+  }
+  return { removed, kept, unknown }
+}
+
+/** 诊断一条残留的凭据写锁（供 diagnoseProfile 报出）；没有锁时返回空数组。 */
+export function diagnoseCredentialLock(dshHome: string): string[] {
+  const lockFile = join(dshHome, CREDENTIAL_LOCK_NAME)
+  if (!existsSync(lockFile)) return []
+  const pid = readLockHolderPid(lockFile)
+  if (pid === null) {
+    return [
+      `凭据写锁无法判定归属：${lockFile}（文件存在但读不出持有者 PID），` +
+        '确认没有任何 dsh 在运行后请手动删除它，否则环境启动会失败',
+    ]
+  }
+  if (isProcessAlive(pid)) {
+    return [`凭据写锁被 PID ${pid} 持有（该进程仍在运行），若它并非正常的 dsh 写入者请手动处理：${lockFile}`]
+  }
+  return [
+    `存在孤儿凭据写锁（持有者 PID ${pid} 已不存在）：${lockFile}。` +
+      '它会让 dsh 在打印认证地址之前就退出，表现为「地址未就绪」——启动前自愈会自动清理它',
+  ]
+}
+
+/**
  * 解析当前活跃的 DSH CLI 官方依赖目录（node_modules/@deepseek-ai）。
  * 优先使用实际执行环境（npm 全局 / 指定 bin 所在包），解决 DSH Desktop 内置版本与驱动 CLI 不匹配问题。
  */
@@ -1242,6 +1346,13 @@ export async function diagnoseProfile(
       cliProblems.push(...depProblems)
       issuesFound++
     }
+  }
+
+  // 残留的凭据写锁：会让 dsh 在打印认证地址之前就退出，用户只看到「地址未就绪」（2026-09-11 实测）
+  const lockProblems = diagnoseCredentialLock(dshHome)
+  if (lockProblems.length > 0) {
+    cliProblems.push(...lockProblems)
+    issuesFound++
   }
 
   // Layer 1: Network
