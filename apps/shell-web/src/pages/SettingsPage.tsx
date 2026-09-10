@@ -12,9 +12,10 @@ import {
 import { api } from '../api'
 import type { LauncherConfig, SettingsInfo } from '../types'
 import { Loading, Toast } from '../components'
-import { useToast } from '../hooks'
+import { useAsyncAction, useToast } from '../hooks'
 import { useI18n, type Locale } from '../i18n'
 import { applyTheme, type Theme } from '../theme'
+import { usePageRefresh } from '../refresh'
 
 type PageKey = 'console' | 'profiles' | 'market' | 'allocations' | 'kernels' | 'dsh-envs' | 'settings'
 
@@ -37,8 +38,10 @@ export default function SettingsPage({ locale, changeLocale, theme, changeTheme,
   const [allowMultiPort, setAllowMultiPort] = useState(false)
   const [resetScope, setResetScope] = useState<'data' | 'all' | 'dsh-all'>('data')
   const [saving, setSaving] = useState(false)
+  const [reloading, setReloading] = useState(false)
 
   async function load() {
+    setReloading(true)
     try {
       const s = await api.settings()
       setInfo(s)
@@ -49,12 +52,17 @@ export default function SettingsPage({ locale, changeLocale, theme, changeTheme,
       setAllowMultiPort(s.config.webKernel?.allowMultiPort ?? false)
     } catch (e) {
       show(e instanceof Error ? e.message : String(e), true)
+    } finally {
+      setReloading(false)
     }
   }
 
   useEffect(() => {
     void load()
   }, [])
+
+  // bug 7：把本页既有的 load() 注册到全局刷新总线（顶栏全局刷新按钮 → triggerRefresh → load）
+  usePageRefresh(load, 'settings')
 
   async function save() {
     setSaving(true)
@@ -77,35 +85,41 @@ export default function SettingsPage({ locale, changeLocale, theme, changeTheme,
     }
   }
 
+  /** 导出备份：失败时抛出真实原因，由 useAsyncAction 统一置忙 + 提示 */
   async function exportBackup() {
-    try {
-      const data = await api.backup()
-      const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' })
-      const url = URL.createObjectURL(blob)
-      const a = document.createElement('a')
-      a.href = url
-      a.download = `godsh-backup-${new Date().toISOString().slice(0, 10)}.json`
-      a.click()
-      URL.revokeObjectURL(url)
-      show('备份已导出')
-    } catch (e) {
-      show(e instanceof Error ? e.message : String(e), true)
-    }
+    const data = await api.backup()
+    const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = `godsh-backup-${new Date().toISOString().slice(0, 10)}.json`
+    a.click()
+    URL.revokeObjectURL(url)
   }
 
-  async function importBackup(file: File | undefined) {
-    if (!file) return
-    try {
-      const data = JSON.parse(await file.text()) as Record<string, unknown>
-      const r = await api.restoreBackup(data)
-      show(`备份已导入：${r.restored.join(', ')}`)
-      await load()
-    } catch (e) {
-      show(e instanceof Error ? e.message : String(e), true)
-    }
+  const { run: runExportBackup, loading: exporting } = useAsyncAction(exportBackup, {
+    show,
+    success: '备份已导出',
+    errorPrefix: '导出备份失败：',
+  })
+
+  /** 导入备份：返回已恢复项（未选文件返回 null），成功文案沿用既有格式 */
+  async function importBackup(file: File | undefined): Promise<string[] | null> {
+    if (!file) return null
+    const data = JSON.parse(await file.text()) as Record<string, unknown>
+    const r = await api.restoreBackup(data)
+    await load()
+    return r.restored
   }
 
-  async function doReset() {
+  const { run: runImportBackup, loading: importing } = useAsyncAction(importBackup, {
+    show,
+    success: (restored) => (restored ? `备份已导入：${restored.join(', ')}` : ''),
+    errorPrefix: '导入失败：',
+  })
+
+  /** 重置确认（提示语与确认方式保持原样），返回是否继续执行 */
+  function confirmReset(): boolean {
     const warn =
       resetScope === 'dsh-all'
         ? '「dsh 全删除」将卸载全局 dsh、删除整个 DSH_HOME（profiles/sessions/storages 等所有内容）与全部数据，且会停止所有环境。此操作不可恢复！请输入 DELETE 确认。'
@@ -114,28 +128,38 @@ export default function SettingsPage({ locale, changeLocale, theme, changeTheme,
           : '将重置全部数据（config / kernels / allocations / unified-kernel / dsh-envs），保留 Profile 目录。确定继续？'
     if (resetScope === 'dsh-all') {
       const typed = window.prompt(warn)
-      if (typed !== 'DELETE') return show('已取消：未输入 DELETE 确认', true)
-    } else if (!window.confirm(warn)) {
-      return
+      if (typed !== 'DELETE') {
+        show('已取消：未输入 DELETE 确认', true)
+        return false
+      }
+      return true
     }
-    try {
-      const r = await api.resetAll(resetScope)
-      show(`已重置（scope=${r.scope}）`)
-      await load()
-    } catch (e) {
-      show(e instanceof Error ? e.message : String(e), true)
-    }
+    return window.confirm(warn)
   }
 
-  async function doUninstall() {
-    if (!window.confirm('将调用 uninstall.exe 卸载本应用，确定继续？')) return
-    try {
-      const r = await api.appUninstall()
-      show(`已启动卸载程序：${r.path}`)
-    } catch (e) {
-      show(e instanceof Error ? e.message : String(e), true)
-    }
+  /** 执行重置：破坏性长操作，由 useAsyncAction 保证按钮置忙 + 真实错误提示 */
+  async function resetAll() {
+    const r = await api.resetAll(resetScope)
+    await load()
+    return r
   }
+
+  const { run: runResetAll, loading: resetting } = useAsyncAction(resetAll, {
+    show,
+    success: (r) => `已重置（scope=${r.scope}）`,
+    errorPrefix: '重置失败：',
+  })
+
+  /** 卸载 Launcher：确认框保留在点击处，异步部分交给 useAsyncAction 置忙 + 提示 */
+  async function uninstall() {
+    return api.appUninstall()
+  }
+
+  const { run: runUninstall, loading: uninstalling } = useAsyncAction(uninstall, {
+    show,
+    success: (r) => `已启动卸载程序：${r.path}`,
+    errorPrefix: '卸载失败：',
+  })
 
   if (!info) return <Loading />
 
@@ -275,16 +299,34 @@ export default function SettingsPage({ locale, changeLocale, theme, changeTheme,
         <div className="card-title">数据备份</div>
         <p className="card-sub">导出 / 导入 Launcher 数据（config / kernels / allocations / unified-kernel）</p>
         <div className="row" style={{ marginTop: 8, gap: 8 }}>
-          <button className="btn" onClick={() => void exportBackup()} style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
-            <Download size={13} /> 导出备份
+          <button
+            className="btn"
+            disabled={exporting}
+            onClick={() => void runExportBackup()}
+            style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}
+          >
+            {exporting ? <RefreshCw size={13} className="animate-spin" /> : <Download size={13} />}{' '}
+            {exporting ? '导出中…' : '导出备份'}
           </button>
-          <label className="btn" style={{ cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: 6 }}>
-            <Upload size={13} /> 导入备份
+          <label
+            className="btn"
+            aria-disabled={importing}
+            style={{
+              cursor: importing ? 'not-allowed' : 'pointer',
+              opacity: importing ? 0.6 : 1,
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: 6,
+            }}
+          >
+            {importing ? <RefreshCw size={13} className="animate-spin" /> : <Upload size={13} />}{' '}
+            {importing ? '导入中…' : '导入备份'}
             <input
               type="file"
               accept=".json,application/json"
               style={{ display: 'none' }}
-              onChange={(e) => void importBackup(e.target.files?.[0])}
+              disabled={importing}
+              onChange={(e) => void runImportBackup(e.target.files?.[0])}
             />
           </label>
         </div>
@@ -319,8 +361,17 @@ export default function SettingsPage({ locale, changeLocale, theme, changeTheme,
             />
             <span style={{ color: 'var(--err)', fontWeight: 700 }}>dsh 全删除（卸载 dsh + 删除整个 DSH_HOME + 全部数据）</span>
           </label>
-          <button className="btn danger" onClick={() => void doReset()} style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
-            <RotateCcw size={13} /> 执行重置
+          <button
+            className="btn danger"
+            disabled={resetting}
+            onClick={() => {
+              if (!confirmReset()) return
+              void runResetAll()
+            }}
+            style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}
+          >
+            {resetting ? <RefreshCw size={13} className="animate-spin" /> : <RotateCcw size={13} />}{' '}
+            {resetting ? '执行中…' : '执行重置'}
           </button>
         </div>
       </div>
@@ -333,8 +384,17 @@ export default function SettingsPage({ locale, changeLocale, theme, changeTheme,
             godsh v{config.launcher.version} · DSH 环境管理请前往「DSH 环境」页
           </span>
           <span className="spacer" />
-          <button className="btn danger" onClick={() => void doUninstall()} style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
-            <Trash2 size={13} /> 卸载 Launcher（调用 uninstall.exe）
+          <button
+            className="btn danger"
+            disabled={uninstalling}
+            onClick={() => {
+              if (!window.confirm('将调用 uninstall.exe 卸载本应用，确定继续？')) return
+              void runUninstall()
+            }}
+            style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}
+          >
+            {uninstalling ? <RefreshCw size={13} className="animate-spin" /> : <Trash2 size={13} />}{' '}
+            {uninstalling ? '卸载中…' : '卸载 Launcher（调用 uninstall.exe）'}
           </button>
         </div>
       </div>
@@ -343,8 +403,13 @@ export default function SettingsPage({ locale, changeLocale, theme, changeTheme,
         <button className="btn primary" disabled={saving} onClick={() => void save()} style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
           <Save size={13} /> {saving ? '…' : t('btn.save')}
         </button>
-        <button className="btn" onClick={() => void load()} style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
-          <RefreshCw size={13} /> {t('btn.refresh')}
+        <button
+          className="btn"
+          disabled={reloading}
+          onClick={() => void load()}
+          style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}
+        >
+          <RefreshCw size={13} className={reloading ? 'animate-spin' : ''} /> {reloading ? '刷新中…' : t('btn.refresh')}
         </button>
       </div>
 

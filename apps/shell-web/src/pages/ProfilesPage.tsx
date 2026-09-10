@@ -25,10 +25,19 @@ import {
 import { api } from '../api'
 import type { DshInstance, Health, PortInfo, ProfileView, WorkflowTemplate, ProfilePackage, SnapshotItem } from '../types'
 import { ConfirmDialog, ContextMenu, EmptyState, Loading, SkeletonGrid, Toast, type MenuState } from '../components'
-import { useToast } from '../hooks'
+import { useAsyncAction, useToast } from '../hooks'
 import { useI18n } from '../i18n'
+import { usePageRefresh } from '../refresh'
 import { isTauri, openDshWeb, openDshDesktop as openDshDesktopFn, openExternal } from '../tauri'
 import { taskManager } from '../tasks'
+
+/**
+ * 只有带 token 的地址才是可用的 dsh web 认证地址（bug 6）：
+ * 不带 token 的 http://127.0.0.1:<port> 一定返回 401，绝不能作为兜底拼接出来。
+ */
+function hasAuthToken(u: string | null | undefined): u is string {
+  return !!u && /[?&]token=/.test(u)
+}
 
 export default function ProfilesPage() {
   const [health, setHealth] = useState<Health | null>(null)
@@ -68,6 +77,12 @@ export default function ProfilesPage() {
   const [newSnapshotDesc, setNewSnapshotDesc] = useState('')
   const [repairingProfile, setRepairingProfile] = useState<string | null>(null)
   const [desktopInstalled, setDesktopInstalled] = useState(false)
+  // 快照时光机逐项忙碌标记：'create' | `lock:<id>` | `restore:<id>` | `delete:<id>`
+  const [snapshotBusy, setSnapshotBusy] = useState<string | null>(null)
+  // 刷新按钮的忙碌状态（bug 7：原来点刷新没有任何反馈）
+  const [refreshing, setRefreshing] = useState(false)
+  // 「桌面版」按钮的忙碌标记（按环境名）
+  const [desktopBusy, setDesktopBusy] = useState<string | null>(null)
   const importInputRef = useRef<HTMLInputElement | null>(null)
   const logRef = useRef<HTMLDivElement | null>(null)
   const { toast, show } = useToast()
@@ -97,6 +112,20 @@ export default function ProfilesPage() {
       .then((st) => setDesktopInstalled(st.installed))
       .catch(() => {})
   }, [load])
+
+  /** 手动刷新（顶栏全局刷新按钮与页面刷新按钮共用同一份 load 逻辑） */
+  async function handleRefresh() {
+    if (refreshing) return
+    setRefreshing(true)
+    try {
+      await load()
+    } finally {
+      setRefreshing(false)
+    }
+  }
+
+  // bug 7：把本页的重新加载注册到全局刷新总线
+  usePageRefresh(handleRefresh, 'profiles')
 
   // Esc 键层级关闭模态框、日志、选择
   useEffect(() => {
@@ -136,16 +165,18 @@ export default function ProfilesPage() {
     return () => window.removeEventListener('keydown', onKeyDown)
   }, [workflowsModalOpen, snapshotModalProfile, deleteTarget, menu, showPorts, logFor, selected])
 
-  // 指定 Profile 使用的 dsh 版本
-  async function setProfileVersion(name: string, instance: string) {
-    try {
-      await api.updateSettings({ dsh: { byProfile: { [name]: instance } } })
-      setByProfileVersion((prev) => ({ ...prev, [name]: instance }))
-      show(instance ? `已为 ${name} 指定版本 ${instance}` : `已为 ${name} 恢复默认版本`)
-    } catch (e) {
-      show(e instanceof Error ? e.message : String(e), true)
-    }
+  // 指定 Profile 使用的 dsh 版本（核心操作，失败抛出真实原因，由 useAsyncAction 统一提示与置忙）
+  async function saveProfileVersion(name: string, instance: string) {
+    await api.updateSettings({ dsh: { byProfile: { [name]: instance } } })
+    setByProfileVersion((prev) => ({ ...prev, [name]: instance }))
+    return instance ? `已为 ${name} 指定版本 ${instance}` : `已为 ${name} 恢复默认版本`
   }
+
+  const versionAction = useAsyncAction(saveProfileVersion, {
+    show,
+    success: (msg) => msg,
+    errorPrefix: '保存 dsh 版本失败：',
+  })
 
   // 每 3s 自动刷新运行状态：合并轮询（一次请求返回所有环境状态，替代逐环境请求）
   useEffect(() => {
@@ -216,7 +247,7 @@ export default function ProfilesPage() {
       return
     }
     try {
-      await api.startProfile(name, port)
+      await api.startProfile(name, port ? { port } : undefined)
       show(port ? `正在启动 ${name}（端口 ${port}）…` : `正在启动 ${name}（自动端口）…`)
       setTimeout(load, 1500)
     } catch (e) {
@@ -254,10 +285,13 @@ export default function ProfilesPage() {
     }
   }
 
-  /** 打开环境（默认入口）：用系统浏览器打开 godsh 启动的 web 界面（端口即自定义端口，零冲突）。 */
+  /**
+   * 打开环境（默认入口）：用系统浏览器打开 godsh 启动的 web 界面（端口即自定义端口，零冲突）。
+   * bug 6：只接受带 token 的认证地址，无 token 的地址一律不传给 openDshWeb（必然 401）。
+   */
   async function openDsh(p: { name?: string; profile?: string; url: string | null }) {
     const label = p.name ?? p.profile ?? 'dsh'
-    if (!p.url) return show('环境未运行或地址不可用', true)
+    if (!hasAuthToken(p.url)) return show('环境未运行或认证地址未就绪（缺少 token 的地址会返回 401）', true)
     try {
       await openDshWeb(p.url)
       show(`已在浏览器打开 ${label}（${p.url}）`)
@@ -282,6 +316,7 @@ export default function ProfilesPage() {
 
   async function handleCreateSnapshot() {
     if (!snapshotModalProfile) return
+    setSnapshotBusy('create')
     try {
       await api.backupCreate(snapshotModalProfile, newSnapshotDesc.trim() || undefined)
       setNewSnapshotDesc('')
@@ -290,44 +325,56 @@ export default function ProfilesPage() {
       setSnapshots(res.snapshots || [])
       setSnapshotStats(res.stats || null)
     } catch (e) {
-      show(e instanceof Error ? e.message : String(e), true)
+      show(`创建快照失败：${e instanceof Error ? e.message : String(e)}`, true)
+    } finally {
+      setSnapshotBusy(null)
     }
   }
 
   async function handleToggleLock(snapId: string, currentLocked?: boolean) {
     if (!snapshotModalProfile) return
+    setSnapshotBusy(`lock:${snapId}`)
     try {
       await api.backupToggleLock(snapshotModalProfile, snapId, !currentLocked)
       const res = await api.backupSnapshots(snapshotModalProfile)
       setSnapshots(res.snapshots || [])
+      show(currentLocked ? `已解锁快照 ${snapId}` : `已锁定快照 ${snapId}（免淘汰保护）`)
     } catch (e) {
-      show(e instanceof Error ? e.message : String(e), true)
+      show(`${currentLocked ? '解锁' : '锁定'}快照失败：${e instanceof Error ? e.message : String(e)}`, true)
+    } finally {
+      setSnapshotBusy(null)
     }
   }
 
   async function handleRestoreSnapshot(snapId: string) {
     if (!snapshotModalProfile) return
     if (!window.confirm(`确定要将环境 ${snapshotModalProfile} 回滚到快照 ${snapId} 吗？当前配置将被快照覆盖。`)) return
+    setSnapshotBusy(`restore:${snapId}`)
     try {
       await api.backupRestore(snapshotModalProfile, snapId)
       show(`已成功回滚至快照 ${snapId}`)
       setSnapshotModalProfile(null)
-      load()
+      await load()
     } catch (e) {
-      show(e instanceof Error ? e.message : String(e), true)
+      show(`回滚失败：${e instanceof Error ? e.message : String(e)}`, true)
+    } finally {
+      setSnapshotBusy(null)
     }
   }
 
   async function handleDeleteSnapshot(snapId: string) {
     if (!snapshotModalProfile) return
     if (!window.confirm(`确定删除快照 ${snapId} 吗？`)) return
+    setSnapshotBusy(`delete:${snapId}`)
     try {
       await api.backupDelete(snapshotModalProfile, snapId)
       show('快照已删除')
       const res = await api.backupSnapshots(snapshotModalProfile)
       setSnapshots(res.snapshots || [])
     } catch (e) {
-      show(e instanceof Error ? e.message : String(e), true)
+      show(`删除快照失败：${e instanceof Error ? e.message : String(e)}`, true)
+    } finally {
+      setSnapshotBusy(null)
     }
   }
 
@@ -343,9 +390,12 @@ export default function ProfilesPage() {
     }
   }
 
-  async function handleOpenDesktop(name: string) {
+  async function handleOpenDesktop(name: string, url: string | null) {
+    if (desktopBusy === name) return
+    setDesktopBusy(name)
     try {
-      const ok = await openDshDesktopFn(name)
+      // bug 6：把调用方已经拿到的真实地址透传给 DSH Desktop（此前固定传 '' 导致 Rust 侧解析失败）
+      const ok = await openDshDesktopFn(name, url)
       if (ok) {
         show(`已唤醒 DSH Desktop 客户端（环境: ${name}）`)
       } else {
@@ -353,46 +403,51 @@ export default function ProfilesPage() {
       }
     } catch (e) {
       show(`启动失败: ${e instanceof Error ? e.message : String(e)}`, true)
+    } finally {
+      setDesktopBusy(null)
     }
   }
 
 
 
-  /** 导出环境完整配置包（JSON） */
+  /** 导出环境完整配置包（JSON）：核心操作返回提示文案，进度/错误由 useAsyncAction 统一呈现 */
   async function exportEnv(name: string) {
-    try {
-      const pkg = await api.exportProfile(name)
-      const blob = new Blob([JSON.stringify(pkg, null, 2)], { type: 'application/json' })
-      const url = URL.createObjectURL(blob)
-      const a = document.createElement('a')
-      a.href = url
-      a.download = `godsh-env-${name}-${new Date().toISOString().slice(0, 10)}.json`
-      a.click()
-      URL.revokeObjectURL(url)
-      show(`已导出环境包：${name}`)
-    } catch (e) {
-      show(e instanceof Error ? e.message : String(e), true)
-    }
+    const pkg = await api.exportProfile(name)
+    const blob = new Blob([JSON.stringify(pkg, null, 2)], { type: 'application/json' })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = `godsh-env-${name}-${new Date().toISOString().slice(0, 10)}.json`
+    a.click()
+    URL.revokeObjectURL(url)
+    return `已导出环境包：${name}`
   }
 
-  /** 从本地 JSON 文件导入环境包 */
+  const exportAction = useAsyncAction(exportEnv, {
+    show,
+    success: (msg) => msg,
+    errorPrefix: '导出失败：',
+  })
+
+  /** 从本地 JSON 文件导入环境包（取消选择时返回 null，不提示） */
   async function handleImportFile(file: File) {
-    try {
-      const text = await file.text()
-      const pkg = JSON.parse(text) as ProfilePackage
-      if (!pkg || typeof pkg !== 'object' || !pkg.name) {
-        show('非法环境包文件：缺少必要字段', true)
-        return
-      }
-      const targetName = window.prompt(`请输入导入后的环境名（原环境名：${pkg.name}）：`, pkg.name)
-      if (!targetName) return
-      const res = await api.importProfile({ targetName: targetName.trim(), package: pkg })
-      show(`已成功导入环境 ${res.profile}${res.dependenciesCount ? `（正在准备 ${res.dependenciesCount} 个依赖）` : ''}`)
-      await load()
-    } catch (e) {
-      show(e instanceof Error ? e.message : String(e), true)
+    const text = await file.text()
+    const pkg = JSON.parse(text) as ProfilePackage
+    if (!pkg || typeof pkg !== 'object' || !pkg.name) {
+      throw new Error('非法环境包文件：缺少必要字段')
     }
+    const targetName = window.prompt(`请输入导入后的环境名（原环境名：${pkg.name}）：`, pkg.name)
+    if (!targetName) return null
+    const res = await api.importProfile({ targetName: targetName.trim(), package: pkg })
+    await load()
+    return `已成功导入环境 ${res.profile}${res.dependenciesCount ? `（正在准备 ${res.dependenciesCount} 个依赖）` : ''}`
   }
+
+  const importAction = useAsyncAction(handleImportFile, {
+    show,
+    success: (msg) => msg ?? '',
+    errorPrefix: '导入失败：',
+  })
 
   /** 加载预设工作流列表 */
   async function openWorkflowsModal() {
@@ -478,6 +533,9 @@ export default function ProfilesPage() {
 
   function onContext(p: ProfileView, e: React.MouseEvent) {
     e.preventDefault()
+    // 先收敛为 const：类型收窄不会穿透到箭头函数内部（闭包里属性可能已变），
+    // 用局部常量才能既保持类型安全、又不靠 `!` 断言。
+    const authUrl: string | null = hasAuthToken(p.url) ? p.url : null
     setMenu({
       x: e.clientX,
       y: e.clientY,
@@ -488,21 +546,21 @@ export default function ProfilesPage() {
         p.running
           ? { label: '重启', onClick: () => void restart(p.name) }
           : { label: '重启', disabled: true, onClick: () => {} },
-        p.running && p.url
+        p.running && hasAuthToken(p.url)
           ? { label: '打开应用窗口（网址应用化）', onClick: () => void openDsh(p) }
           : { label: '打开应用窗口（网址应用化）', disabled: true, onClick: () => {} },
         isTauri() && p.running
-          ? { label: '用 DSH Desktop 打开', onClick: () => void openDshDesktopFn(p.name) }
+          ? { label: '用 DSH Desktop 打开', onClick: () => void openDshDesktopFn(p.name, p.url) }
           : { label: '用 DSH Desktop 打开', disabled: true, onClick: () => {} },
-        p.running && p.url
-          ? { label: '在系统浏览器打开', onClick: () => void openExternal(p.url!) }
+        authUrl
+          ? { label: '在系统浏览器打开', onClick: () => void openExternal(authUrl) }
           : { label: '在系统浏览器打开', disabled: true, onClick: () => {} },
         { label: '查看日志', onClick: () => viewLog(p.name) },
         { separator: true, label: '', onClick: () => {} },
         p.port ? { label: `复制端口 ${p.port}`, onClick: () => void copy(String(p.port), '端口') } : { label: '复制端口', disabled: true, onClick: () => {} },
-        p.url ? { label: '复制地址', onClick: () => void copy(p.url!, '地址') } : { label: '复制地址', disabled: true, onClick: () => {} },
+        authUrl ? { label: '复制地址', onClick: () => void copy(authUrl, '地址') } : { label: '复制地址', disabled: true, onClick: () => {} },
         { separator: true, label: '', onClick: () => {} },
-        { label: '导出环境包 (JSON)', onClick: () => void exportEnv(p.name) },
+        { label: '导出环境包 (JSON)', onClick: () => void exportAction.run(p.name) },
         { separator: true, label: '', onClick: () => {} },
         { label: '删除环境', onClick: () => setDeleteTarget({ name: p.name }), danger: true, disabled: p.running },
       ],
@@ -713,15 +771,29 @@ export default function ProfilesPage() {
             </button>
           </>
         )}
-        <button className="btn sm" onClick={() => void load()}>
-          <RefreshCw size={12} /> {t('btn.refresh')}
+        <button
+          className="btn sm"
+          disabled={refreshing}
+          onClick={() => void handleRefresh()}
+          title="重新加载环境列表"
+        >
+          <RefreshCw size={12} className={refreshing ? 'animate-spin' : ''} /> {refreshing ? '刷新中…' : t('btn.refresh')}
         </button>
         <button
           className="btn sm"
+          disabled={importAction.loading}
           onClick={() => importInputRef.current?.click()}
           title="从 JSON 环境配置包一键导入新环境"
         >
-          <Upload size={12} /> 导入环境包
+          {importAction.loading ? (
+            <>
+              <Loader2 size={12} className="animate-spin" /> 导入中…
+            </>
+          ) : (
+            <>
+              <Upload size={12} /> 导入环境包
+            </>
+          )}
         </button>
         <button
           className="btn sm"
@@ -740,7 +812,7 @@ export default function ProfilesPage() {
           accept=".json"
           onChange={(e) => {
             const f = e.target.files?.[0]
-            if (f) void handleImportFile(f)
+            if (f) void importAction.run(f)
             e.target.value = ''
           }}
         />
@@ -778,7 +850,7 @@ export default function ProfilesPage() {
                     {p.pid ? `PID ${p.pid}${p.processName ? `（${p.processName}）` : ''}` : '未监听'}
                   </span>
                   <span className="spacer" />
-                  {p.url && (
+                  {hasAuthToken(p.url) ? (
                     <button
                       className="btn sm"
                       title="浏览器应用窗口打开（网址应用化，独立窗口）"
@@ -786,6 +858,10 @@ export default function ProfilesPage() {
                     >
                       <Globe size={12} /> 打开 ↗
                     </button>
+                  ) : (
+                    <span className="muted" title="认证地址（含 token）尚未生成，无 token 的地址会返回 401">
+                      地址未就绪
+                    </span>
                   )}
                 </div>
               ))}
@@ -867,7 +943,11 @@ export default function ProfilesPage() {
                 {p.exists ? `${p.bundles.length} 个 bundle · ${Object.keys(p.dependencies).length} 个依赖` : '（目录缺失）'}
                 {p.port ? ` · 端口 ${p.port}` : ''}
               </p>
-              {p.url && <p className="muted">地址：{p.url}</p>}
+              {p.url ? (
+                <p className="muted">地址：{p.url}</p>
+              ) : (p.running || p.starting) ? (
+                <p className="muted">地址未就绪</p>
+              ) : null}
               {p.error && <p className="muted"><AlertTriangle size={12} style={{ verticalAlign: 'middle' }} /> {p.error}</p>}
               {dshInstances.length > 0 && (
                 <div className="row" style={{ marginTop: 8 }}>
@@ -876,7 +956,8 @@ export default function ProfilesPage() {
                     className="select"
                     style={{ padding: '4px 8px', fontSize: 12 }}
                     value={byProfileVersion[p.name] ?? ''}
-                    onChange={(e) => void setProfileVersion(p.name, e.target.value)}
+                    disabled={versionAction.loading}
+                    onChange={(e) => void versionAction.run(p.name, e.target.value)}
                   >
                     <option value="">{t('common.default')}</option>
                     {dshInstances.map((inst) => (
@@ -921,7 +1002,7 @@ export default function ProfilesPage() {
                     />
                   </>
                 )}
-                {p.running && p.url && (
+                {hasAuthToken(p.url) ? (
                   <button
                     className="btn btn-glow-primary sm"
                     title="浏览器应用窗口打开（网址应用化，独立窗口）"
@@ -929,13 +1010,26 @@ export default function ProfilesPage() {
                   >
                     <Globe size={13} /> Web 版
                   </button>
-                )}
+                ) : (p.running || p.starting) ? (
+                  <span className="muted" title="认证地址（含 token）尚未生成，无 token 的地址会返回 401">
+                    地址未就绪
+                  </span>
+                ) : null}
                 <button
                   className="btn btn-glow-accent sm"
+                  disabled={desktopBusy === p.name}
                   title={desktopInstalled ? '以 DSH Desktop 官方桌面端打开该环境' : '尝试唤醒 DSH Desktop 官方客户端'}
-                  onClick={() => void handleOpenDesktop(p.name)}
+                  onClick={() => void handleOpenDesktop(p.name, p.url)}
                 >
-                  <Monitor size={13} /> 桌面版
+                  {desktopBusy === p.name ? (
+                    <>
+                      <Loader2 size={13} className="animate-spin" /> 唤醒中…
+                    </>
+                  ) : (
+                    <>
+                      <Monitor size={13} /> 桌面版
+                    </>
+                  )}
                 </button>
                 <button className="btn sm" onClick={() => viewLog(p.name)}>
                   <FileText size={12} /> {logFor === p.name ? '收起' : '日志'}
@@ -1157,8 +1251,16 @@ export default function ProfilesPage() {
                 onChange={(e) => setNewSnapshotDesc(e.target.value)}
                 onKeyDown={(e) => { if (e.key === 'Enter') void handleCreateSnapshot() }}
               />
-              <button className="btn primary" onClick={() => void handleCreateSnapshot()}>
-                <Plus size={12} /> 创建快照
+              <button className="btn primary" disabled={snapshotBusy === 'create'} onClick={() => void handleCreateSnapshot()}>
+                {snapshotBusy === 'create' ? (
+                  <>
+                    <Loader2 size={12} className="animate-spin" /> 创建中…
+                  </>
+                ) : (
+                  <>
+                    <Plus size={12} /> 创建快照
+                  </>
+                )}
               </button>
             </div>
 
@@ -1199,24 +1301,41 @@ export default function ProfilesPage() {
                     <div style={{ display: 'flex', gap: 6 }}>
                       <button
                         className="btn sm"
+                        disabled={snapshotBusy === `lock:${snap.id}`}
                         onClick={() => void handleToggleLock(snap.id, snap.isLocked)}
                         title={snap.isLocked ? '已锁定（免淘汰），点击解锁' : '未锁定，点击锁定保护'}
                       >
-                        {snap.isLocked ? <><Unlock size={12} /> 解锁</> : <><Lock size={12} /> 锁定</>}
+                        {snapshotBusy === `lock:${snap.id}` ? (
+                          <><Loader2 size={12} className="animate-spin" /> 处理中…</>
+                        ) : snap.isLocked ? (
+                          <><Unlock size={12} /> 解锁</>
+                        ) : (
+                          <><Lock size={12} /> 锁定</>
+                        )}
                       </button>
                       <button
                         className="btn sm primary"
+                        disabled={snapshotBusy === `restore:${snap.id}`}
                         onClick={() => void handleRestoreSnapshot(snap.id)}
                         title="原子回滚此快照"
                       >
-                        <RotateCcw size={12} /> 回滚
+                        {snapshotBusy === `restore:${snap.id}` ? (
+                          <><Loader2 size={12} className="animate-spin" /> 回滚中…</>
+                        ) : (
+                          <><RotateCcw size={12} /> 回滚</>
+                        )}
                       </button>
                       <button
                         className="btn sm danger"
+                        disabled={snapshotBusy === `delete:${snap.id}`}
                         onClick={() => void handleDeleteSnapshot(snap.id)}
                         title="删除此快照"
                       >
-                        <Trash2 size={12} />
+                        {snapshotBusy === `delete:${snap.id}` ? (
+                          <Loader2 size={12} className="animate-spin" />
+                        ) : (
+                          <Trash2 size={12} />
+                        )}
                       </button>
                     </div>
                   </div>

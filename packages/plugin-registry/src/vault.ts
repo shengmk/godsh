@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, cpSync, writeFileSync, lstatSync, statSync, symlinkSync, renameSync } from 'node:fs'
+import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, cpSync, writeFileSync, lstatSync, statSync, symlinkSync, renameSync, realpathSync } from 'node:fs'
 import { basename, dirname, join, resolve, sep } from 'node:path'
 import { DATA_DIR, run, ensureCompatibilityShims } from '@godsh/core'
 import { auditPackage, type PluginAuditReport, type SecurityLevel } from '@godsh/security'
@@ -103,6 +103,33 @@ function removePathSafe(p: string): void {
     try {
       rmSync(p, { recursive: true, force: true })
     } catch {}
+  }
+}
+
+/** 读取某物理目录 package.json 的运行时依赖名与**声明范围**（dependencies 优先于 peerDependencies）。 */
+function readPackageDependencySpecs(dir: string): { name: string; range: string }[] {
+  try {
+    const parsed = JSON.parse(readFileSync(join(dir, 'package.json'), 'utf8')) as {
+      dependencies?: Record<string, string>
+      peerDependencies?: Record<string, string>
+    }
+    const out = new Map<string, string>()
+    for (const [n, r] of Object.entries(parsed.peerDependencies ?? {})) out.set(n, r)
+    // dependencies 覆盖 peerDependencies：真正声明为依赖时以它为准
+    for (const [n, r] of Object.entries(parsed.dependencies ?? {})) out.set(n, r)
+    return [...out.entries()].map(([name, range]) => ({ name, range }))
+  } catch {
+    return []
+  }
+}
+
+/** 读取某物理目录 manifest 的插件类型（bundle / both / client / unknown）。 */
+function readPackageKind(dir: string): PluginKind {
+  try {
+    const parsed = JSON.parse(readFileSync(join(dir, 'package.json'), 'utf8')) as PluginManifest
+    return inspectManifest(parsed).kind
+  } catch {
+    return 'unknown'
   }
 }
 
@@ -693,6 +720,8 @@ export class VaultManager {
     error?: string
     /** 因互斥被阻断时给出冲突插件名 */
     blockedBy?: string[]
+    /** 本次从插件自身 package.json 推导并一并注入的子依赖（契约表未覆盖的部分） */
+    derivedCompanions?: string[]
   }> {
     const data = this.readData()
     const plugin = data.plugins.find((p) => p.id === id || p.name === id)
@@ -778,6 +807,31 @@ export class VaultManager {
           return fail(`伴随依赖 ${comp.pkg} 的物理源就是目标环境自身，拒绝注入`)
         }
         companionPlans.push({ name: comp.pkg, version: comp.version, isBundle: Boolean(comp.isBundle), src: compSrc })
+      }
+
+      // 契约表只覆盖极少数伴随关系（实测 82 个插件间 39 条真实依赖边，契约仅 1 条）。
+      // 因此再按**插件自己的 package.json** 推导一遍：凡其依赖在沙箱里有物理包的，一并注入。
+      // 这修的是「父插件装上了、子插件没装 → 插件树不完整 → 环境打不开」（bug 3 的注入侧）。
+      const derivedCompanions: string[] = []
+      for (const { name: depName, range } of readPackageDependencySpecs(sourceDir)) {
+        if (OFFICIAL_BUNDLES.has(depName)) continue
+        if (companionPlans.some((c) => c.name === depName)) continue
+        if (Object.hasOwn(deps, depName) && isResolvableInProfile(profileDir, depName)) continue
+        const depPlugin = data.plugins.find((p) => p.name === depName)
+        if (!depPlugin) continue // 沙箱里没有 → 交给 dsh/pnpm 自行解析，不阻断本次注入
+        const depSrc = this.resolvePluginSourceDir(depPlugin)
+        if (!depSrc || !existsSync(join(depSrc, 'package.json'))) continue
+        const depDest = join(profileNm, ...depName.split('/'))
+        if (resolve(depSrc).toLowerCase() === resolve(depDest).toLowerCase()) continue
+        const depKind = readPackageKind(depSrc)
+        companionPlans.push({
+          name: depName,
+          // 优先沿用父插件声明的版本范围，避免凭空造出一个可能与上游要求冲突的范围
+          version: range || (depPlugin.version ? `^${depPlugin.version}` : '*'),
+          isBundle: depKind === 'bundle' || depKind === 'both',
+          src: depSrc,
+        })
+        derivedCompanions.push(depName)
       }
 
       // ---------- 2. 先落物理（可回滚） ----------
@@ -884,6 +938,7 @@ export class VaultManager {
         isJunction: linkOutcome === 'junction',
         shimsApplied,
         conflicts: [] as string[],
+        derivedCompanions,
       }
     })
   }
@@ -1114,6 +1169,24 @@ export class VaultManager {
         }
       } catch {}
 
+      // 子插件识别（bug 5 收尾）：若某个包被**同一 node_modules 内的其它包**声明为依赖，
+      // 它就是「附属子插件」，不应被当成独立沙箱条目纳管。
+      // 否则用户删掉它之后再点「一键收割」，它会以新的 `vault-harvested-*` id 复活 —— 表现为「怎么删都删不掉」。
+      const childNames = new Set<string>()
+      for (const item of scanDirs) {
+        try {
+          const m = JSON.parse(readFileSync(join(item.path, 'package.json'), 'utf8')) as {
+            dependencies?: Record<string, string>
+            peerDependencies?: Record<string, string>
+          }
+          for (const dep of [...Object.keys(m.dependencies ?? {}), ...Object.keys(m.peerDependencies ?? {})]) {
+            childNames.add(dep)
+          }
+        } catch {
+          /* 读不到 manifest 的包不参与子插件判定 */
+        }
+      }
+
       for (const item of scanDirs) {
         if (knownNames.has(item.name)) {
           // 已存在，确保 installedProfiles 记录了此 profile
@@ -1137,9 +1210,10 @@ export class VaultManager {
           continue
         }
 
-        // 仅收割具有 bundle / client 或 dsh 特征的包
+        // 仅收割具有 bundle / client 或 dsh 特征的包；并排除「被别人依赖的子插件」
         const isDshBundle = manifest.dsh?.bundle || item.name.includes('dsh') || item.name.includes('theme')
         if (!isDshBundle) continue
+        if (childNames.has(item.name)) continue
 
         const version = manifest.version || '1.0.0'
         const sanitized = item.name.replace(/[^a-zA-Z0-9@._-]/g, '_')
@@ -1224,7 +1298,52 @@ export class VaultManager {
   /**
    * 优化 5: 沙箱垃圾大扫除 (Garbage Collection)
    */
-  async garbageCollect(profilesDir: string): Promise<{ freedBytes: number; removedDirs: string[] }> {
+  /**
+   * 收集所有 Profile 的 `node_modules` 中、指向沙箱池内的链接目标目录（小写绝对路径）。
+   *
+   * 用途（bug 5 收尾）：GC 删池目录前必须先知道「谁还链着它」。
+   * 旧实现只按「是否被某条索引记录解析到」判断，于是删掉一个记录后池目录被判为孤儿并删除，
+   * 而 Profile 里指向它的 junction 立刻变成**死链** —— 这就是「删完再点沙箱大扫除 → 环境打不开」的成因。
+   */
+  private collectLinkedStoreDirs(profilesDir: string): Set<string> {
+    const out = new Set<string>()
+    let profiles: string[]
+    try {
+      profiles = readdirSync(profilesDir, { withFileTypes: true })
+        .filter((d) => d.isDirectory())
+        .map((d) => d.name)
+    } catch {
+      return out
+    }
+    const consider = (p: string) => {
+      try {
+        if (!lstatSync(p).isSymbolicLink()) return
+        const target = realpathSync(p)
+        if (this.isInsideStoreDir(target)) out.add(resolve(target).toLowerCase())
+      } catch {
+        /* 死链本身就取不到 realpath，忽略 */
+      }
+    }
+    for (const prof of profiles) {
+      const nm = join(profilesDir, prof, 'node_modules')
+      if (!existsSync(nm)) continue
+      try {
+        for (const entry of readdirSync(nm, { withFileTypes: true })) {
+          const p = join(nm, entry.name)
+          if (entry.name.startsWith('@')) {
+            try {
+              for (const sub of readdirSync(p, { withFileTypes: true })) consider(join(p, sub.name))
+            } catch {}
+          } else {
+            consider(p)
+          }
+        }
+      } catch {}
+    }
+    return out
+  }
+
+  async garbageCollect(profilesDir: string): Promise<{ freedBytes: number; removedDirs: string[]; keptDirs: string[] }> {
     const data = this.readData()
     const activeDirs = new Set<string>()
 
@@ -1234,26 +1353,35 @@ export class VaultManager {
       if (dir) activeDirs.add(dir.toLowerCase())
     }
 
+    // 反向防护：仍被某个 Profile 链接指着的池目录一律保留，避免制造死链
+    const linkedDirs = this.collectLinkedStoreDirs(profilesDir)
+
     let freedBytes = 0
     const removedDirs: string[] = []
+    const keptDirs: string[] = []
 
     try {
       const entries = readdirSync(this.storeDir, { withFileTypes: true })
       for (const e of entries) {
         if (!e.isDirectory()) continue
         const full = join(this.storeDir, e.name)
-        if (!activeDirs.has(full.toLowerCase())) {
-          const sz = getDirectorySize(full)
-          try {
-            rmSync(full, { recursive: true, force: true })
-            freedBytes += sz
-            removedDirs.push(e.name)
-          } catch {}
+        const key = full.toLowerCase()
+        if (activeDirs.has(key)) continue
+        if (linkedDirs.has(key)) {
+          // 仍被环境引用 → 保留并如实上报，而不是静默删除制造死链
+          keptDirs.push(e.name)
+          continue
         }
+        const sz = getDirectorySize(full)
+        try {
+          rmSync(full, { recursive: true, force: true })
+          freedBytes += sz
+          removedDirs.push(e.name)
+        } catch {}
       }
     } catch {}
 
-    return { freedBytes, removedDirs }
+    return { freedBytes, removedDirs, keptDirs }
   }
 
   /**

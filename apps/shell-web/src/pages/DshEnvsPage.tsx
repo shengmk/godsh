@@ -14,8 +14,9 @@ import {
 import { api } from '../api'
 import type { DshEnv, DshEnvsInfo, DshStatus, ProfileView } from '../types'
 import { PageSkeleton, Toast } from '../components'
-import { useToast } from '../hooks'
+import { useAsyncAction, useToast } from '../hooks'
 import { useI18n } from '../i18n'
+import { usePageRefresh } from '../refresh'
 
 const KIND_LABEL: Record<string, string> = { base: 'base 主环境', managed: '并列环境', external: '外部检测' }
 
@@ -27,9 +28,28 @@ export default function DshEnvsPage() {
   const [envName, setEnvName] = useState('')
   const [envVersion, setEnvVersion] = useState('')
   const [refreshing, setRefreshing] = useState(false)
+  // bug 1：按控件键控的忙碌标记（如 activate-<id> / remove-<id> / profile-<name>），
+  // 每个控件各自禁用并显示进度，不同行之间互不干扰
+  const [busyKeys, setBusyKeys] = useState<string[]>([])
+  const busyRef = useRef<Set<string>>(new Set())
   const pollTimer = useRef<ReturnType<typeof setInterval> | null>(null)
   const { toast, show } = useToast()
   const { t } = useI18n()
+
+  const isBusy = (key: string) => busyKeys.includes(key)
+
+  /** 统一包装用户触发操作：置忙（按钮禁用 + 进度提示）→ 执行 → 复位；失败提示沿用各 handler 既有的 toast 文案 */
+  async function runBusy(key: string, action: () => Promise<void>) {
+    if (busyRef.current.has(key)) return
+    busyRef.current.add(key)
+    setBusyKeys(Array.from(busyRef.current))
+    try {
+      await action()
+    } finally {
+      busyRef.current.delete(key)
+      setBusyKeys(Array.from(busyRef.current))
+    }
+  }
 
   async function load() {
     try {
@@ -57,15 +77,27 @@ export default function DshEnvsPage() {
     }
   }
 
-  async function handleClearTasks() {
-    try {
+  // bug 7：把本页既有的 load 注册到全局刷新总线（不新增任何请求逻辑）
+  usePageRefresh(load, 'dsh-envs')
+
+  // bug 1：清空日志 —— 置忙（按钮禁用 + 进度提示），失败弹出真实错误信息
+  const { run: clearTaskLogs, loading: clearingTasks } = useAsyncAction(
+    async () => {
       await api.dshClearTasks()
       await load()
-      show('已清空历史任务日志')
-    } catch (err) {
-      show(err instanceof Error ? err.message : String(err), true)
-    }
-  }
+    },
+    { show, success: '已清空历史任务日志' },
+  )
+
+  // bug 1：初始化官方默认模板 —— 置忙（按钮禁用 + 进度提示），失败弹出真实错误信息
+  const { run: initHome, loading: initingHome } = useAsyncAction(
+    async () => {
+      const r = await api.dshInitHome()
+      await load()
+      return r
+    },
+    { show, success: (r) => `已初始化：${r.home}（${r.created.join(', ') || '模板已存在'}）` },
+  )
 
   useEffect(() => {
     void load()
@@ -97,79 +129,80 @@ export default function DshEnvsPage() {
     if (info) prevTasks.current = info.tasks
   }, [info])
 
-  async function installBase() {
-    try {
+  // bug 1：自动安装官方 dsh —— 置忙（按钮禁用 + 进度提示），失败弹出真实错误信息
+  const { run: installBase, loading: installingBase } = useAsyncAction(
+    async () => {
       await api.dshInstall()
-      show('已开始安装官方 dsh（base 主环境），请稍候…')
       setTimeout(() => void load(), 1000)
-    } catch (e) {
-      show(e instanceof Error ? e.message : String(e), true)
-    }
-  }
+    },
+    { show, success: '已开始安装官方 dsh（base 主环境），请稍候…' },
+  )
 
-  async function updateBase() {
-    try {
+  // bug 1：更新 base 到最新版
+  const { run: updateBase, loading: updatingBase } = useAsyncAction(
+    async () => {
       await api.dshUpdate()
-      show('已开始更新 base 到最新版…')
       setTimeout(() => void load(), 1000)
-    } catch (e) {
-      show(e instanceof Error ? e.message : String(e), true)
-    }
-  }
+    },
+    { show, success: '已开始更新 base 到最新版…' },
+  )
 
-  async function addEnv() {
-    const name = envName.trim()
-    if (!name) return show('请填写环境名', true)
-    try {
-      await api.dshEnvAdd(name, envVersion.trim() || undefined)
-      show(`已开始安装并列环境 ${name}…`)
+  // bug 1：添加并列环境（环境名先校验，校验失败沿用原提示）
+  const { run: addEnv, loading: addingEnv } = useAsyncAction(
+    async (name: string, version: string) => {
+      await api.dshEnvAdd(name, version || undefined)
       setEnvName('')
       setEnvVersion('')
       setTimeout(() => void load(), 1000)
-    } catch (e) {
-      show(e instanceof Error ? e.message : String(e), true)
+      return name
+    },
+    { show, success: (name: string) => `已开始安装并列环境 ${name}…` },
+  )
+
+  function handleAddEnv() {
+    const name = envName.trim()
+    if (!name) {
+      show('请填写环境名', true)
+      return
     }
+    void addEnv(name, envVersion.trim())
   }
 
   async function removeEnv(env: DshEnv) {
     if (!window.confirm(`确定删除并列环境 ${env.id}（${env.dir}）？此操作不可撤销。`)) return
-    try {
-      await api.dshEnvRemove(env.id)
-      show(`已删除环境 ${env.id}`)
-      await load()
-    } catch (e) {
-      show(e instanceof Error ? e.message : String(e), true)
-    }
+    await runBusy(`remove-${env.id}`, async () => {
+      try {
+        await api.dshEnvRemove(env.id)
+        show(`已删除环境 ${env.id}`)
+        await load()
+      } catch (e) {
+        show(e instanceof Error ? e.message : String(e), true)
+      }
+    })
   }
 
   async function activate(env: DshEnv) {
-    try {
-      await api.dshEnvActivate(env.id)
-      show(`已设为默认：${env.id}`)
-      await load()
-    } catch (e) {
-      show(e instanceof Error ? e.message : String(e), true)
-    }
+    await runBusy(`activate-${env.id}`, async () => {
+      try {
+        await api.dshEnvActivate(env.id)
+        show(`已设为默认：${env.id}`)
+        await load()
+      } catch (e) {
+        show(e instanceof Error ? e.message : String(e), true)
+      }
+    })
   }
 
   async function setProfileEnv(profile: string, value: string) {
-    try {
-      await api.updateSettings({ dsh: { byProfile: { [profile]: value } } })
-      show(value ? `已为 ${profile} 指定环境 ${value}` : `已为 ${profile} 恢复默认`)
-      await load()
-    } catch (e) {
-      show(e instanceof Error ? e.message : String(e), true)
-    }
-  }
-
-  async function initHome() {
-    try {
-      const r = await api.dshInitHome()
-      show(`已初始化：${r.home}（${r.created.join(', ') || '模板已存在'}）`)
-      await load()
-    } catch (e) {
-      show(e instanceof Error ? e.message : String(e), true)
-    }
+    await runBusy(`profile-${profile}`, async () => {
+      try {
+        await api.updateSettings({ dsh: { byProfile: { [profile]: value } } })
+        show(value ? `已为 ${profile} 指定环境 ${value}` : `已为 ${profile} 恢复默认`)
+        await load()
+      } catch (e) {
+        show(e instanceof Error ? e.message : String(e), true)
+      }
+    })
   }
 
   if (!info) return <PageSkeleton />
@@ -255,8 +288,14 @@ export default function DshEnvsPage() {
                   <Copy size={11} /> 复制日志
                 </button>
               )}
-              <button className="btn sm" onClick={() => void handleClearTasks()}>
-                清空日志
+              <button
+                className="btn sm"
+                disabled={clearingTasks}
+                onClick={() => void clearTaskLogs()}
+                style={{ display: 'inline-flex', alignItems: 'center', gap: 5 }}
+              >
+                {clearingTasks ? <RefreshCw size={11} className="animate-spin" /> : <Trash2 size={11} />}
+                {clearingTasks ? '清空中…' : '清空日志'}
               </button>
             </div>
           </div>
@@ -290,11 +329,23 @@ export default function DshEnvsPage() {
           </div>
           <p className="card-sub">一键安装官方 dsh 并建立 base 主环境（类比 Anaconda base），随后可添加并列环境。</p>
           <div className="row" style={{ marginTop: 8 }}>
-            <button className="btn primary" onClick={() => void installBase()}>
-              自动安装官方 dsh（创建 base 主环境）
+            <button
+              className="btn primary"
+              disabled={installingBase}
+              onClick={() => void installBase()}
+              style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}
+            >
+              {installingBase && <RefreshCw size={13} className="animate-spin" />}
+              {installingBase ? '安装中…' : '自动安装官方 dsh（创建 base 主环境）'}
             </button>
-            <button className="btn" onClick={() => void initHome()}>
-              初始化官方默认模板
+            <button
+              className="btn"
+              disabled={initingHome}
+              onClick={() => void initHome()}
+              style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}
+            >
+              {initingHome && <RefreshCw size={13} className="animate-spin" />}
+              {initingHome ? '初始化中…' : '初始化官方默认模板'}
             </button>
           </div>
         </div>
@@ -333,18 +384,36 @@ export default function DshEnvsPage() {
               </div>
               <span className="spacer" />
               {activeId !== e.id && (
-                <button className="btn sm" onClick={() => void activate(e)} style={{ display: 'inline-flex', alignItems: 'center', gap: 5 }}>
-                  <Check size={11} /> {t('btn.setDefault')}
+                <button
+                  className="btn sm"
+                  disabled={isBusy(`activate-${e.id}`)}
+                  onClick={() => void activate(e)}
+                  style={{ display: 'inline-flex', alignItems: 'center', gap: 5 }}
+                >
+                  {isBusy(`activate-${e.id}`) ? <RefreshCw size={11} className="animate-spin" /> : <Check size={11} />}
+                  {isBusy(`activate-${e.id}`) ? '切换中…' : t('btn.setDefault')}
                 </button>
               )}
               {e.kind === 'managed' && (
-                <button className="btn danger sm" onClick={() => void removeEnv(e)} style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
-                  <Trash2 size={11} /> 删除
+                <button
+                  className="btn danger sm"
+                  disabled={isBusy(`remove-${e.id}`)}
+                  onClick={() => void removeEnv(e)}
+                  style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}
+                >
+                  {isBusy(`remove-${e.id}`) ? <RefreshCw size={11} className="animate-spin" /> : <Trash2 size={11} />}
+                  {isBusy(`remove-${e.id}`) ? '删除中…' : '删除'}
                 </button>
               )}
               {e.kind === 'base' && (
-                <button className="btn sm" onClick={() => void updateBase()} style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
-                  <ArrowUpCircle size={11} /> 更新到最新
+                <button
+                  className="btn sm"
+                  disabled={updatingBase}
+                  onClick={() => void updateBase()}
+                  style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}
+                >
+                  {updatingBase ? <RefreshCw size={11} className="animate-spin" /> : <ArrowUpCircle size={11} />}
+                  {updatingBase ? '更新中…' : '更新到最新'}
                 </button>
               )}
             </div>
@@ -372,8 +441,14 @@ export default function DshEnvsPage() {
               ))
             )}
           </select>
-          <button className="btn primary" onClick={() => void addEnv()} style={{ display: 'inline-flex', alignItems: 'center', gap: 5 }}>
-            <Plus size={13} /> 添加
+          <button
+            className="btn primary"
+            disabled={addingEnv}
+            onClick={handleAddEnv}
+            style={{ display: 'inline-flex', alignItems: 'center', gap: 5 }}
+          >
+            {addingEnv ? <RefreshCw size={13} className="animate-spin" /> : <Plus size={13} />}
+            {addingEnv ? '添加中…' : '添加'}
           </button>
         </div>
         {tasks.length > 0 && (
@@ -398,6 +473,7 @@ export default function DshEnvsPage() {
             <select
               className="select"
               value={byProfile[p.name] ?? ''}
+              disabled={isBusy(`profile-${p.name}`)}
               onChange={(e) => void setProfileEnv(p.name, e.target.value)}
             >
               <option value="">（默认）</option>
@@ -407,6 +483,11 @@ export default function DshEnvsPage() {
                 </option>
               ))}
             </select>
+            {isBusy(`profile-${p.name}`) && (
+              <span className="muted" style={{ display: 'inline-flex', alignItems: 'center', gap: 4, fontSize: 12 }}>
+                <RefreshCw size={11} className="animate-spin" /> 保存中…
+              </span>
+            )}
           </div>
         ))}
       </div>
@@ -415,8 +496,14 @@ export default function DshEnvsPage() {
         <div className="card-title">DSH_HOME / 官方模板</div>
         <p className="card-sub">初始化 DSH_HOME 与官方默认 web 模板（base + web-app bundles）。</p>
         <div className="row" style={{ marginTop: 8 }}>
-          <button className="btn" onClick={() => void initHome()} style={{ display: 'inline-flex', alignItems: 'center', gap: 5 }}>
-            <Sparkles size={13} /> 初始化官方默认模板
+          <button
+            className="btn"
+            disabled={initingHome}
+            onClick={() => void initHome()}
+            style={{ display: 'inline-flex', alignItems: 'center', gap: 5 }}
+          >
+            {initingHome ? <RefreshCw size={13} className="animate-spin" /> : <Sparkles size={13} />}
+            {initingHome ? '初始化中…' : '初始化官方默认模板'}
           </button>
         </div>
       </div>

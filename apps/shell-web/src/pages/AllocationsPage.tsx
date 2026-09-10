@@ -22,8 +22,9 @@ import {
 import { api } from '../api'
 import type { Allocation, AvailablePlugin, MarketCategory, ProfileView, VaultPlugin } from '../types'
 import { ContextMenu, EmptyState, Toast, type MenuState } from '../components'
-import { useToast } from '../hooks'
+import { useAsyncAction, useToast } from '../hooks'
 import { useI18n } from '../i18n'
+import { usePageRefresh } from '../refresh'
 import { taskManager } from '../tasks'
 
 /** 统一列表条目：已分配卡片 或 可用插件 */
@@ -71,6 +72,10 @@ export default function AllocationsPage() {
   const [importCategory, setImportCategory] = useState('dev')
   const [deployTargetProfile, setDeployTargetProfile] = useState<Record<string, string>>({})
   const [vaultChecking, setVaultChecking] = useState(false)
+  /** 本页刷新按钮的进行中状态（页面按钮与顶栏全局刷新共用同一份 load 逻辑） */
+  const [reloading, setReloading] = useState(false)
+  /** 单项/单目标操作的忙碌键集合（如 update:<分配id>、drop:<环境名>），用于禁用对应控件并显示转圈 */
+  const [busyKeys, setBusyKeys] = useState<Set<string>>(new Set())
 
   // 紧凑排版与框选多选状态
   const [compactMode, setCompactMode] = useState<boolean>(true)
@@ -79,8 +84,40 @@ export default function AllocationsPage() {
   const marqueeRef = useRef<{ startX: number; startY: number; currentX: number; currentY: number; profile: string } | null>(null)
 
   const dragRef = useRef<DragState | null>(null)
+  /** 拖放处理中标记（同步判断，避免渲染延迟期间重复触发拖放） */
+  const dropBusyRef = useRef(false)
   const { toast, show } = useToast()
   const { t } = useI18n()
+
+  /** 置位 / 复位某个操作的忙碌键 */
+  const markBusy = useCallback((key: string, on: boolean) => {
+    setBusyKeys((prev) => {
+      if (prev.has(key) === on) return prev
+      const next = new Set(prev)
+      if (on) next.add(key)
+      else next.delete(key)
+      return next
+    })
+  }, [])
+
+  /** 某个操作是否进行中（用于按钮 disabled 与转圈图标） */
+  const isBusy = useCallback((key: string) => busyKeys.has(key), [busyKeys])
+
+  /**
+   * 用忙碌键包裹一次异步操作：执行期间对应控件禁用 + 显示转圈，结束后自动复位。
+   * 异常兜底提示，避免出现未捕获的 rejection（各处理器内部原有 try/catch 的提示保持不变）。
+   */
+  async function withBusy<T>(key: string, action: () => Promise<T>): Promise<T | undefined> {
+    markBusy(key, true)
+    try {
+      return await action()
+    } catch (e) {
+      show(e instanceof Error ? e.message : String(e), true)
+      return undefined
+    } finally {
+      markBusy(key, false)
+    }
+  }
 
   // Esc 键清空选择
   useEffect(() => {
@@ -99,6 +136,7 @@ export default function AllocationsPage() {
   }, [])
 
   async function load() {
+    setReloading(true)
     try {
       void loadVault()
       const [p, a, av, cats] = await Promise.all([
@@ -114,6 +152,8 @@ export default function AllocationsPage() {
       setExpanded((prev) => (prev.size ? prev : new Set(p.length ? [p[0]!.name] : [])))
     } catch (e) {
       show(e instanceof Error ? e.message : String(e), true)
+    } finally {
+      setReloading(false)
     }
   }
 
@@ -127,6 +167,88 @@ export default function AllocationsPage() {
       show(e instanceof Error ? e.message : String(e), true)
     }
   }
+
+  /** 本页刷新按钮：复用同一份 load（顶栏全局刷新也走这里） */
+  async function handleReload() {
+    if (reloading) return
+    await load()
+  }
+
+  // 注册到全局刷新总线：顶栏刷新按钮（以及 KeepAlive 页面数据过期后重新可见）都会重新加载本页
+  usePageRefresh(load, 'allocations')
+
+  // ---------- 用户触发操作的统一包装（bug 1：可见进度 + 真实错误提示） ----------
+
+  /** 本地插件导入（弹窗确认按钮） */
+  const importLocalAction = useAsyncAction(
+    async (path: string, category: string) => {
+      const r = await api.vaultImportLocal(path, category)
+      setImportModalOpen(false)
+      setImportPath('')
+      await loadVault()
+      return r
+    },
+    { show, success: (r) => `已导入本地插件: ${r.plugin.name} (v${r.plugin.version})` },
+  )
+
+  /** 批量启用 / 禁用 */
+  const batchToggleAction = useAsyncAction(
+    async (ids: string[], enabled: boolean) => {
+      for (const id of ids) {
+        await api.setEnabled(id, enabled)
+      }
+      await refresh()
+      return { count: ids.length, enabled }
+    },
+    { show, success: ({ count, enabled }) => `已批量${enabled ? '启用' : '禁用'} ${count} 个插件` },
+  )
+
+  /** 批量纳管下至仓库沙箱 */
+  const batchHarvestAction = useAsyncAction(
+    async (items: { profile: string; pluginId: string }[]) => {
+      let count = 0
+      for (const it of items) {
+        await api.vaultHarvest(it.profile, it.pluginId)
+        count++
+      }
+      await loadVault()
+      setSelectedKeys(new Set())
+      return { count }
+    },
+    { show, success: ({ count }) => `已批量纳管 ${count} 个插件下至仓库沙箱！` },
+  )
+
+  /** 批量移除分配 */
+  const batchRemoveAction = useAsyncAction(
+    async (allocIds: string[]) => {
+      for (const id of allocIds) {
+        await api.removeAllocation(id)
+      }
+      setSelectedKeys(new Set())
+      await refresh()
+      return { count: allocIds.length }
+    },
+    { show, success: ({ count }) => `已批量移除 ${count} 项分配` },
+  )
+
+  /** 批量转移 / 复制到目标环境 */
+  const batchMoveAction = useAsyncAction(
+    async (items: { id: string; profile: string }[], targetProfile: string) => {
+      let moved = 0
+      for (const it of items) {
+        await api.moveWithInstall(it.id, targetProfile, it.profile)
+        moved++
+      }
+      setSelectedKeys(new Set())
+      await refresh()
+      return { moved, targetProfile }
+    },
+    { show, success: ({ moved, targetProfile }) => `已成功将 ${moved} 个插件批量分发复制到环境 [${targetProfile}]` },
+  )
+
+  /** 任一批量操作进行中：禁用其它批量入口，避免并发冲突 */
+  const batchBusy =
+    batchToggleAction.loading || batchHarvestAction.loading || batchRemoveAction.loading || batchMoveAction.loading
 
   useEffect(() => {
     void load()
@@ -182,13 +304,15 @@ export default function AllocationsPage() {
     const count = (addableByCategory[profile] ?? []).find((g) => g.category === category)?.items.length ?? 0
     if (count === 0) return
     if (!window.confirm(`确定把 ${zh}（${count} 个）全部分配到环境 ${profile}？`)) return
-    try {
-      const r = await api.assignCategory(profile, category)
-      show(`已分配 ${r.assigned} 个 ${zh} 插件到 ${profile}${r.skipped ? `（${r.skipped} 个已分配过）` : ''}`)
-      await refresh()
-    } catch (e) {
-      show(e instanceof Error ? e.message : String(e), true)
-    }
+    await withBusy(`assign:${profile}:${category}`, async () => {
+      try {
+        const r = await api.assignCategory(profile, category)
+        show(`已分配 ${r.assigned} 个 ${zh} 插件到 ${profile}${r.skipped ? `（${r.skipped} 个已分配过）` : ''}`)
+        await refresh()
+      } catch (e) {
+        show(e instanceof Error ? e.message : String(e), true)
+      }
+    })
   }
 
   // 每个环境的统一列表：已分配在前，可用插件在后
@@ -250,6 +374,8 @@ export default function AllocationsPage() {
         if (r.ok) {
           show(`已把 ${pluginId} 复制到 ${targetProfile}${r.installed ? '' : '（已自动安装）'}`)
           await refresh()
+        } else {
+          show(`跨环境转移 ${pluginId} → ${targetProfile} 失败`, true)
         }
       } catch (e) {
         show(e instanceof Error ? e.message : String(e), true)
@@ -342,14 +468,24 @@ export default function AllocationsPage() {
       dragRef.current = null
       setDrag(null)
       if (!d || !d.active || !overProfile) return
-      await handleDrop(overProfile, overKey, d.key)
+      // 拖放处理中不接受新的拖放（避免并发写坏顺序），并对外暴露可见进度
+      if (dropBusyRef.current) return
+      dropBusyRef.current = true
+      markBusy(`drop:${overProfile}`, true)
+      try {
+        await handleDrop(overProfile, overKey, d.key)
+      } finally {
+        dropBusyRef.current = false
+        markBusy(`drop:${overProfile}`, false)
+      }
     },
-    [handleDrop],
+    [handleDrop, markBusy],
   )
 
   const onGripPointerDown = useCallback((e: React.PointerEvent, key: string) => {
     e.preventDefault()
     e.stopPropagation()
+    if (dropBusyRef.current) return
     dragRef.current = { key, startX: e.clientX, startY: e.clientY, x: e.clientX, y: e.clientY, active: false, overProfile: null, overKey: null }
   }, [])
 
@@ -468,27 +604,31 @@ export default function AllocationsPage() {
         .filter((x): x is Allocation => x !== null)
       return [...prev.filter((x) => x.profile !== a.profile), ...reordered]
     })
-    try {
-      await api.reorderAllocations(a.profile, ids)
-    } catch (e) {
-      show(e instanceof Error ? e.message : String(e), true)
-      await refresh()
-    }
+    await withBusy(`move:${a.id}`, async () => {
+      try {
+        await api.reorderAllocations(a.profile, ids)
+      } catch (e) {
+        show(e instanceof Error ? e.message : String(e), true)
+        await refresh()
+      }
+    })
   }
 
-  // 单插件纳管下至沙箱
+  /** 单插件纳管下至沙箱 */
   async function harvestToVault(profile: string, pluginId: string) {
-    try {
-      const r = await api.vaultHarvest(profile, pluginId)
-      if (r.ok) {
-        show(`已成功将 ${pluginId} 纳管下至仓库沙箱！`)
-        await loadVault()
-      } else {
-        show(r.message || '纳管下至沙箱失败', true)
+    await withBusy(`harvest:${profile}:${pluginId}`, async () => {
+      try {
+        const r = await api.vaultHarvest(profile, pluginId)
+        if (r.ok) {
+          show(`已成功将 ${pluginId} 纳管下至仓库沙箱！`)
+          await loadVault()
+        } else {
+          show(r.message || '纳管下至沙箱失败', true)
+        }
+      } catch (e) {
+        show(e instanceof Error ? e.message : String(e), true)
       }
-    } catch (e) {
-      show(e instanceof Error ? e.message : String(e), true)
-    }
+    })
   }
 
   // 批量启用 / 禁用
@@ -500,15 +640,7 @@ export default function AllocationsPage() {
       }
     }
     if (idsToToggle.length === 0) return
-    try {
-      for (const id of idsToToggle) {
-        await api.setEnabled(id, enabled)
-      }
-      show(`已批量${enabled ? '启用' : '禁用'} ${idsToToggle.length} 个插件`)
-      await refresh()
-    } catch (e) {
-      show(e instanceof Error ? e.message : String(e), true)
-    }
+    await batchToggleAction.run(idsToToggle, enabled)
   }
 
   // 批量下至沙箱
@@ -521,18 +653,7 @@ export default function AllocationsPage() {
       }
     }
     if (itemsToHarvest.length === 0) return
-    try {
-      let count = 0
-      for (const it of itemsToHarvest) {
-        await api.vaultHarvest(it.profile, it.pluginId)
-        count++
-      }
-      show(`已批量纳管 ${count} 个插件下至仓库沙箱！`)
-      await loadVault()
-      setSelectedKeys(new Set())
-    } catch (e) {
-      show(e instanceof Error ? e.message : String(e), true)
-    }
+    await batchHarvestAction.run(itemsToHarvest)
   }
 
   // 批量移除分配
@@ -545,35 +666,16 @@ export default function AllocationsPage() {
     }
     if (allocIds.length === 0) return
     if (!window.confirm(`确定从环境中批量移除选中的 ${allocIds.length} 项分配？`)) return
-    try {
-      for (const id of allocIds) {
-        await api.removeAllocation(id)
-      }
-      show(`已批量移除 ${allocIds.length} 项分配`)
-      setSelectedKeys(new Set())
-      await refresh()
-    } catch (e) {
-      show(e instanceof Error ? e.message : String(e), true)
-    }
+    await batchRemoveAction.run(allocIds)
   }
 
   // 批量转移/复制到目标 Profile
   async function handleBatchMove(targetProfile: string) {
-    const items = [...selectedKeys].map((k) => parseKey(k)).filter(Boolean)
+    const items = [...selectedKeys]
+      .map((k) => parseKey(k))
+      .filter((x): x is { kind: 'alloc' | 'avail'; id: string; profile: string } => x !== null)
     if (items.length === 0) return
-    try {
-      let moved = 0
-      for (const it of items) {
-        if (!it) continue
-        await api.moveWithInstall(it.id, targetProfile, it.profile)
-        moved++
-      }
-      show(`已成功将 ${moved} 个插件批量分发复制到环境 [${targetProfile}]`)
-      setSelectedKeys(new Set())
-      await refresh()
-    } catch (e) {
-      show(e instanceof Error ? e.message : String(e), true)
-    }
+    await batchMoveAction.run(items, targetProfile)
   }
 
   function toggleSelectRow(key: string, e: React.MouseEvent | React.ChangeEvent) {
@@ -619,24 +721,28 @@ export default function AllocationsPage() {
   }
 
   async function toggle(a: Allocation) {
-    try {
-      await api.setEnabled(a.id, !a.enabled)
-      await refresh()
-    } catch (e) {
-      show(e instanceof Error ? e.message : String(e), true)
-    }
+    await withBusy(`toggle:${a.id}`, async () => {
+      try {
+        await api.setEnabled(a.id, !a.enabled)
+        await refresh()
+      } catch (e) {
+        show(e instanceof Error ? e.message : String(e), true)
+      }
+    })
   }
 
   /** 可用插件单击分配：立即把该插件分配到本环境（写回 patch）。 */
   async function assignAvail(profile: string, pluginId: string) {
-    try {
-      await api.allocate(profile, pluginId, pluginId, true)
-      show(`已分配 ${pluginId} → ${profile}`)
-      await refresh()
-    } catch (e) {
-      show(e instanceof Error ? e.message : String(e), true)
-      await refresh()
-    }
+    await withBusy(`assignAvail:${profile}:${pluginId}`, async () => {
+      try {
+        await api.allocate(profile, pluginId, pluginId, true)
+        show(`已分配 ${pluginId} → ${profile}`)
+        await refresh()
+      } catch (e) {
+        show(e instanceof Error ? e.message : String(e), true)
+        await refresh()
+      }
+    })
   }
 
   // ---------- 插件悬停简介 tooltip ----------
@@ -663,14 +769,16 @@ export default function AllocationsPage() {
       show('官方内核 bundle 由 dsh 自动维护，无需手动更新', true)
       return
     }
-    try {
-      const r = await api.installPlugin(a.profile, 'update', a.pluginId)
-      if (r.ok) show(`已更新 ${a.pluginId}`)
-      else show(r.message || `更新失败（${r.errorType ?? 'unknown'}）`, true)
-      await refresh()
-    } catch (e) {
-      show(e instanceof Error ? e.message : String(e), true)
-    }
+    await withBusy(`update:${a.id}`, async () => {
+      try {
+        const r = await api.installPlugin(a.profile, 'update', a.pluginId)
+        if (r.ok) show(`已更新 ${a.pluginId}`)
+        else show(r.message || `更新失败（${r.errorType ?? 'unknown'}）`, true)
+        await refresh()
+      } catch (e) {
+        show(e instanceof Error ? e.message : String(e), true)
+      }
+    })
   }
 
   /** 更新某环境全部已安装插件（后台任务 + 进度面板）。 */
@@ -693,16 +801,19 @@ export default function AllocationsPage() {
   async function updateAll(profile: string) {
     if (updatingProfile) return show(`正在更新 ${updatingProfile}，请稍候`, true)
     if (!window.confirm(`确定更新环境 ${profile} 的全部插件？`)) return
+    markBusy(`updateAll:${profile}`, true)
     setUpdatingProfile(profile)
     setUpdateLog('准备中…\n')
     setUpdateStatus('running')
 
     const res = await taskManager.startUpdateAllTask(profile, async (ok) => {
       show(ok ? `环境 ${profile} 插件更新完成` : `更新出错`)
+      markBusy(`updateAll:${profile}`, false)
       await refresh()
     })
 
     if (!res.ok) {
+      markBusy(`updateAll:${profile}`, false)
       setUpdatingProfile(null)
       show(res.message || '启动更新失败', true)
     }
@@ -714,13 +825,15 @@ export default function AllocationsPage() {
   }
 
   async function remove(a: Allocation) {
-    try {
-      await api.removeAllocation(a.id)
-      show(`已移除 ${a.pluginId}`)
-      await refresh()
-    } catch (e) {
-      show(e instanceof Error ? e.message : String(e), true)
-    }
+    await withBusy(`remove:${a.id}`, async () => {
+      try {
+        await api.removeAllocation(a.id)
+        show(`已移除 ${a.pluginId}`)
+        await refresh()
+      } catch (e) {
+        show(e instanceof Error ? e.message : String(e), true)
+      }
+    })
   }
 
   /** 卸载插件：智能卸载（依赖 → pnpm remove；纯 bundle → 从 bundles 移除不再加载），并同步移除分配记录。 */
@@ -738,36 +851,31 @@ export default function AllocationsPage() {
       ? '卸载 @deepseek-ai/dsh-web-app 后，该环境将失去 Web 界面（仅保留命令行能力）。确定继续？'
       : `确定从环境 ${a.profile} 卸载插件 ${a.pluginId}？`
     if (!window.confirm(hint)) return
-    try {
-      const r = await api.uninstallPlugin(a.profile, a.pluginId)
-      if (!r.ok) {
-        show(r.message || `卸载失败（${r.errorType ?? 'unknown'}）`, true)
-        return
-      }
-      // 卸载成功后同步移除分配记录（若仍存在）
+    await withBusy(`uninstall:${a.id}`, async () => {
       try {
-        await api.removeAllocation(a.id)
-      } catch {
-        /* 分配可能已被其它操作移除 */
+        const r = await api.uninstallPlugin(a.profile, a.pluginId)
+        if (!r.ok) {
+          show(r.message || `卸载失败（${r.errorType ?? 'unknown'}）`, true)
+          return
+        }
+        // 卸载成功后同步移除分配记录（若仍存在）
+        try {
+          await api.removeAllocation(a.id)
+        } catch {
+          /* 分配可能已被其它操作移除 */
+        }
+        show(`已卸载 ${a.pluginId} ← ${a.profile}`)
+        await refresh()
+      } catch (e) {
+        show(e instanceof Error ? e.message : String(e), true)
       }
-      show(`已卸载 ${a.pluginId} ← ${a.profile}`)
-      await refresh()
-    } catch (e) {
-      show(e instanceof Error ? e.message : String(e), true)
-    }
+    })
   }
 
   async function handleImportLocal() {
-    if (!importPath.trim()) return
-    try {
-      const r = await api.vaultImportLocal(importPath.trim(), importCategory)
-      show(`已导入本地插件: ${r.plugin.name} (v${r.plugin.version})`)
-      setImportModalOpen(false)
-      setImportPath('')
-      await loadVault()
-    } catch (e) {
-      show(e instanceof Error ? e.message : String(e), true)
-    }
+    const path = importPath.trim()
+    if (!path) return
+    await importLocalAction.run(path, importCategory)
   }
 
   async function handleDeployVault(plugin: VaultPlugin) {
@@ -776,29 +884,33 @@ export default function AllocationsPage() {
       show('请先选择目标环境', true)
       return
     }
-    try {
-      const r = await api.vaultDeploy(plugin.id, target)
-      if (r.companionAdded && r.companionAdded.length > 0) {
-        show(`已秒级分发到 ${target}，并自动补齐伴随驱动: ${r.companionAdded.join(', ')}`)
-      } else {
-        show(`已秒级分发 ${plugin.name} 到 ${target}`)
+    await withBusy(`deploy:${plugin.id}`, async () => {
+      try {
+        const r = await api.vaultDeploy(plugin.id, target)
+        if (r.companionAdded && r.companionAdded.length > 0) {
+          show(`已秒级分发到 ${target}，并自动补齐伴随驱动: ${r.companionAdded.join(', ')}`)
+        } else {
+          show(`已秒级分发 ${plugin.name} 到 ${target}`)
+        }
+        await refresh()
+        await loadVault()
+      } catch (e) {
+        show(e instanceof Error ? e.message : String(e), true)
       }
-      await refresh()
-      await loadVault()
-    } catch (e) {
-      show(e instanceof Error ? e.message : String(e), true)
-    }
+    })
   }
 
   async function handleRemoveVault(id: string) {
     if (!window.confirm('确定将该插件从仓库沙箱中移除？（不影响已分配的 Profile）')) return
-    try {
-      await api.vaultRemove(id)
-      show('已移出沙箱')
-      await loadVault()
-    } catch (e) {
-      show(e instanceof Error ? e.message : String(e), true)
-    }
+    await withBusy(`vaultRemove:${id}`, async () => {
+      try {
+        await api.vaultRemove(id)
+        show('已移出沙箱')
+        await loadVault()
+      } catch (e) {
+        show(e instanceof Error ? e.message : String(e), true)
+      }
+    })
   }
 
   async function handleCheckVaultUpdates() {
@@ -836,6 +948,14 @@ export default function AllocationsPage() {
 
   const totalAllocated = allocations.length
 
+  /** 正在处理拖放的目标环境（用于卡片上的进度标记） */
+  const dropBusyProfile = useMemo(() => {
+    const hit = Array.from(busyKeys).find((k) => k.startsWith('drop:'))
+    return hit ? hit.slice('drop:'.length) : null
+  }, [busyKeys])
+  /** 是否有拖放操作正在处理（用于全局进度提示） */
+  const dropBusy = dropBusyProfile !== null
+
   return (
     <>
       <div className="page-head">
@@ -857,8 +977,8 @@ export default function AllocationsPage() {
         >
           <SlidersHorizontal size={12} /> {compactMode ? '紧凑视图 (开)' : '舒适视图'}
         </button>
-        <button className="btn sm" onClick={() => load()}>
-          <RefreshCw size={12} /> 刷新
+        <button className="btn sm" disabled={reloading} onClick={() => void handleReload()} title="重新加载本页数据">
+          <RefreshCw size={12} className={reloading ? 'animate-spin' : ''} /> {reloading ? '刷新中…' : '刷新'}
         </button>
       </div>
 
@@ -941,6 +1061,7 @@ export default function AllocationsPage() {
                           className="input sm"
                           style={{ padding: '2px 6px', fontSize: 12 }}
                           value={deployTargetProfile[vp.id] || profiles[0]?.name || ''}
+                          disabled={isBusy(`deploy:${vp.id}`)}
                           onChange={(e) => setDeployTargetProfile({ ...deployTargetProfile, [vp.id]: e.target.value })}
                         >
                           {profiles.map((p) => (
@@ -951,20 +1072,30 @@ export default function AllocationsPage() {
                         </select>
                         <button
                           className="btn sm primary"
-                          title="秒级部署至目标环境"
+                          title={isBusy(`deploy:${vp.id}`) ? '分发中…' : '秒级部署至目标环境'}
+                          disabled={isBusy(`deploy:${vp.id}`)}
                           onClick={() => void handleDeployVault(vp)}
                           style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}
                         >
-                          <Zap size={11} /> 分发
+                          {isBusy(`deploy:${vp.id}`) ? (
+                            <>
+                              <RefreshCw size={11} className="animate-spin" /> 分发中…
+                            </>
+                          ) : (
+                            <>
+                              <Zap size={11} /> 分发
+                            </>
+                          )}
                         </button>
                       </div>
                       <button
                         className="btn sm danger"
                         style={{ padding: '2px 8px', display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}
-                        title="从沙箱移出"
+                        title={isBusy(`vaultRemove:${vp.id}`) ? '移出中…' : '从沙箱移出'}
+                        disabled={isBusy(`vaultRemove:${vp.id}`)}
                         onClick={() => void handleRemoveVault(vp.id)}
                       >
-                        <Trash2 size={12} />
+                        {isBusy(`vaultRemove:${vp.id}`) ? <RefreshCw size={12} className="animate-spin" /> : <Trash2 size={12} />}
                       </button>
                     </div>
                   </div>
@@ -1031,11 +1162,17 @@ export default function AllocationsPage() {
               </select>
             </div>
             <div className="row" style={{ justifyContent: 'flex-end', gap: 8 }}>
-              <button className="btn" onClick={() => setImportModalOpen(false)}>
+              <button className="btn" disabled={importLocalAction.loading} onClick={() => setImportModalOpen(false)}>
                 取消
               </button>
-              <button className="btn primary" onClick={() => void handleImportLocal()}>
-                确认导入
+              <button className="btn primary" disabled={importLocalAction.loading} onClick={() => void handleImportLocal()}>
+                {importLocalAction.loading ? (
+                  <>
+                    <RefreshCw size={12} className="animate-spin" /> 导入中…
+                  </>
+                ) : (
+                  '确认导入'
+                )}
               </button>
             </div>
           </div>
@@ -1074,16 +1211,23 @@ export default function AllocationsPage() {
                 <span className={`badge ${p.running ? 'running' : 'stopped'}`}>{p.running ? '运行中' : '已停止'}</span>
                 <span className="badge">{allocCount} 条分配</span>
                 {availCount > 0 && <span className="badge">{availCount} 个可添加</span>}
+                {dropBusyProfile === p.name && (
+                  <span className="badge info" style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+                    <RefreshCw size={11} className="animate-spin" /> 处理中…
+                  </span>
+                )}
                 <span className="spacer" />
                 <button
                   className="btn sm"
-                  title="更新该环境全部插件"
+                  title={isBusy(`updateAll:${p.name}`) ? '更新中…' : '更新该环境全部插件'}
+                  disabled={isBusy(`updateAll:${p.name}`)}
                   onClick={(e) => {
                     e.stopPropagation()
                     void updateAll(p.name)
                   }}
                 >
-                  <RefreshCw size={12} /> 全部更新
+                  <RefreshCw size={12} className={isBusy(`updateAll:${p.name}`) ? 'animate-spin' : ''} />{' '}
+                  {isBusy(`updateAll:${p.name}`) ? '更新中…' : '全部更新'}
                 </button>
                 <span className="muted" style={{ fontSize: 12 }}>
                   {p.exists ? `${p.bundles.length} bundle · ${Object.keys(p.dependencies).length} 依赖` : '（目录缺失）'}
@@ -1122,6 +1266,16 @@ export default function AllocationsPage() {
                       const isDragging = drag?.active && drag.key === key
                       const isDropLine = drag?.active && drag.overKey === key
                       const isSelected = selectedKeys.has(key)
+                      // 本行各操作是否进行中（禁用对应按钮并显示转圈 / 处理中）
+                      const idx = a ? (byProfile[p.name] ?? []).findIndex((x) => x.id === a.id) : -1
+                      const rowMoveBusy = !!a && isBusy(`move:${a.id}`)
+                      const rowToggleBusy = !!a && isBusy(`toggle:${a.id}`)
+                      const rowHarvestBusy = !!a && isBusy(`harvest:${a.profile}:${a.pluginId}`)
+                      const rowUpdateBusy = !!a && isBusy(`update:${a.id}`)
+                      const rowRemoveBusy = !!a && isBusy(`remove:${a.id}`)
+                      const rowUninstallBusy = !!a && isBusy(`uninstall:${a.id}`)
+                      const rowBusy =
+                        rowMoveBusy || rowToggleBusy || rowHarvestBusy || rowUpdateBusy || rowRemoveBusy || rowUninstallBusy
                       return (
                         <div
                           className={`alloc-row ${compactMode ? 'compact' : ''}${isSelected ? ' selected' : ''}${isDragging ? ' dragging' : ''}${isDropLine ? ' drop-line' : ''}`}
@@ -1163,59 +1317,87 @@ export default function AllocationsPage() {
                               </span>
                               <button
                                 className={`alloc-power-btn ${a.enabled ? 'on' : 'off'}`}
+                                disabled={rowToggleBusy}
                                 onClick={(e) => {
                                   e.stopPropagation()
                                   void toggle(a)
                                 }}
-                                title={a.enabled ? '点击禁用' : '点击启用'}
+                                title={rowToggleBusy ? '处理中…' : a.enabled ? '点击禁用' : '点击启用'}
                               >
-                                <Power size={11} /> {a.enabled ? '启用' : '禁用'}
+                                {rowToggleBusy ? <RefreshCw size={11} className="animate-spin" /> : <Power size={11} />}{' '}
+                                {a.enabled ? '启用' : '禁用'}
                               </button>
+                              {rowBusy && (
+                                <span className="badge info" style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+                                  <RefreshCw size={11} className="animate-spin" /> 处理中…
+                                </span>
+                              )}
                               <span className="spacer" />
                               <div className="alloc-action-group" onClick={(e) => e.stopPropagation()}>
                                 <button
                                   className="alloc-action-btn"
                                   onClick={() => void move(a, -1)}
-                                  disabled={(byProfile[p.name] ?? []).findIndex((x) => x.id === a.id) <= 0}
-                                  title="上移"
+                                  disabled={idx <= 0 || rowMoveBusy}
+                                  title={rowMoveBusy ? '处理中…' : '上移'}
                                 >
-                                  <ArrowUp size={12} />
+                                  {rowMoveBusy ? <RefreshCw size={12} className="animate-spin" /> : <ArrowUp size={12} />}
                                 </button>
                                 <button
                                   className="alloc-action-btn"
                                   onClick={() => void move(a, 1)}
-                                  disabled={(byProfile[p.name] ?? []).findIndex((x) => x.id === a.id) >= (byProfile[p.name] ?? []).length - 1}
-                                  title="下移"
+                                  disabled={idx < 0 || idx >= (byProfile[p.name] ?? []).length - 1 || rowMoveBusy}
+                                  title={rowMoveBusy ? '处理中…' : '下移'}
                                 >
-                                  <ArrowDown size={12} />
+                                  {rowMoveBusy ? <RefreshCw size={12} className="animate-spin" /> : <ArrowDown size={12} />}
                                 </button>
                                 <button
                                   className="alloc-action-btn"
                                   onClick={() => void harvestToVault(a.profile, a.pluginId)}
-                                  title="纳管下至仓库沙箱 (Vault)"
+                                  disabled={rowHarvestBusy}
+                                  title={rowHarvestBusy ? '纳管中…' : '纳管下至仓库沙箱 (Vault)'}
                                 >
-                                  <Package size={12} /> 沙箱
+                                  {rowHarvestBusy ? (
+                                    <>
+                                      <RefreshCw size={12} className="animate-spin" /> 纳管中…
+                                    </>
+                                  ) : (
+                                    <>
+                                      <Package size={12} /> 沙箱
+                                    </>
+                                  )}
                                 </button>
                                 <button
                                   className="alloc-action-btn"
-                                  title="更新此插件"
+                                  title={rowUpdateBusy ? '更新中…' : '更新此插件'}
+                                  disabled={rowUpdateBusy}
                                   onClick={() => void updatePlugin(a)}
                                 >
-                                  <RefreshCw size={12} /> 更新
+                                  <RefreshCw size={12} className={rowUpdateBusy ? 'animate-spin' : ''} />{' '}
+                                  {rowUpdateBusy ? '更新中…' : '更新'}
                                 </button>
                                 <button
                                   className="alloc-action-btn"
                                   onClick={() => void remove(a)}
-                                  title="移除分配"
+                                  disabled={rowRemoveBusy}
+                                  title={rowRemoveBusy ? '移除中…' : '移除分配'}
                                 >
-                                  <X size={12} /> 移除
+                                  {rowRemoveBusy ? (
+                                    <>
+                                      <RefreshCw size={12} className="animate-spin" /> 移除中…
+                                    </>
+                                  ) : (
+                                    <>
+                                      <X size={12} /> 移除
+                                    </>
+                                  )}
                                 </button>
                                 <button
                                   className="alloc-action-btn danger"
-                                  title="卸载插件（含依赖）"
+                                  title={rowUninstallBusy ? '卸载中…' : '卸载插件（含依赖）'}
+                                  disabled={rowUninstallBusy}
                                   onClick={() => void uninstall(a)}
                                 >
-                                  <Trash2 size={12} />
+                                  {rowUninstallBusy ? <RefreshCw size={12} className="animate-spin" /> : <Trash2 size={12} />}
                                 </button>
                               </div>
                             </>
@@ -1225,7 +1407,9 @@ export default function AllocationsPage() {
                     })}
 
                     {/* 可添加插件：按市场分类分组 */}
-                    {(addableByCategory[p.name] ?? []).map((group) => (
+                    {(addableByCategory[p.name] ?? []).map((group) => {
+                      const groupAssignBusy = isBusy(`assign:${p.name}:${group.category}`)
+                      return (
                       <div key={group.category} className="alloc-group">
                         <div className="alloc-group-head">
                           <span className="alloc-group-title" style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
@@ -1236,10 +1420,12 @@ export default function AllocationsPage() {
                           <span className="spacer" />
                           <button
                             className="btn sm"
-                            title={`把 ${group.zh} 分类全部 ${group.items.length} 个插件分配到 ${p.name}`}
+                            title={groupAssignBusy ? '分配中…' : `把 ${group.zh} 分类全部 ${group.items.length} 个插件分配到 ${p.name}`}
+                            disabled={groupAssignBusy}
                             onClick={() => void assignCategory(p.name, group.category, group.zh)}
                           >
-                            <Zap size={12} /> 全部分配
+                            <RefreshCw size={12} className={groupAssignBusy ? 'animate-spin' : ''} />{' '}
+                            {groupAssignBusy ? '分配中…' : '全部分配'}
                           </button>
                         </div>
                         {group.items.map((av) => {
@@ -1247,6 +1433,8 @@ export default function AllocationsPage() {
                           const isDragging = drag?.active && drag.key === key
                           const isDropLine = drag?.active && drag.overKey === key
                           const isSelected = selectedKeys.has(key)
+                          const availAssignBusy = isBusy(`assignAvail:${p.name}:${av.pluginId}`)
+                          const availHarvestBusy = isBusy(`harvest:${p.name}:${av.pluginId}`)
                           return (
                             <div
                               className={`alloc-row ${compactMode ? 'compact' : ''}${isSelected ? ' selected' : ''}${isDragging ? ' dragging' : ''}${isDropLine ? ' drop-line' : ''}`}
@@ -1263,7 +1451,7 @@ export default function AllocationsPage() {
                               }}
                               onMouseLeave={hideTooltip}
                               onClick={(e) => {
-                                if (!drag?.active && !e.defaultPrevented) void assignAvail(p.name, av.pluginId)
+                                if (!drag?.active && !e.defaultPrevented && !availAssignBusy) void assignAvail(p.name, av.pluginId)
                               }}
                               onContextMenu={(e) => onContextAvail(av, e)}
                             >
@@ -1289,28 +1477,52 @@ export default function AllocationsPage() {
                                 {av.source === 'bundle' ? 'bundle' : '依赖'}
                               </span>
                               <span className="badge disabled">未分配 · 单击分配 / 拖动转移</span>
+                              {(availAssignBusy || availHarvestBusy) && (
+                                <span className="badge info" style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+                                  <RefreshCw size={11} className="animate-spin" /> {availAssignBusy ? '分配中…' : '纳管中…'}
+                                </span>
+                              )}
                               <span className="spacer" />
                               <div className="alloc-action-group" onClick={(e) => e.stopPropagation()}>
                                 <button
                                   className="alloc-action-btn"
                                   onClick={() => void assignAvail(p.name, av.pluginId)}
-                                  title="分配至当前环境"
+                                  disabled={availAssignBusy}
+                                  title={availAssignBusy ? '分配中…' : '分配至当前环境'}
                                 >
-                                  <Zap size={12} /> 分配
+                                  {availAssignBusy ? (
+                                    <>
+                                      <RefreshCw size={12} className="animate-spin" /> 分配中…
+                                    </>
+                                  ) : (
+                                    <>
+                                      <Zap size={12} /> 分配
+                                    </>
+                                  )}
                                 </button>
                                 <button
                                   className="alloc-action-btn"
                                   onClick={() => void harvestToVault(p.name, av.pluginId)}
-                                  title="纳管下至仓库沙箱 (Vault)"
+                                  disabled={availHarvestBusy}
+                                  title={availHarvestBusy ? '纳管中…' : '纳管下至仓库沙箱 (Vault)'}
                                 >
-                                  <Package size={12} /> 下至沙箱
+                                  {availHarvestBusy ? (
+                                    <>
+                                      <RefreshCw size={12} className="animate-spin" /> 纳管中…
+                                    </>
+                                  ) : (
+                                    <>
+                                      <Package size={12} /> 下至沙箱
+                                    </>
+                                  )}
                                 </button>
                               </div>
                             </div>
                           )
                         })}
                       </div>
-                    ))}
+                      )
+                    })}
                   </div>
                 </div>
               )}
@@ -1325,26 +1537,60 @@ export default function AllocationsPage() {
           <span style={{ fontSize: '0.85rem', fontWeight: 600 }}>
             已选择 <strong>{selectedKeys.size}</strong> 项插件
           </span>
-          <button className="btn sm" onClick={() => void handleBatchToggle(true)}>
-            <Play size={12} /> 批量启用
+          <button className="btn sm" disabled={batchBusy} onClick={() => void handleBatchToggle(true)}>
+            {batchToggleAction.loading ? (
+              <>
+                <RefreshCw size={12} className="animate-spin" /> 处理中…
+              </>
+            ) : (
+              <>
+                <Play size={12} /> 批量启用
+              </>
+            )}
           </button>
-          <button className="btn sm" onClick={() => void handleBatchToggle(false)}>
-            <Square size={12} /> 批量禁用
+          <button className="btn sm" disabled={batchBusy} onClick={() => void handleBatchToggle(false)}>
+            {batchToggleAction.loading ? (
+              <>
+                <RefreshCw size={12} className="animate-spin" /> 处理中…
+              </>
+            ) : (
+              <>
+                <Square size={12} /> 批量禁用
+              </>
+            )}
           </button>
           <button
             className="btn sm"
             style={{ background: 'rgba(99,102,241,0.15)', color: '#4f46e5', borderColor: '#4f46e5', fontWeight: 600 }}
+            disabled={batchBusy}
             onClick={() => void handleBatchHarvest()}
           >
-            <Package size={12} /> 批量下至沙箱
+            {batchHarvestAction.loading ? (
+              <>
+                <RefreshCw size={12} className="animate-spin" /> 纳管中…
+              </>
+            ) : (
+              <>
+                <Package size={12} /> 批量下至沙箱
+              </>
+            )}
           </button>
-          <button className="btn sm danger" onClick={() => void handleBatchRemove()}>
-            <Trash2 size={12} /> 批量移除
+          <button className="btn sm danger" disabled={batchBusy} onClick={() => void handleBatchRemove()}>
+            {batchRemoveAction.loading ? (
+              <>
+                <RefreshCw size={12} className="animate-spin" /> 移除中…
+              </>
+            ) : (
+              <>
+                <Trash2 size={12} /> 批量移除
+              </>
+            )}
           </button>
           {profiles.length > 1 && (
             <select
               className="input sm"
               defaultValue=""
+              disabled={batchBusy}
               onChange={(e) => {
                 if (e.target.value) {
                   void handleBatchMove(e.target.value)
@@ -1354,7 +1600,7 @@ export default function AllocationsPage() {
               style={{ width: '130px', padding: '2px 6px' }}
             >
               <option value="" disabled>
-                批量转移到…
+                {batchMoveAction.loading ? '转移中…' : '批量转移到…'}
               </option>
               {profiles.map((pr) => (
                 <option key={pr.name} value={pr.name}>
@@ -1363,9 +1609,23 @@ export default function AllocationsPage() {
               ))}
             </select>
           )}
+          {batchMoveAction.loading && (
+            <span className="muted" style={{ display: 'inline-flex', alignItems: 'center', gap: 4, fontSize: '0.8rem' }}>
+              <RefreshCw size={12} className="animate-spin" /> 转移中…
+            </span>
+          )}
           <button className="btn sm subtle" onClick={() => setSelectedKeys(new Set())} style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
             <X size={12} /> 取消选择 (Esc)
           </button>
+        </div>
+      )}
+
+      {/* 拖放处理中：全局进度提示（有批量栏时上移，避免遮挡） */}
+      {dropBusy && (
+        <div className="batch-floating-bar" style={{ bottom: selectedKeys.size > 0 ? 84 : 24 }}>
+          <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: '0.85rem', fontWeight: 600 }}>
+            <RefreshCw size={12} className="animate-spin" /> 正在处理拖放操作…
+          </span>
         </div>
       )}
 

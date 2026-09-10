@@ -31,23 +31,9 @@ import type {
   DshDesktopStatus,
 } from './types'
 
-import { isTauri, tauriInvoke } from './tauri'
-
-// 非 Tauri（Web/浏览器）回退基址：默认同源 /api；也可由 VITE_API_BASE 覆盖。
-const FALLBACK_BASE = (import.meta.env.VITE_API_BASE as string | undefined) ?? '/api'
-
-// Tauri 桌面端：后端端口由 Rust 动态探测（4780 被占则顺延），
-// 前端必须运行时查询实际端口，避免前后端端口错位导致「连接被拒绝」。
-let basePromise: Promise<string> | null = null
-function resolveBase(): Promise<string> {
-  if (isTauri()) {
-    basePromise ??= tauriInvoke('get_server_port')
-      .then((port) => `http://127.0.0.1:${port as number}/api`)
-      .catch(() => FALLBACK_BASE)
-    return basePromise
-  }
-  return Promise.resolve(FALLBACK_BASE)
-}
+// 基址解析统一放在 tauri.ts（Tauri 桌面端需运行时查询 Rust 探测到的后端端口；
+// Web/浏览器开发态为同源 /api，由 Vite dev proxy 转发），避免两处逻辑漂移。
+import { resolveApiBase } from './tauri'
 
 /** 端口自愈：当首选端口请求失败时，扫描 4780–4899 找真实后端（防 invoke 失效/端口顺延错位）。 */
 let probedBase: string | null = null
@@ -123,7 +109,7 @@ async function req<T>(path: string, init?: RequestInit): Promise<T> {
   const method = (init?.method ?? 'GET').toUpperCase()
   const idempotent = method === 'GET' || method === 'HEAD'
   const maxAttempts = idempotent ? 5 : 1
-  const primary = await resolveBase()
+  const primary = await resolveApiBase()
   let base = primary
   let lastErr: unknown
 
@@ -203,11 +189,25 @@ export const api = {
       `/profiles/status?names=${names.map((n) => encodeURIComponent(n)).join(',')}`,
     ).then((r) => r.statuses),
 
-  startProfile: (name: string, port?: number) =>
-    req<{ status: string; port: number; pid: number | null; url?: string }>(`/profiles/${encodeURIComponent(name)}/start`, {
-      method: 'POST',
-      body: port ? JSON.stringify({ port }) : undefined,
-    }),
+  /**
+   * 启动环境。
+   * opts.waitMs > 0 时后端会等到 dsh web 的**认证地址（含 token）**就绪再返回：
+   * - 200 { status:'running', url:'…token=…' } ；
+   * - 202 { status:'starting', url:null, warning:'…' } 超时仍未就绪。
+   * url 为 null 表示认证地址未就绪，后端绝不会返回不带 token 的裸 host:port，调用方也不得自行拼接。
+   */
+  startProfile: (name: string, opts?: { port?: number; waitMs?: number }) => {
+    const params = new URLSearchParams()
+    if (opts?.waitMs && opts.waitMs > 0) params.set('wait', String(opts.waitMs))
+    const qs = params.toString()
+    return req<{ status: string; port: number; pid: number | null; url: string | null; warning?: string }>(
+      `/profiles/${encodeURIComponent(name)}/start${qs ? `?${qs}` : ''}`,
+      {
+        method: 'POST',
+        body: opts?.port ? JSON.stringify({ port: opts.port }) : undefined,
+      },
+    )
+  },
 
   restartProfile: (name: string, port?: number) =>
     req<{ status: string; port: number; pid: number | null; url?: string }>(`/profiles/${encodeURIComponent(name)}/restart`, {

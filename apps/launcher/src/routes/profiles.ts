@@ -1,6 +1,6 @@
 import { join } from 'node:path'
 import { mkdirSync, readFileSync, writeFileSync, existsSync } from 'node:fs'
-import { readLogTail, extractDshWebUrl, spawnWebProfile, stopWeb, waitForPort, isPortListening, findPidByPort, findProcessName, invalidatePortProbe, ensureProfileBundles, ensureCacheIntegrity, killAllProfileProcesses, verifyProfileDeps, runPreflightCheck } from '@godsh/core'
+import { readLogTail, extractDshWebUrl, spawnWebProfile, stopWeb, waitForPort, waitForWebUrl, hasAuthToken, isPortListening, findPidByPort, findProcessName, invalidatePortProbe, ensureProfileBundles, ensureCacheIntegrity, killAllProfileProcesses, verifyProfileDeps, runPreflightCheck } from '@godsh/core'
 import { createProfile, removeProfile, scanProfiles, setProfileBundles, exportProfilePackage, importProfilePackage, type ProfilePackage } from '@godsh/profile-manager'
 import { run } from '@godsh/core'
 import { pluginAction, PLUGIN_ACTION_TIMEOUT_MS, resolveInstallArg } from '@godsh/marketplace'
@@ -143,8 +143,18 @@ export const profilesHandler: ApiHandler = async (ctx, _req, res, method, seg, b
       [...running.entries()].map(async ([profile, proc]) => {
         const alive = await isPortListening(proc.port)
         const pid = alive ? await findPidByPort(proc.port) : null
-        const logFile = join(logDir, `dsh-web-${profile}-${proc.port}.log`)
-        const authUrl = proc.url ?? extractDshWebUrl(logFile) ?? `http://127.0.0.1:${proc.port}`
+        // 日志名必须与 process-manager 实际写入的一致（旧代码拼成 dsh-web-<profile>-<port>.log，永远读不到），
+        // 并保留旧命名作为回退。
+        const primaryLog = join(logDir, `dsh-${profile}-${proc.port}.log`)
+        const fallbackLog = join(logDir, `dsh-web-${profile}-${proc.port}.log`)
+        const logFile = existsSync(primaryLog) ? primaryLog : fallbackLog
+        // 认证地址：只接受**含 token** 的地址。都不含 token 时返回 null，
+        // 绝不回退到 `http://127.0.0.1:<port>`——那在当前 dsh 上必然 401（bug 6）。
+        let authUrl: string | null = hasAuthToken(proc.url) ? proc.url : null
+        if (!authUrl) {
+          const fromLog = extractDshWebUrl(logFile)
+          authUrl = hasAuthToken(fromLog) ? fromLog : null
+        }
         return {
           profile,
           port: proc.port,
@@ -355,7 +365,34 @@ export const profilesHandler: ApiHandler = async (ctx, _req, res, method, seg, b
           }
         }
       })()
-      ctx.sendJson(res, 202, { status: 'starting', profile: name, port, pid: child.pid ?? null, url: proc.url })
+
+      // 可选「等到认证地址就绪」（bug 6）：快速启动场景传 ?wait=15000，
+      // 避免前端拿到一个尚未生成 token 的地址。url 为空表示未就绪，绝不返回 host:port。
+      const waitRaw = url.searchParams.get('wait')
+      const waitMs = waitRaw ? Math.min(Math.max(Number.parseInt(waitRaw, 10) || 0, 0), 60_000) : 0
+      if (waitMs > 0) {
+        const readyUrl = await waitForWebUrl(info, waitMs)
+        if (readyUrl) {
+          ctx.sendJson(res, 200, { status: 'running', profile: name, port, pid: child.pid ?? null, url: readyUrl })
+        } else {
+          ctx.sendJson(res, 202, {
+            status: 'starting',
+            profile: name,
+            port,
+            pid: child.pid ?? null,
+            url: null,
+            warning: `尚未取到认证地址，请轮询 /api/profiles/${name}/status 直到 url 就绪`,
+          })
+        }
+        return
+      }
+      ctx.sendJson(res, 202, {
+        status: 'starting',
+        profile: name,
+        port,
+        pid: child.pid ?? null,
+        url: hasAuthToken(proc.url) ? proc.url : null,
+      })
     })
     return true
   }
@@ -423,7 +460,34 @@ export const profilesHandler: ApiHandler = async (ctx, _req, res, method, seg, b
           }
         }
       })()
-      ctx.sendJson(res, 202, { status: 'starting', profile: name, port, pid: child.pid ?? null, url: proc.url })
+
+      // 可选「等到认证地址就绪」（bug 6）：快速启动场景传 ?wait=15000，
+      // 避免前端拿到一个尚未生成 token 的地址。url 为空表示未就绪，绝不返回 host:port。
+      const waitRaw = url.searchParams.get('wait')
+      const waitMs = waitRaw ? Math.min(Math.max(Number.parseInt(waitRaw, 10) || 0, 0), 60_000) : 0
+      if (waitMs > 0) {
+        const readyUrl = await waitForWebUrl(info, waitMs)
+        if (readyUrl) {
+          ctx.sendJson(res, 200, { status: 'running', profile: name, port, pid: child.pid ?? null, url: readyUrl })
+        } else {
+          ctx.sendJson(res, 202, {
+            status: 'starting',
+            profile: name,
+            port,
+            pid: child.pid ?? null,
+            url: null,
+            warning: `尚未取到认证地址，请轮询 /api/profiles/${name}/status 直到 url 就绪`,
+          })
+        }
+        return
+      }
+      ctx.sendJson(res, 202, {
+        status: 'starting',
+        profile: name,
+        port,
+        pid: child.pid ?? null,
+        url: hasAuthToken(proc.url) ? proc.url : null,
+      })
     })
     return true
   }

@@ -18,7 +18,8 @@ import {
 import { api } from '../api'
 import type { MarketPlugin, ProfileView, VaultPlugin } from '../types'
 import { EmptyState, SkeletonGrid, Toast } from '../components'
-import { useToast } from '../hooks'
+import { useAsyncAction, useToast } from '../hooks'
+import { usePageRefresh } from '../refresh'
 import { useI18n } from '../i18n'
 
 function desc(p: MarketPlugin): string {
@@ -94,6 +95,18 @@ function errorLabel(r: { errorType?: string; message?: string; stderr?: string }
 }
 
 /**
+ * 沙箱仓库接口失败时的提示文案：这些响应体通常不带 message，
+ * errorLabel 只能给出「操作失败」，此时保留更具体的原有文案；带明细时拼上真实原因。
+ */
+function vaultFailText(
+  prefix: string,
+  r: { ok?: boolean; errorType?: string; message?: string; stderr?: string },
+): string {
+  const detail = errorLabel(r)
+  return detail && detail !== '操作失败' ? `${prefix}：${detail}` : prefix
+}
+
+/**
  * 真实安装包名：市场索引的 `name`（展示名）≠ npm 包名。
  * 例如 name='dsh-memory'，npm='@furongjun1999/dsh-memory'——必须用 npm 字段才能装。
  */
@@ -120,8 +133,13 @@ export default function MarketPage() {
   const [plugins, setPlugins] = useState<MarketPlugin[] | null>(null)
   const [vaultPlugins, setVaultPlugins] = useState<VaultPlugin[]>([])
   const [installedNames, setInstalledNames] = useState<string[]>([])
-  const [installing, setInstalling] = useState<string | null>(null)
-  const [vaultActing, setVaultActing] = useState<string | null>(null)
+  /**
+   * 单插件正在进行的操作（按包名记录）：区分安装/更新/卸载，用于按钮禁用 + 「进行中」文案。
+   * 用 Record 而非单个槽位，多个卡片的操作不会互相覆盖进度显示。
+   */
+  const [cardActions, setCardActions] = useState<Record<string, 'install' | 'update' | 'remove'>>({})
+  /** 沙箱操作中的插件包名（下至沙箱 / 瞬时注入），同样按包名记录避免互相覆盖 */
+  const [vaultActing, setVaultActing] = useState<Record<string, boolean>>({})
   const [sortBy, setSortBy] = useState<SortBy>('default')
   const [category, setCategory] = useState('') // '' = 全部
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('all')
@@ -129,6 +147,8 @@ export default function MarketPage() {
   const [queue, setQueue] = useState<QueueItem[] | null>(null)
   const [queueDone, setQueueDone] = useState(false)
   const [queueTitle, setQueueTitle] = useState('安装进度')
+  /** 正在执行的批量动作：用于禁用批量按钮 + 在触发按钮上显示进度（队列面板仍逐项展示进度） */
+  const [batchRunning, setBatchRunning] = useState<'install' | 'vault' | null>(null)
   // 分批渲染：初始 60，滚动/「加载更多」每次 +60
   const [visibleCount, setVisibleCount] = useState(60)
   const PAGE_STEP = 60
@@ -143,6 +163,46 @@ export default function MarketPage() {
       /* 忽略 */
     }
   }, [])
+
+  /**
+   * 市场数据加载（bug 7）：顶栏全局刷新、页面刷新按钮、空状态「刷新市场」共用同一份逻辑（不重复 fetch）。
+   * 不配置 success：加载成功不打扰用户；失败沿用原有原始错误文案。
+   */
+  const { run: loadMarket, loading: marketLoading } = useAsyncAction(
+    useCallback(async (): Promise<void> => {
+      const list = await api.market()
+      setPlugins(list)
+      await loadVault()
+    }, [loadVault]),
+    { show },
+  )
+
+  usePageRefresh(loadMarket, 'market')
+
+  // 单卡片操作占用标记（按包名）：启动时登记、结束时清除，供按钮禁用与进度文案使用
+  function markCardAction(pkg: string, kind: 'install' | 'update' | 'remove') {
+    setCardActions((prev) => ({ ...prev, [pkg]: kind }))
+  }
+
+  function clearCardAction(pkg: string) {
+    setCardActions((prev) => {
+      const next = { ...prev }
+      delete next[pkg]
+      return next
+    })
+  }
+
+  function markVaultActing(pkg: string) {
+    setVaultActing((prev) => ({ ...prev, [pkg]: true }))
+  }
+
+  function clearVaultActing(pkg: string) {
+    setVaultActing((prev) => {
+      const next = { ...prev }
+      delete next[pkg]
+      return next
+    })
+  }
 
   // 当前 Profile 已安装的插件清单
   const refreshInstalled = useCallback(async () => {
@@ -167,11 +227,7 @@ export default function MarketPage() {
         if (p.length && !p.some((x) => x.name === profile)) setProfile(p[0]!.name)
       })
       .catch(() => {})
-    api
-      .market()
-      .then(setPlugins)
-      .catch((e) => show(e instanceof Error ? e.message : String(e), true))
-    void loadVault()
+    void loadMarket()
   }, [])
 
   // 辅助判断是否在沙箱仓库中
@@ -250,7 +306,7 @@ export default function MarketPage() {
   // 单插件安装到当前 Profile
   async function installToProfile(pkg: string, display: string, marketName?: string) {
     if (!profile) return show('请先选择目标 Profile', true)
-    setInstalling(pkg)
+    markCardAction(pkg, 'install')
     try {
       const r = await api.installPlugin(profile, 'add', pkg, marketName)
       if (r.ok) {
@@ -262,14 +318,14 @@ export default function MarketPage() {
     } catch (e) {
       show(e instanceof Error ? e.message : String(e), true)
     } finally {
-      setInstalling(null)
+      clearCardAction(pkg)
     }
   }
 
   // 单插件下载到沙箱仓库 (Vault)
   async function downloadToVault(p: MarketPlugin) {
     const pkg = pkgName(p)
-    setVaultActing(pkg)
+    markVaultActing(pkg)
     try {
       const r = await api.vaultAddMarket({
         name: pkg,
@@ -281,19 +337,19 @@ export default function MarketPage() {
         show(`已将 ${p.name} 成功下载保存至沙箱仓库`)
         await loadVault()
       } else {
-        show('暂存沙箱失败', true)
+        show(vaultFailText('暂存沙箱失败', r), true)
       }
     } catch (e) {
       show(e instanceof Error ? e.message : String(e), true)
     } finally {
-      setVaultActing(null)
+      clearVaultActing(pkg)
     }
   }
 
   // 已安装插件下至沙箱：优先本地反向收割，若无本地物理文件则从市场暂存入库
   async function harvestOrDownloadToVault(p: MarketPlugin) {
     const pkg = pkgName(p)
-    setVaultActing(pkg)
+    markVaultActing(pkg)
     try {
       const r = await api.vaultHarvest(profile, pkg)
       if (r.ok) {
@@ -305,14 +361,14 @@ export default function MarketPage() {
     } catch {
       await downloadToVault(p)
     } finally {
-      setVaultActing(null)
+      clearVaultActing(pkg)
     }
   }
 
-  // 从沙箱瞬时注入/部署到当前 Profile
-  async function deployFromVault(vPlugin: VaultPlugin, display: string) {
+  // 从沙箱瞬时注入/部署到当前 Profile（busyKey = 卡片包名，保证「注入中…」出现在触发的按钮上）
+  async function deployFromVault(vPlugin: VaultPlugin, display: string, busyKey: string) {
     if (!profile) return show('请先选择目标 Profile', true)
-    setVaultActing(vPlugin.name)
+    markVaultActing(busyKey)
     try {
       const r = await api.vaultDeploy(vPlugin.id, profile)
       if (r.ok) {
@@ -320,19 +376,19 @@ export default function MarketPage() {
         await refreshInstalled()
         await loadVault()
       } else {
-        show('沙箱注入失败', true)
+        show(vaultFailText('沙箱注入失败', r), true)
       }
     } catch (e) {
       show(e instanceof Error ? e.message : String(e), true)
     } finally {
-      setVaultActing(null)
+      clearVaultActing(busyKey)
     }
   }
 
   async function remove(pkg: string, display: string) {
     if (!profile) return show('请先选择目标 Profile', true)
     if (!window.confirm(`确定从 ${profile} 卸载 ${display}？`)) return
-    setInstalling(pkg)
+    markCardAction(pkg, 'remove')
     try {
       const r = await api.uninstallPlugin(profile, pkg)
       if (r.ok) {
@@ -345,13 +401,13 @@ export default function MarketPage() {
     } catch (e) {
       show(e instanceof Error ? e.message : String(e), true)
     } finally {
-      setInstalling(null)
+      clearCardAction(pkg)
     }
   }
 
   async function update(pkg: string, display: string, marketName?: string) {
     if (!profile) return show('请先选择目标 Profile', true)
-    setInstalling(pkg)
+    markCardAction(pkg, 'update')
     try {
       const r = await api.installPlugin(profile, 'update', pkg, marketName)
       if (r.ok) {
@@ -363,7 +419,7 @@ export default function MarketPage() {
     } catch (e) {
       show(e instanceof Error ? e.message : String(e), true)
     } finally {
-      setInstalling(null)
+      clearCardAction(pkg)
     }
   }
 
@@ -394,6 +450,7 @@ export default function MarketPage() {
       })),
     )
     setQueueDone(false)
+    setBatchRunning('install')
     let failedCount = 0
 
     for (let i = 0; i < selectedPlugins.length; i++) {
@@ -439,6 +496,7 @@ export default function MarketPage() {
         ? `批量安装完成：${selectedPlugins.length - failedCount} 成功，${failedCount} 失败`
         : `批量安装完成：${selectedPlugins.length} 个全部成功`,
     )
+    setBatchRunning(null)
   }
 
   // 批量下载到沙箱仓库 (Vault)
@@ -458,6 +516,7 @@ export default function MarketPage() {
       })),
     )
     setQueueDone(false)
+    setBatchRunning('vault')
     let failedCount = 0
 
     for (let i = 0; i < selectedPlugins.length; i++) {
@@ -508,6 +567,7 @@ export default function MarketPage() {
         ? `批量下载沙箱完成：${selectedPlugins.length - failedCount} 成功，${failedCount} 失败`
         : `批量下载沙箱完成：${selectedPlugins.length} 个全部就绪`,
     )
+    setBatchRunning(null)
   }
 
   const selectedCount = selected.size
@@ -593,6 +653,18 @@ export default function MarketPage() {
           <option value="hot">热门度 (下载与 Star)</option>
           <option value="latest">最新发布</option>
         </select>
+
+        {/* 市场数据刷新（bug 7）：与顶栏全局刷新、空状态「刷新市场」共用 loadMarket */}
+        <button
+          className="btn sm"
+          disabled={marketLoading}
+          onClick={() => void loadMarket()}
+          title="重新拉取市场索引与沙箱仓库数据"
+          style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}
+        >
+          <RefreshCw size={13} className={marketLoading ? 'animate-spin' : ''} />
+          {marketLoading ? '刷新中…' : '刷新市场'}
+        </button>
       </div>
 
       {/* 批量操作浮动条 */}
@@ -603,11 +675,19 @@ export default function MarketPage() {
               <Package size={12} />
               <span>已选择 {selectedCount} 项</span>
             </span>
-            <button className="btn primary" onClick={() => void batchInstall()} style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
-              <Zap size={13} /> 批量安装到 [{profile}]
+            <button className="btn primary" disabled={batchRunning !== null} onClick={() => void batchInstall()} style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+              {batchRunning === 'install' ? (
+                <><RefreshCw size={13} className="animate-spin" /> 批量安装中…</>
+              ) : (
+                <><Zap size={13} /> 批量安装到 [{profile}]</>
+              )}
             </button>
-            <button className="btn vault" onClick={() => void batchDownloadVault()} style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
-              <Package size={13} /> 批量下载到沙箱 (Vault)
+            <button className="btn vault" disabled={batchRunning !== null} onClick={() => void batchDownloadVault()} style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+              {batchRunning === 'vault' ? (
+                <><RefreshCw size={13} className="animate-spin" /> 正在拉取到沙箱…</>
+              ) : (
+                <><Package size={13} /> 批量下载到沙箱 (Vault)</>
+              )}
             </button>
             <button className="btn sm subtle" onClick={() => setSelected(new Set())} style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
               <Trash2 size={12} /> 清空选择
@@ -639,10 +719,7 @@ export default function MarketPage() {
             label: '刷新市场',
             icon: RefreshCw,
             onClick: () => {
-              api
-                .market()
-                .then(setPlugins)
-                .catch((e) => show(e instanceof Error ? e.message : String(e), true))
+              void loadMarket()
             },
           }}
         />
@@ -664,8 +741,9 @@ export default function MarketPage() {
               const vPlugin = getVaultPlugin(p)
               const inVault = Boolean(vPlugin)
               const isSelected = selected.has(p.name)
-              const isInstalling = installing === pkg
-              const isVaultActing = vaultActing === pkg
+              const cardKind = cardActions[pkg] ?? null
+              const isInstalling = cardKind !== null
+              const isVaultActing = Boolean(vaultActing[pkg])
 
               return (
                 <div className={`card${isSelected ? ' selected' : ''}`} key={pkg}>
@@ -726,7 +804,11 @@ export default function MarketPage() {
                           onClick={() => update(pkg, p.name, p.name)}
                           title="从官方源检查并更新此插件"
                         >
-                          {isInstalling ? '更新中…' : <><RefreshCw size={12} /> 更新</>}
+                          {cardKind === 'update' ? (
+                            <><RefreshCw size={12} className="animate-spin" /> 更新中…</>
+                          ) : (
+                            <><RefreshCw size={12} /> 更新</>
+                          )}
                         </button>
                         {inVault ? (
                           <span
@@ -743,7 +825,11 @@ export default function MarketPage() {
                             onClick={() => void harvestOrDownloadToVault(p)}
                             title="将当前环境中已安装的插件纳管并下至全局沙箱仓库 (Vault)"
                           >
-                            {isVaultActing ? '存入中…' : <><Package size={12} /> 下至沙箱</>}
+                            {isVaultActing ? (
+                              <><RefreshCw size={12} className="animate-spin" /> 存入中…</>
+                            ) : (
+                              <><Package size={12} /> 下至沙箱</>
+                            )}
                           </button>
                         )}
                         <button
@@ -751,7 +837,11 @@ export default function MarketPage() {
                           disabled={isInstalling}
                           onClick={() => remove(pkg, p.name)}
                         >
-                          <Trash2 size={12} /> 卸载
+                          {cardKind === 'remove' ? (
+                            <><RefreshCw size={12} className="animate-spin" /> 卸载中…</>
+                          ) : (
+                            <><Trash2 size={12} /> 卸载</>
+                          )}
                         </button>
                       </>
                     ) : (
@@ -763,7 +853,11 @@ export default function MarketPage() {
                           onClick={() => installToProfile(pkg, p.name, p.name)}
                           title={`直接安装并配置到当前运行环境 [${profile}]`}
                         >
-                          {isInstalling ? '安装中…' : <><Zap size={12} /> 安装到 {profile}</>}
+                          {cardKind === 'install' ? (
+                            <><RefreshCw size={12} className="animate-spin" /> 安装中…</>
+                          ) : (
+                            <><Zap size={12} /> 安装到 {profile}</>
+                          )}
                         </button>
 
                         {/* 沙箱操作双轨 */}
@@ -771,19 +865,27 @@ export default function MarketPage() {
                           <button
                             className="btn vault-inject-btn sm"
                             disabled={isInstalling || isVaultActing}
-                            onClick={() => deployFromVault(vPlugin!, p.name)}
+                            onClick={() => void deployFromVault(vPlugin!, p.name, pkg)}
                             title="从沙箱秒级挂载注入到当前环境（无需重新下载）"
                           >
-                            {isVaultActing ? '注入中…' : <><Rocket size={12} /> 瞬时注入</>}
+                            {isVaultActing ? (
+                              <><RefreshCw size={12} className="animate-spin" /> 注入中…</>
+                            ) : (
+                              <><Rocket size={12} /> 瞬时注入</>
+                            )}
                           </button>
                         ) : (
                           <button
                             className="btn vault sm"
                             disabled={isInstalling || isVaultActing}
-                            onClick={() => downloadToVault(p)}
+                            onClick={() => void downloadToVault(p)}
                             title="下载并隔离暂存到沙箱仓库，不污染生产环境"
                           >
-                            {isVaultActing ? '下载中…' : <><Package size={12} /> 下至沙箱</>}
+                            {isVaultActing ? (
+                              <><RefreshCw size={12} className="animate-spin" /> 下载中…</>
+                            ) : (
+                              <><Package size={12} /> 下至沙箱</>
+                            )}
                           </button>
                         )}
 

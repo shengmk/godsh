@@ -22,6 +22,23 @@ import { useI18n } from './i18n'
 import { useTheme } from './theme'
 import { ErrorBoundary, KeepAlive, PageSkeleton } from './components'
 import { TaskCenter } from './TaskCenter'
+import { triggerRefresh } from './refresh'
+
+/** 顶栏图标按钮统一样式（全局刷新 / 主题切换保持同一视觉规格）。 */
+const TOPBAR_ICON_BTN_STYLE = {
+  display: 'inline-flex',
+  alignItems: 'center',
+  justifyContent: 'center',
+  width: '32px',
+  height: '32px',
+  borderRadius: '8px',
+  background: 'var(--surface-soft, rgba(255,255,255,0.04))',
+  border: '1px solid var(--border-hairline)',
+  color: 'var(--text-secondary)',
+  cursor: 'pointer',
+  transition: 'all 150ms ease',
+  flexShrink: 0,
+} as const
 
 // 按页代码分割：首屏只加载当前页面，其它页面按需加载
 const ControllerConsolePage = lazy(() => import('./pages/ControllerConsolePage'))
@@ -76,6 +93,33 @@ export default function App() {
     window.addEventListener('hashchange', handleHashChange)
     return () => window.removeEventListener('hashchange', handleHashChange)
   }, [])
+
+  // 全局刷新（bug 7）：KeepAlive 让页面常驻，切换页面不重新拉数据，
+  // 顶栏按钮统一触发所有已注册页面的 reload。
+  const [refreshingAll, setRefreshingAll] = useState(false)
+  const refreshSpinTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+  function handleGlobalRefresh() {
+    if (refreshingAll) return
+    setRefreshingAll(true)
+    triggerRefresh()
+    if (refreshSpinTimer.current) clearTimeout(refreshSpinTimer.current)
+    refreshSpinTimer.current = setTimeout(() => setRefreshingAll(false), 700)
+  }
+  useEffect(
+    () => () => {
+      if (refreshSpinTimer.current) clearTimeout(refreshSpinTimer.current)
+    },
+    [],
+  )
+
+  // 页面重新可见（KeepAlive）且离开超过 30s：只刷新该页自己的数据
+  const pageLastActive = useRef<Record<string, number>>({})
+  useEffect(() => {
+    const now = Date.now()
+    const prev = pageLastActive.current[page]
+    pageLastActive.current[page] = now
+    if (prev && now - prev > 30_000) triggerRefresh(page)
+  }, [page])
 
   // 顶栏：dsh 版本（实际激活 + 来源）+ 全局搜索
   const [health, setHealth] = useState<Health | null>(null)
@@ -353,26 +397,22 @@ export default function App() {
             {`DSH ${shownVersion || '—'} · ${dshStatus?.activeVersionName ? 'env' : 'PATH'}`}
           </div>
           <button
+            className="topbar-btn"
+            title="刷新当前所有已访问页面（Ctrl+R 仅刷新浏览器）"
+            disabled={refreshingAll}
+            onClick={handleGlobalRefresh}
+            style={TOPBAR_ICON_BTN_STYLE}
+          >
+            <RefreshCw size={15} className={refreshingAll ? 'animate-spin' : ''} />
+          </button>
+          <button
             className="topbar-btn theme-toggle-btn"
             title={`切换主题（当前：${theme === 'light' ? '浅色' : theme === 'dark' ? '深色' : '跟随系统'}，点击切换）`}
             onClick={() => {
               const next = theme === 'light' ? 'dark' : 'light'
               changeTheme(next)
             }}
-            style={{
-              display: 'inline-flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              width: '32px',
-              height: '32px',
-              borderRadius: '8px',
-              background: 'var(--surface-soft, rgba(255,255,255,0.04))',
-              border: '1px solid var(--border-hairline)',
-              color: 'var(--text-secondary)',
-              cursor: 'pointer',
-              transition: 'all 150ms ease',
-              flexShrink: 0,
-            }}
+            style={TOPBAR_ICON_BTN_STYLE}
           >
             {theme === 'light' ? <Moon size={15} /> : <Sun size={15} />}
           </button>

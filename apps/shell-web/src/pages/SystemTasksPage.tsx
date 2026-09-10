@@ -10,7 +10,9 @@ import {
   FileText,
 } from 'lucide-react'
 import { api } from '../api'
-import { EmptyState } from '../components'
+import { EmptyState, Toast } from '../components'
+import { useAsyncAction, useToast } from '../hooks'
+import { usePageRefresh } from '../refresh'
 import type { SystemTaskItem, JournalEntryItem } from '../types'
 
 export default function SystemTasksPage() {
@@ -23,6 +25,7 @@ export default function SystemTasksPage() {
   const [autoScroll, setAutoScroll] = useState(true)
   const [refreshing, setRefreshing] = useState(false)
   const terminalRef = useRef<HTMLPreElement | null>(null)
+  const { toast, show } = useToast()
 
   const loadData = async () => {
     try {
@@ -39,6 +42,29 @@ export default function SystemTasksPage() {
       }
     } catch {}
   }
+
+  // bug 7：向全局刷新总线注册本页既有的 loadData（const 声明，必须在其之后注册；不新增请求逻辑）
+  usePageRefresh(loadData, 'tasks')
+
+  // bug 1：清理历史 —— 置忙（按钮禁用 + 进度提示），失败弹出真实错误信息
+  const { run: clearTasks, loading: clearingTasks } = useAsyncAction(
+    async () => {
+      await api.systemTasksClear()
+      await loadData()
+      setSelectedTaskKey(null)
+      setTaskDetail(null)
+    },
+    { show, success: '已清理已结束的历史任务' },
+  )
+
+  // bug 1：清空审计日记
+  const { run: clearJournal, loading: clearingJournal } = useAsyncAction(
+    async () => {
+      await api.journalClear()
+      await loadData()
+    },
+    { show, success: '已清空审计日记' },
+  )
 
   useEffect(() => {
     loadData()
@@ -74,22 +100,6 @@ export default function SystemTasksPage() {
       clearInterval(tInterval)
     }
   }, [selectedTaskKey, autoScroll])
-
-  const handleClearTasks = async () => {
-    try {
-      await api.systemTasksClear()
-      await loadData()
-      setSelectedTaskKey(null)
-      setTaskDetail(null)
-    } catch {}
-  }
-
-  const handleClearJournal = async () => {
-    try {
-      await api.journalClear()
-      await loadData()
-    } catch {}
-  }
 
   const filteredTasks = tasks.filter((t) => {
     if (filterStatus === 'all') return true
@@ -158,20 +168,22 @@ export default function SystemTasksPage() {
           {activeTab === 'tasks' ? (
             <button
               className="btn btn-danger-outline"
-              onClick={handleClearTasks}
+              onClick={() => void clearTasks()}
+              disabled={clearingTasks}
               style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}
             >
-              <Trash2 size={13} />
-              <span>清理历史</span>
+              {clearingTasks ? <RefreshCw size={13} className="animate-spin" /> : <Trash2 size={13} />}
+              <span>{clearingTasks ? '清理中…' : '清理历史'}</span>
             </button>
           ) : (
             <button
               className="btn btn-danger-outline"
-              onClick={handleClearJournal}
+              onClick={() => void clearJournal()}
+              disabled={clearingJournal}
               style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}
             >
-              <Trash2 size={13} />
-              <span>清空日记</span>
+              {clearingJournal ? <RefreshCw size={13} className="animate-spin" /> : <Trash2 size={13} />}
+              <span>{clearingJournal ? '清空中…' : '清空日记'}</span>
             </button>
           )}
         </div>
@@ -356,6 +368,8 @@ export default function SystemTasksPage() {
           </div>
         </div>
       )}
+
+      {toast && <Toast text={toast.text} error={toast.error} />}
     </div>
   )
 }

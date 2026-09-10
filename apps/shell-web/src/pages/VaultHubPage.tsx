@@ -23,6 +23,8 @@ import {
 } from 'lucide-react'
 import { api, ApiError } from '../api'
 import { EmptyState, SkeletonTable } from '../components'
+import { useAsyncAction } from '../hooks'
+import { usePageRefresh } from '../refresh'
 import { taskManager } from '../tasks'
 import type { DeploymentSnapshot, DiskSavingsReport, PluginAuditReport, ProfileView, VaultPlugin } from '../types'
 
@@ -113,6 +115,15 @@ export default function VaultHubPage() {
   useEffect(() => {
     void loadData()
   }, [])
+
+  // bug 7：把本页既有的 loadData 注册进全局刷新总线（顶栏全局刷新按钮会触发它）
+  usePageRefresh(loadData, 'vault')
+
+  // 工具栏「刷新」按钮：与全局刷新复用同一份 loadData，不新增任何请求逻辑（bug 1：点击即有可见进度）
+  const { run: refreshData, loading: reloading } = useAsyncAction(loadData, {
+    show: (text, error) => showNotice(text, error ? 'err' : 'ok'),
+    errorPrefix: '刷新失败：',
+  })
 
   // 一键反向收割
   async function handleHarvest() {
@@ -499,6 +510,23 @@ export default function VaultHubPage() {
           </p>
         </div>
         <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+          <button
+            className="btn sm"
+            onClick={() => void refreshData()}
+            disabled={reloading}
+            title="重新加载沙箱插件清单、空间指标、环境列表与部署历史"
+            style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}
+          >
+            {reloading ? (
+              <>
+                <RefreshCw size={12} className="animate-spin" /> 刷新中…
+              </>
+            ) : (
+              <>
+                <RefreshCw size={12} /> 刷新
+              </>
+            )}
+          </button>
           <button className="btn sm" onClick={() => setHistoryModal({ open: true })}>
             <History size={12} /> 部署历史
           </button>
@@ -513,8 +541,21 @@ export default function VaultHubPage() {
           >
             <HelpCircle size={12} /> 更新机制说明
           </button>
-          <button className="btn sm" onClick={() => void handleCheckUpdates()} disabled={actionLoading === 'updates'}>
-            <RefreshCw size={12} className={actionLoading === 'updates' ? 'animate-spin' : ''} /> 检查更新
+          <button
+            className="btn sm"
+            onClick={() => void handleCheckUpdates()}
+            disabled={actionLoading === 'updates'}
+            style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}
+          >
+            {actionLoading === 'updates' ? (
+              <>
+                <RefreshCw size={12} className="animate-spin" /> 正在检查更新…
+              </>
+            ) : (
+              <>
+                <RefreshCw size={12} /> 检查更新
+              </>
+            )}
           </button>
           {plugins.some((p) => p.hasUpdate) && (
             <button
@@ -527,8 +568,21 @@ export default function VaultHubPage() {
               <Zap size={12} /> {actionLoading === 'update-all' ? '正在自动更新…' : '自动更新全部'}
             </button>
           )}
-          <button className="btn sm primary" onClick={() => void handleHarvest()} disabled={actionLoading === 'harvest'}>
-            <Download size={12} /> 一键收割
+          <button
+            className="btn sm primary"
+            onClick={() => void handleHarvest()}
+            disabled={actionLoading === 'harvest'}
+            style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}
+          >
+            {actionLoading === 'harvest' ? (
+              <>
+                <RefreshCw size={12} className="animate-spin" /> 正在收割…
+              </>
+            ) : (
+              <>
+                <Download size={12} /> 一键收割
+              </>
+            )}
           </button>
         </div>
       </div>
@@ -828,6 +882,8 @@ export default function VaultHubPage() {
                   const isDanger = p.securityLevel === 'danger'
                   const isWarning = p.securityLevel === 'warning'
                   const isSafe = !isOfficial && !isDanger && !isWarning
+                  // 单插件审计进行中（bug 1：点击「审计」后必须有可见进度）
+                  const auditing = actionLoading === `audit-${p.id}`
 
                   return (
                     <tr
@@ -926,6 +982,7 @@ export default function VaultHubPage() {
                       <td style={{ padding: '10px' }}>
                         <button
                           onClick={() => void handleInspectAudit(p)}
+                          disabled={auditing}
                           style={{
                             border: 'none',
                             background: 'none',
@@ -954,10 +1011,11 @@ export default function VaultHubPage() {
                           }}
                           title="点击查看静态 AST 审计详情"
                         >
-                          {isOfficial && <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}><ShieldCheck size={11} /> 官方精选</span>}
-                          {isSafe && <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}><CheckCircle2 size={11} /> 安全认证</span>}
-                          {isWarning && <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}><AlertTriangle size={11} /> 需关注</span>}
-                          {isDanger && <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}><AlertCircle size={11} /> 高危警示</span>}
+                          {auditing && <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}><RefreshCw size={11} className="animate-spin" /> 审计中…</span>}
+                          {!auditing && isOfficial && <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}><ShieldCheck size={11} /> 官方精选</span>}
+                          {!auditing && isSafe && <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}><CheckCircle2 size={11} /> 安全认证</span>}
+                          {!auditing && isWarning && <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}><AlertTriangle size={11} /> 需关注</span>}
+                          {!auditing && isDanger && <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}><AlertCircle size={11} /> 高危警示</span>}
                         </button>
                       </td>
 
@@ -1010,9 +1068,14 @@ export default function VaultHubPage() {
                                   alignItems: 'center',
                                 }}
                                 title="从该环境卸载 (热拔插)"
+                                disabled={actionLoading === `unmount-${p.id}-${prof}`}
                                 onClick={() => void handleUnmount(p, prof)}
                               >
-                                <X size={10} />
+                                {actionLoading === `unmount-${p.id}-${prof}` ? (
+                                  <RefreshCw size={10} className="animate-spin" />
+                                ) : (
+                                  <X size={10} />
+                                )}
                               </button>
                               <button
                                 style={{
@@ -1026,9 +1089,14 @@ export default function VaultHubPage() {
                                   alignItems: 'center',
                                 }}
                                 title="一键回滚到前序版本"
+                                disabled={actionLoading === `rollback-${p.id}-${prof}`}
                                 onClick={() => void handleRollback(p, prof)}
                               >
-                                <RotateCcw size={10} />
+                                {actionLoading === `rollback-${p.id}-${prof}` ? (
+                                  <RefreshCw size={10} className="animate-spin" />
+                                ) : (
+                                  <RotateCcw size={10} />
+                                )}
                               </button>
                             </span>
                           ))}
@@ -1054,10 +1122,19 @@ export default function VaultHubPage() {
                           <button
                             className="btn sm"
                             onClick={() => void handleInspectAudit(p)}
+                            disabled={auditing}
                             title="查看安全审查报告"
                             style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}
                           >
-                            <ShieldCheck size={11} /> 审计
+                            {auditing ? (
+                              <>
+                                <RefreshCw size={11} className="animate-spin" /> 审计中…
+                              </>
+                            ) : (
+                              <>
+                                <ShieldCheck size={11} /> 审计
+                              </>
+                            )}
                           </button>
                           <button
                             className="btn danger sm"

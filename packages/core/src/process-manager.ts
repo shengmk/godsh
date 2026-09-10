@@ -190,18 +190,28 @@ export function spawnWebProfile(opts: WebProcessStartOptions): { info: WebProces
     profile: opts.profile,
     port: opts.port,
     pid: child.pid ?? null,
-    url: `http://127.0.0.1:${opts.port}`,
+    // ⚠️ 不要在这里伪造 `http://127.0.0.1:<port>`：当前 dsh 的认证地址形如
+    //    `http://127.0.0.1:<port>/?token=<...>`，无 token 的地址打开必然 401。
+    //    伪造初值会让所有 `?? 兜底` 失效并把这个假值当成权威值传下去（bug 6 根因）。
+    //    空串语义 = 「认证地址尚未就绪」。
+    url: '',
     pidFile: pidFilePath(opts.pidDir, opts.port),
     logFile,
     running: false,
   }
 
+  // stdout 可能把 URL 分块切开，保留尾部窗口参与匹配；并对同一 URL 只回调一次。
+  let tail = ''
   const captureUrl = (text: string) => {
-    const m = /dsh web:\s*(https?:\/\/[^\s\r\n]+)/.exec(text)
+    const window = tail + text
+    tail = window.slice(-512)
+    const m = /dsh web:\s*(https?:\/\/[^\s\r\n]+)/.exec(window)
     if (m && m[1]) {
       const captured = m[1].replace(/[),;]+$/, '')
-      info.url = captured
-      opts.onUrlCaptured?.(captured)
+      if (captured !== info.url) {
+        info.url = captured
+        opts.onUrlCaptured?.(captured)
+      }
     }
   }
 
@@ -307,6 +317,33 @@ export function extractDshWebUrl(logFile: string): string | null {
 }
 
 /**
+ * 该 URL 是否已带认证 token。
+ *
+ * 当前 dsh 的认证地址形如 `http://127.0.0.1:<port>/?token=<...>`；
+ * **不带 token 的地址打开必然 401**，因此任何「回退到 host:port」的兜底都是错的。
+ */
+export function hasAuthToken(url: string | null | undefined): url is string {
+  return typeof url === 'string' && /[?&]token=/.test(url)
+}
+
+/**
+ * 等待 dsh 打印出认证 URL（用于「快速启动」直接给出可点链接，而不是先给一个 401 地址）。
+ * 超时未拿到返回 null；`info.url` 会被 stdout 回调异步填充。
+ */
+export async function waitForWebUrl(
+  info: WebProcessInfo,
+  timeoutMs = 15_000,
+  intervalMs = 300
+): Promise<string | null> {
+  const deadline = Date.now() + timeoutMs
+  while (Date.now() < deadline) {
+    if (hasAuthToken(info.url)) return info.url
+    await new Promise((r) => setTimeout(r, intervalMs))
+  }
+  return hasAuthToken(info.url) ? info.url : null
+}
+
+/**
  * 反查某个 Profile 当前在系统中运行的所有 dsh / node 进程 PID。
  * 通过匹配命令行参数 `--profile <profileName>` 实现全系统精准反查。
  *
@@ -364,7 +401,21 @@ export async function killAllProfileProcesses(
   pidDir: string,
   profile: string,
 ): Promise<{ killed: number; pids: number[] }> {
-  const pids = await findProcessesByProfile(profile)
+  // 性能门控（回归修复）：WMI CommandLine 全系统扫描在本机实测需 3–5 秒
+  // （旧文档所称「加 -Filter 后降到毫秒级」并不成立）。
+  // 当 pidDir 下没有任何 service-pid-*.txt 时，说明本启动器从未为该环境登记过进程，
+  // 此时全系统扫描没有可回收对象 —— 直接跳过。
+  // 这修的是：全新环境首次启动 / 删除未启动过的环境被拖到 4–5 秒，
+  // 恰好越过前端与冒烟脚本的 5 秒超时，导致请求被判失败且 running 尚未登记。
+  const hasPidFiles = (() => {
+    try {
+      return existsSync(pidDir) && readdirSync(pidDir).some((f) => /^service-pid-\d+\.txt$/.test(f))
+    } catch {
+      return false
+    }
+  })()
+
+  const pids = hasPidFiles ? await findProcessesByProfile(profile) : []
   for (const pid of pids) {
     await killProcess(pid)
   }

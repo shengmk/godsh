@@ -3,7 +3,7 @@ import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from 'no
 import { dirname, extname, join, normalize, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { gzipSync } from 'node:zlib'
-import { MONOREPO_ROOT, DATA_DIR, findPidByPort, isPortListening, readLogTail, extractDshWebUrl, ensureDshBundles, ensureCacheIntegrity, ensureCompatibilityShims, isPortAvailable } from '@godsh/core'
+import { MONOREPO_ROOT, DATA_DIR, findPidByPort, isPortListening, readLogTail, extractDshWebUrl, hasAuthToken, ensureDshBundles, ensureCacheIntegrity, ensureCompatibilityShims, isPortAvailable } from '@godsh/core'
 import { fetchMarketIndex, warmUpLocalProxy } from '@godsh/marketplace'
 import { scanProfiles, ensureProfileWorkspace, ensureProfilePatches } from '@godsh/profile-manager'
 import type { CliContext } from './context.js'
@@ -11,7 +11,7 @@ import { routeHandlers } from './routes/index.js'
 import type { ApiHandler, RouteContext, RuntimeProc } from './routes/types.js'
 
 interface RuntimeStateFile {
-  entries: { profile: string; port: number; startedAt: number }[]
+  entries: { profile: string; port: number; startedAt: number; url?: string }[]
 }
 
 /** 运行状态持久化文件：pidDir/runtime.json，用于 API 服务重启后恢复仍在运行的 dsh 进程。 */
@@ -159,25 +159,35 @@ export async function startApiServer(ctx: CliContext, opts: ApiServerOptions): P
   for (const e of readRuntimeState(pidDir)) {
     if (running.has(e.profile)) continue
     if (await isPortListening(e.port)) {
-      const primaryLog = join(logDir, `dsh-${e.profile}-${e.port}.log`)
-      const fallbackLog = join(logDir, `dsh-web-${e.profile}-${e.port}.log`)
-      const logFile = existsSync(primaryLog) ? primaryLog : fallbackLog
-      const restoredUrl = extractDshWebUrl(logFile) ?? `http://127.0.0.1:${e.port}`
+      // 认证地址优先取 runtime.json 里持久化的值（含 token），其次回读日志；
+      // 都没有则留空串表示「未就绪」——绝不伪造 `host:port`（bug 6：无 token 必然 401）。
+      let restoredUrl = hasAuthToken(e.url) ? e.url : ''
+      if (!restoredUrl) {
+        const primaryLog = join(logDir, `dsh-${e.profile}-${e.port}.log`)
+        const fallbackLog = join(logDir, `dsh-web-${e.profile}-${e.port}.log`)
+        const logFile = existsSync(primaryLog) ? primaryLog : fallbackLog
+        const fromLog = extractDshWebUrl(logFile)
+        restoredUrl = hasAuthToken(fromLog) ? fromLog : ''
+      }
       running.set(e.profile, { port: e.port, child: null, startedAt: e.startedAt, status: 'running', url: restoredUrl })
     }
   }
   // 启动即刻清洗 runtime.json 中的僵尸/已死亡进程条目
-  writeRuntimeState(
-    pidDir,
-    [...running.entries()].map(([profile, p]) => ({ profile, port: p.port, startedAt: p.startedAt })),
-  )
+  writeRuntimeState(pidDir, runtimeEntries())
 
   /** 将当前运行表持久化到 runtime.json（start/stop/进程退出时调用）。 */
   function persistRuntime(): void {
-    writeRuntimeState(
-      pidDir,
-      [...running.entries()].map(([profile, p]) => ({ profile, port: p.port, startedAt: p.startedAt })),
-    )
+    writeRuntimeState(pidDir, runtimeEntries())
+  }
+
+  /** 运行表 → runtime.json 条目（含认证 URL，供 API 重启后直接复用，避免只能靠日志重建）。 */
+  function runtimeEntries(): RuntimeStateFile['entries'] {
+    return [...running.entries()].map(([profile, p]) => ({
+      profile,
+      port: p.port,
+      startedAt: p.startedAt,
+      url: p.url || undefined,
+    }))
   }
 
   /**
@@ -285,18 +295,20 @@ export async function startApiServer(ctx: CliContext, opts: ApiServerOptions): P
         pid = proc.child.pid ?? null
         if (proc.status === 'error') procError = proc.error ?? '启动失败，请查看日志'
       }
-      authUrl = proc.url ?? null
+      authUrl = hasAuthToken(proc.url) ? proc.url : null
     }
     if (runningState && port !== null) {
+      // 只要当前地址**不含 token** 就回读日志补齐（旧代码只在 authUrl 为 null 时才回读，
+      // 而 proc.url 曾被伪造成 host:port，导致永远不补 token —— bug 6 的机制 ③）。
       if (!authUrl) {
         const primaryLog = join(logDir, `dsh-${name}-${port}.log`)
         const fallbackLog = join(logDir, `dsh-web-${name}-${port}.log`)
         const logFile = existsSync(primaryLog) ? primaryLog : fallbackLog
-        authUrl = extractDshWebUrl(logFile)
+        const fromLog = extractDshWebUrl(logFile)
+        authUrl = hasAuthToken(fromLog) ? fromLog : null
       }
-      if (!authUrl) {
-        authUrl = `http://127.0.0.1:${port}`
-      }
+      // 注意：这里**不再**回退到 `http://127.0.0.1:<port>`。无 token 的地址必然 401，
+      // 返回 null 才是可判定状态，前端应显示「正在获取认证地址」。
     }
     return {
       name,

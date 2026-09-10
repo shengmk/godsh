@@ -251,3 +251,96 @@ test('bug5: 批量删除逐项独立，单项失败不影响其余', async () =>
     rmSync(fx.tempDir, { recursive: true, force: true })
   }
 })
+
+/* ------------------------------------------------------------------ */
+/* 未完成项收尾：GC 死链防护 / 子依赖推导 / 收割不纳管子插件                    */
+/* ------------------------------------------------------------------ */
+
+test('收尾: GC 不删除仍被 Profile 链接的池目录（防止制造死链）', async () => {
+  const fx = makeFixture()
+  try {
+    seedStore(fx, 'linked-plugin', '1.0.0')
+    await fx.vm.addFromMarket({ name: 'linked-plugin', version: '1.0.0' })
+    const id = idOf(fx, 'linked-plugin')
+    const deploy = await fx.vm.deployToProfile(id, 'web-test', fx.profilesDir)
+    assert.equal(deploy.ok, true)
+    const storeDirPath = join(fx.storeDir, 'linked-plugin@1.0.0')
+    assert.ok(existsSync(storeDirPath))
+
+    // 复现旧 remove 的坏状态：只从索引删记录、不解挂载（profile 仍链着池目录）
+    const vaultJsonPath = join(fx.dataDir, 'vault.json')
+    const vj = JSON.parse(readFileSync(vaultJsonPath, 'utf8')) as { plugins: { id: string }[] }
+    vj.plugins = vj.plugins.filter((p) => p.id !== id)
+    writeFileSync(vaultJsonPath, JSON.stringify(vj, null, 2), 'utf8')
+
+    const vm2 = new VaultManager(fx.dataDir)
+    const gc = await vm2.garbageCollect(fx.profilesDir)
+
+    assert.ok(
+      gc.keptDirs.includes('linked-plugin@1.0.0'),
+      `仍被环境链接的池目录必须保留，实际 kept=[${gc.keptDirs.join(',')}] removed=[${gc.removedDirs.join(',')}]`
+    )
+    assert.ok(!gc.removedDirs.includes('linked-plugin@1.0.0'))
+    assert.ok(existsSync(storeDirPath), '池目录必须仍在')
+    // 关键：环境的 junction 没有被变成死链
+    assert.ok(existsSync(join(fx.profileDir, 'node_modules', 'linked-plugin', 'package.json')))
+  } finally {
+    rmSync(fx.tempDir, { recursive: true, force: true })
+  }
+})
+
+test('收尾: 注入父插件时自动带上沙箱内的子依赖（契约表未覆盖的依赖边）', async () => {
+  const fx = makeFixture()
+  try {
+    seedStore(fx, 'dsh-child-dep', '1.0.0')
+    seedStore(fx, 'dsh-parent-plugin', '1.0.0', { 'dsh-child-dep': '^1.0.0' })
+    await fx.vm.addFromMarket({ name: 'dsh-child-dep', version: '1.0.0' })
+    await fx.vm.addFromMarket({ name: 'dsh-parent-plugin', version: '1.0.0' })
+
+    const parentId = idOf(fx, 'dsh-parent-plugin')
+    const r = await fx.vm.deployToProfile(parentId, 'web-test', fx.profilesDir)
+
+    assert.equal(r.ok, true)
+    assert.ok(
+      r.derivedCompanions?.includes('dsh-child-dep'),
+      `应从父插件 package.json 推导出子依赖，实际 derived=[${(r.derivedCompanions ?? []).join(',')}]`
+    )
+    const pkg = readProfilePkg(fx)
+    assert.ok(pkg.dependencies?.['dsh-child-dep'], '子依赖必须写入 dependencies')
+    assert.ok(
+      existsSync(join(fx.profileDir, 'node_modules', 'dsh-child-dep', 'package.json')),
+      '子依赖必须物理可解析（否则插件树不完整 → 环境打不开）'
+    )
+  } finally {
+    rmSync(fx.tempDir, { recursive: true, force: true })
+  }
+})
+
+test('收尾: 收割不把「别人的子依赖」纳管为独立条目（防止删除后复活）', async () => {
+  const fx = makeFixture()
+  try {
+    const nm = join(fx.profileDir, 'node_modules')
+    const parentDir = join(nm, 'dsh-harvest-parent')
+    const childDir = join(nm, 'dsh-harvest-child')
+    mkdirSync(parentDir, { recursive: true })
+    mkdirSync(childDir, { recursive: true })
+    writeFileSync(
+      join(parentDir, 'package.json'),
+      JSON.stringify({ name: 'dsh-harvest-parent', version: '1.0.0', dependencies: { 'dsh-harvest-child': '^1.0.0' } }),
+      'utf8'
+    )
+    writeFileSync(
+      join(childDir, 'package.json'),
+      JSON.stringify({ name: 'dsh-harvest-child', version: '1.0.0' }),
+      'utf8'
+    )
+
+    const res = await fx.vm.harvestFromProfiles(fx.profilesDir)
+    const names = res.harvested.map((p) => p.name)
+
+    assert.ok(names.includes('dsh-harvest-parent'), `父插件应被收割，实际=[${names.join(',')}]`)
+    assert.ok(!names.includes('dsh-harvest-child'), '子插件不应被单独纳管（否则删除后会以新 id 复活）')
+  } finally {
+    rmSync(fx.tempDir, { recursive: true, force: true })
+  }
+})

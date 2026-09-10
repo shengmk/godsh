@@ -3,7 +3,7 @@ import assert from 'node:assert/strict'
 import { mkdtempSync, rmSync, writeFileSync, existsSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { findProcessesByProfile, killAllProfileProcesses, extractDshWebUrl } from './process-manager.js'
+import { findProcessesByProfile, killAllProfileProcesses, extractDshWebUrl, hasAuthToken } from './process-manager.js'
 import { ConfigStore } from './config-store.js'
 import { run } from './run.js'
 
@@ -99,5 +99,20 @@ test('extractDshWebUrl: 从日志中提取含 token 的认证 URL', () => {
   } finally {
     rmSync(dir, { recursive: true, force: true })
   }
+})
+
+test('hasAuthToken: 只有含 token 的地址才视为可用（bug 6 的核心守卫）', () => {
+  // 无 token 的地址在当前 dsh 上必然 401，绝不能被当作可点链接
+  assert.equal(hasAuthToken('http://127.0.0.1:3080'), false)
+  assert.equal(hasAuthToken('http://127.0.0.1:3080/'), false)
+  // 带 token（根路径形式与多参数形式）
+  assert.equal(hasAuthToken('http://127.0.0.1:3296/?token=X'), true)
+  assert.equal(hasAuthToken('http://127.0.0.1:3296/?a=1&token=X'), true)
+  // 空值/未就绪
+  assert.equal(hasAuthToken(''), false)
+  assert.equal(hasAuthToken(null), false)
+  assert.equal(hasAuthToken(undefined), false)
+  // 近似但非 token 的参数名不应误判
+  assert.equal(hasAuthToken('http://127.0.0.1:3296/?tokenizer=X'), false)
 })
 
