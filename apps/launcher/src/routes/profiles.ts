@@ -268,7 +268,7 @@ export const profilesHandler: ApiHandler = async (ctx, _req, res, method, seg, b
       running.delete(name)
       ctx.persistRuntime()
     }
-    await killAllProfileProcesses(pidDir, name)
+    await killAllProfileProcesses(pidDir, name, proc ? { ports: [proc.port] } : {})
     try {
       removeProfile(profilesDir, name)
       ctx.sendJson(res, 200, { ok: true })
@@ -292,7 +292,7 @@ export const profilesHandler: ApiHandler = async (ctx, _req, res, method, seg, b
           invalidatePortProbe(existing.port)
           running.delete(name)
         }
-        await killAllProfileProcesses(pidDir, name)
+        await killAllProfileProcesses(pidDir, name, existing ? { ports: [existing.port] } : {})
       } else if (existing && existing.status !== 'error') {
         ctx.sendJson(res, 409, { error: `Profile "${name}" 已在运行` })
         return
@@ -407,7 +407,7 @@ export const profilesHandler: ApiHandler = async (ctx, _req, res, method, seg, b
         invalidatePortProbe(existing.port)
         running.delete(name)
       }
-      await killAllProfileProcesses(pidDir, name)
+      await killAllProfileProcesses(pidDir, name, existing ? { ports: [existing.port] } : {})
       ctx.persistRuntime()
 
       // 短暂等待 OS 释放 socket 端口
@@ -501,8 +501,8 @@ export const profilesHandler: ApiHandler = async (ctx, _req, res, method, seg, b
       invalidatePortProbe(proc.port)
       running.delete(name)
     }
-    // 强制彻底清理该 profile 的所有孤儿进程
-    await killAllProfileProcesses(pidDir, name)
+    // 释放该 profile 的残留进程（端口快路径；?06 起不再在请求内做命令行全扫描）
+    await killAllProfileProcesses(pidDir, name, proc ? { ports: [proc.port] } : {})
     ctx.persistRuntime()
     ctx.sendJson(res, 200, { ok: true, message: `已停止 ${name} 及释放所有关联端口` })
     return true

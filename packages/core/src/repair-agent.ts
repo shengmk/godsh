@@ -117,7 +117,9 @@ export class RepairAgent {
       // Phase 2: 进程隔离与优雅停机
       await executePhase(2, '安全隔离与残留进程终结', async () => {
         const pidDir = join(dshHome, 'run')
-        const killRes = await killAllProfileProcesses(pidDir, profileName)
+        // 自愈是后台工作流，不赶时间：这里显式要「深扫」，
+        // 因为自愈的目标就是「清干净」，宁可多花几秒（Windows 上命令行全扫描约 4 秒）也要找全。
+        const killRes = await killAllProfileProcesses(pidDir, profileName, { deep: true })
         return {
           status: killRes.killed > 0 ? 'repaired' : 'passed',
           detail: killRes.killed > 0 ? `已安全清理 ${killRes.killed} 个残留进程与端口句柄` : '无残留孤儿进程',

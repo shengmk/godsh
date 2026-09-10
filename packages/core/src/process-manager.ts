@@ -344,6 +344,29 @@ export async function waitForWebUrl(
 }
 
 /**
+ * 构造「按 Profile 反查进程」的 PowerShell 查询串（导出仅为可回归测试）。
+ *
+ * 性能结论（本机 Windows PowerShell 5.1 实测，2026-09-10）：
+ * 同一查询**加上 `-Property ProcessId,CommandLine`** 后，
+ * 最坏耗时 3796 ms → 487 ms（单次最坏 7879 ms → 730 ms），命中结果完全一致。
+ * 慢的原因不是 WMI 枚举本身，而是 `Get-CimInstance` 默认要为每个命中进程
+ * 构造并序列化**全部属性**的 CIM 对象；只索取这两个属性即可绕开这部分开销。
+ *
+ * 为什么不改用 `netstat -ano`：netstat 全量实测 44–233 ms，确实更快，
+ * 但它只能回答「端口 ↔ PID」，无法回答「该 PID 的命令行里有没有这个 --profile」。
+ * 若改成按监听端口反查，会漏掉尚未绑定端口、或已停止监听但进程仍活着的残留进程，
+ * stop / restart 就杀不干净。因此保留 WMI，只做属性裁剪。
+ */
+export function buildProfileProcessQuery(profile: string): string | null {
+  const safeProfile = profile.replace(/[^a-zA-Z0-9_-]/g, '')
+  if (!safeProfile) return null
+  // 注意 `["'']`：PowerShell 的单引号字符串里，字面量单引号必须写成两个单引号。
+  // 曾经写成 `["']`，导致整条命令语法错误（"Unexpected token ']'"），
+  // 而调用处的 `catch {}` 把错误吞掉，于是本函数在 Windows 上「永远返回空数组、还白等 3–8 秒」。
+  return `Get-CimInstance Win32_Process -Property ProcessId,CommandLine -Filter "Name = 'node.exe' or Name = 'cmd.exe'" | Where-Object { $_.CommandLine -and ($_.CommandLine -match '--profile\\s+["'']?${safeProfile}["'']?(\\s|$)') } | Select-Object -ExpandProperty ProcessId`
+}
+
+/**
  * 反查某个 Profile 当前在系统中运行的所有 dsh / node 进程 PID。
  * 通过匹配命令行参数 `--profile <profileName>` 实现全系统精准反查。
  *
@@ -358,13 +381,18 @@ export async function findProcessesByProfile(profile: string): Promise<number[]>
   if (!safeProfile) return pids
 
   if (process.platform === 'win32') {
-    // 性能大幅优化：在 WMI 阶段限制仅检索 node.exe 和 cmd.exe，避免全量序列化系统数千进程（单次耗时降低 95%）
-    const psCmd = `Get-CimInstance Win32_Process -Filter "Name = 'node.exe' or Name = 'cmd.exe'" | Where-Object { $_.CommandLine -and ($_.CommandLine -match '--profile\\s+["\']?${safeProfile}["\']?(\\s|$)') } | Select-Object -ExpandProperty ProcessId`
+    // 性能：查询串只索取 ProcessId 与 CommandLine（见 buildProfileProcessQuery 的实测结论）
+    const psCmd = buildProfileProcessQuery(safeProfile)
+    if (!psCmd) return pids
     try {
       const r = await execFileAsync('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', psCmd], {
         windowsHide: true,
         encoding: 'utf8',
-        timeout: 8000,
+        // 超时给足 20 秒：本机实测 powershell.exe 冷启动本身就要 3.2–7.3 秒，
+        // 原先的 8000ms 几乎没有余量 —— 机器一忙就顶到超时，被 catch 吞成「空数组」，
+        // 于是「深扫」在负载下静默失效（这也是它历史上看起来一直没用的第二个原因）。
+        // 该函数如今只被 deep: true 的后台自愈路径调用，放宽超时不占用交互路径。
+        timeout: 20_000,
         maxBuffer: 16 * 1024 * 1024,
       })
       if (r.stdout) {
@@ -375,7 +403,11 @@ export async function findProcessesByProfile(profile: string): Promise<number[]>
           }
         }
       }
-    } catch {}
+    } catch (e) {
+      // 不许静默：正因为这里曾经是空 catch，查询串的语法错误（见 buildProfileProcessQuery）
+      // 才被隐藏了很久，表现为「清理残留进程永远无效，还白等 3–8 秒」。
+      console.warn('[process-manager] findProcessesByProfile 查询失败（返回空结果）:', e instanceof Error ? e.message : String(e))
+    }
     return pids
   }
 
@@ -395,32 +427,87 @@ export async function findProcessesByProfile(profile: string): Promise<number[]>
 }
 
 /**
- * 彻底终止属于某 Profile 的所有运行中与孤儿进程，并清理其关联的 PID 文件与端口探测缓存。
+ * 读取 pidDir/runtime.json 里某个 Profile 最近登记的端口（免 PowerShell 的端口来源之一）。
+ * runtime.json 由 server.ts 维护，结构为 `{ entries: [{ profile, port, startedAt, url? }] }`。
+ */
+function readRuntimePorts(pidDir: string, profile: string): number[] {
+  try {
+    const raw = JSON.parse(readFileSync(join(pidDir, 'runtime.json'), 'utf8')) as {
+      entries?: { profile?: string; port?: number }[]
+    }
+    return (raw.entries ?? [])
+      .filter((e) => e?.profile === profile && typeof e.port === 'number' && e.port > 0)
+      .map((e) => e.port as number)
+  } catch {
+    return []
+  }
+}
+
+/** `killAllProfileProcesses` 的可选项。 */
+export interface KillProfileOptions {
+  /**
+   * 本次调用方**已知属于该 Profile** 的端口。
+   * 传入后，定位残留进程只需读 pid 文件 + 查 netstat 快照（约 0.1 秒，完全不 spawn PowerShell）。
+   */
+  ports?: number[]
+  /**
+   * 是否额外执行「按 `--profile` 匹配命令行」的全系统扫描。
+   *
+   * ⚠️ 该扫描在 Windows 上必须 spawn 一次 `powershell.exe`，
+   * 而本机实测 `powershell.exe -NoProfile -NonInteractive -Command "1"`（空跑）
+   * 就要 3.2–7.3 秒（`Get-CimInstance` 的 `-Property` 裁剪只能省下其中约 0.5 秒，救不了大局）。
+   * 因此默认关闭，只留给自愈等后台流程；启动 / 停止 / 删除路径一律走端口快路径。
+   */
+  deep?: boolean
+}
+
+/**
+ * 终止属于某 Profile 的残留进程，并清理其关联的 PID 文件与端口探测缓存。
+ *
+ * 定位策略（?06 重写；主体行为不变，只把「慢的定位手段」换成「快的」）：
+ * 1. **端口快路径（默认，免 PowerShell）**：对调用方给出的每个端口，
+ *    既取 pid 文件里登记的 PID，也取 netstat 快照里**当前真正监听该端口**的 PID。
+ *    后者正是仓库里已记录的孤儿形态——`dsh` 在 Windows 上走 cmd shim，
+ *    shim 退出后真实 dsh（node）被孤儿化但仍占着端口（同类逻辑见 `stopWeb` 与 `findPidByPort`）。
+ *    `killProcess` 用 `taskkill /T`，会连带杀掉子树。
+ * 2. **深扫（`deep: true`，仅后台流程）**：额外按 `--profile <name>` 匹配命令行全系统反查，
+ *    用于「端口信息缺失」或「自愈要求清干净」的场景。
+ *
+ * 为什么不无条件用深扫：那是启动 / 停止 / 删除路径上 3–8 秒的固定开销，
+ * 曾把冒烟脚本与前端 5 秒超时顶爆，用户看到的是「点了没反应」。
  */
 export async function killAllProfileProcesses(
   pidDir: string,
   profile: string,
+  opts: KillProfileOptions = {},
 ): Promise<{ killed: number; pids: number[] }> {
-  // 性能门控（回归修复）：WMI CommandLine 全系统扫描在本机实测需 3–5 秒
-  // （旧文档所称「加 -Filter 后降到毫秒级」并不成立）。
-  // 当 pidDir 下没有任何 service-pid-*.txt 时，说明本启动器从未为该环境登记过进程，
-  // 此时全系统扫描没有可回收对象 —— 直接跳过。
-  // 这修的是：全新环境首次启动 / 删除未启动过的环境被拖到 4–5 秒，
-  // 恰好越过前端与冒烟脚本的 5 秒超时，导致请求被判失败且 running 尚未登记。
-  const hasPidFiles = (() => {
-    try {
-      return existsSync(pidDir) && readdirSync(pidDir).some((f) => /^service-pid-\d+\.txt$/.test(f))
-    } catch {
-      return false
-    }
-  })()
+  const found = new Set<number>()
 
-  const pids = hasPidFiles ? await findProcessesByProfile(profile) : []
+  // 1) 端口快路径：pid 文件登记的 PID + 真正占用该端口的 PID（netstat 快照有 500ms 缓存）。
+  //    端口来源 = 调用方给出的（最准）+ pidDir/runtime.json 里该 Profile 最近登记的。
+  const ports = new Set<number>(opts.ports ?? [])
+  for (const p of readRuntimePorts(pidDir, profile)) ports.add(p)
+  for (const port of ports) {
+    if (!Number.isFinite(port) || port <= 0) continue
+    const recorded = readPidFile(pidDir, port)
+    if (recorded && isProcessAlive(recorded)) found.add(recorded)
+    const owner = await findPidByPort(port)
+    if (owner) found.add(owner)
+  }
+
+  // 2) 深扫（可选）：按 --profile 匹配命令行
+  if (opts.deep) {
+    for (const pid of await findProcessesByProfile(profile)) found.add(pid)
+  }
+
+  const pids = Array.from(found)
   for (const pid of pids) {
     await killProcess(pid)
   }
 
-  // 扫描 pidDir 下的 service-pid-*.txt，清理已死亡进程或属于该 profile 的 pid 文件
+  // 扫描 pidDir 下的 service-pid-*.txt：清理「本次已终止」或「进程已死亡」的登记文件。
+  // 注意 pidDir 是**全 Profile 共享**的（context.ts 里 pidDir = data/runtime），
+  // 因此绝不能按「文件存在」就杀，只能按上面的端口归属判断。
   if (existsSync(pidDir)) {
     try {
       const files = readdirSync(pidDir)
@@ -429,7 +516,7 @@ export async function killAllProfileProcesses(
         if (match) {
           const port = Number.parseInt(match[1]!, 10)
           const recordedPid = readPidFile(pidDir, port)
-          if (recordedPid && (pids.includes(recordedPid) || !isProcessAlive(recordedPid))) {
+          if (recordedPid && (found.has(recordedPid) || !isProcessAlive(recordedPid))) {
             rmSync(join(pidDir, file), { force: true })
             invalidatePortProbe(port)
           }

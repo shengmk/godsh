@@ -45,17 +45,33 @@ if (-not $SkipBuild) {
   # 1) 前置构建：后端单文件 + 前端（tauri 模式）
   Write-Host "==> 1/5 打包后端 + 构建前端..." -ForegroundColor Cyan
   Set-Location $root
-  node node_modules/esbuild/bin/esbuild apps/launcher/src/cli.ts --bundle --platform=node --format=esm --outfile=apps/launcher/dist/server.mjs
+  # 必须走 scripts/build-server.mjs，不能在这里裸调 esbuild：
+  # 该脚本会把根 package.json 的 version 经 esbuild --define 注入 __GODSH_VERSION__。
+  # 裸调 esbuild 会漏掉注入，产物在打包路径下读不到根 package.json，
+  # 于是 /api/health 自报 `0.0.0-dev`（?02 实测：布局 A 复现，布局 C 修复后为 0.6.1）。
+  node scripts/build-server.mjs
   if ($LASTEXITCODE -ne 0) { Write-Host "后端打包失败" -ForegroundColor Red; exit 1 }
   node apps/shell-web/node_modules/vite/bin/vite.js build apps/shell-web --mode tauri
   if ($LASTEXITCODE -ne 0) { Write-Host "前端构建失败" -ForegroundColor Red; exit 1 }
 
-  # 2) 填充 resources（server.mjs + templates）
+  # 2) 填充 resources（server.mjs + templates + 前端静态资源）
   $resDir = Join-Path $root "apps\launcher\src-tauri\resources"
   New-Item -ItemType Directory -Force $resDir | Out-Null
   Copy-Item (Join-Path $root "apps\launcher\dist\server.mjs") (Join-Path $resDir "server.mjs") -Force
   if (Test-Path (Join-Path $root "kernels\templates")) {
     robocopy (Join-Path $root "kernels\templates") (Join-Path $resDir "templates") /E /NFL /NDL /NJH /NJS /NP | Out-Null
+  }
+  # 前端静态资源也必须随包发布：node 后端在「与 server.mjs 同级」处找 shell-web/
+  # （见 apps/launcher/src/server.ts 的 serveStatic 兜底链）。
+  # 桌面窗口用的是编译进 exe 的 frontendDist，所以缺了它 GUI 仍正常，
+  # 但用浏览器打开 http://127.0.0.1:<port>/ 只会看到「前端尚未构建」占位文本（?02 实测）。
+  $resShell = Join-Path $resDir "shell-web"
+  if (Test-Path $resShell) { Remove-Item $resShell -Recurse -Force }
+  $shellDist = Join-Path $root "apps\shell-web\dist"
+  if (Test-Path $shellDist) {
+    robocopy $shellDist $resShell /E /NFL /NDL /NJH /NJS /NP | Out-Null
+  } else {
+    Write-Host "警告: 未找到 $shellDist，打包版将无法用浏览器打开界面" -ForegroundColor Yellow
   }
 
   # 3) tauri build（内嵌前端 + 官方 NSIS 安装器；beforeBuildCommand 会再次构建前端，幂等无害）
