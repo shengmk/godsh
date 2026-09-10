@@ -1,8 +1,11 @@
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync, createWriteStream, readdirSync } from 'node:fs'
-import { spawnSync, type ChildProcess } from 'node:child_process'
+import { execFile, type ChildProcess } from 'node:child_process'
+import { promisify } from 'node:util'
 import http from 'node:http'
 import { join } from 'node:path'
 import { killProcess, runSync, spawnCommand } from './run.js'
+
+const execFileAsync = promisify(execFile)
 
 export interface WebProcessStartOptions {
   profile: string
@@ -278,8 +281,13 @@ export function extractDshWebUrl(logFile: string): string | null {
 /**
  * 反查某个 Profile 当前在系统中运行的所有 dsh / node 进程 PID。
  * 通过匹配命令行参数 `--profile <profileName>` 实现全系统精准反查。
+ *
+ * ⚠️ 必须保持异步（修复 R3 同类问题）：早期实现使用 `spawnSync` 同步执行
+ * powershell/WMI 查询（超时 8000ms），而本函数在每次「启动 / 停止 / 重启 / 自愈」
+ * 环境时都会被调用，会在此期间冻结整个单线程 HTTP 服务，
+ * 前端表现为「点了没反应」。此处改为异步子进程。
  */
-export function findProcessesByProfile(profile: string): number[] {
+export async function findProcessesByProfile(profile: string): Promise<number[]> {
   const pids: number[] = []
   const safeProfile = profile.replace(/[^a-zA-Z0-9_-]/g, '')
   if (!safeProfile) return pids
@@ -288,10 +296,11 @@ export function findProcessesByProfile(profile: string): number[] {
     // 性能大幅优化：在 WMI 阶段限制仅检索 node.exe 和 cmd.exe，避免全量序列化系统数千进程（单次耗时降低 95%）
     const psCmd = `Get-CimInstance Win32_Process -Filter "Name = 'node.exe' or Name = 'cmd.exe'" | Where-Object { $_.CommandLine -and ($_.CommandLine -match '--profile\\s+["\']?${safeProfile}["\']?(\\s|$)') } | Select-Object -ExpandProperty ProcessId`
     try {
-      const r = spawnSync('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', psCmd], {
+      const r = await execFileAsync('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', psCmd], {
         windowsHide: true,
         encoding: 'utf8',
         timeout: 8000,
+        maxBuffer: 16 * 1024 * 1024,
       })
       if (r.stdout) {
         for (const line of r.stdout.split(/\r?\n/)) {
@@ -305,16 +314,18 @@ export function findProcessesByProfile(profile: string): number[] {
     return pids
   }
 
-  // POSIX 平台：pgrep -f
-  const r = runSync('pgrep', ['-f', `--profile ${safeProfile}`])
-  if (r.ok && r.stdout) {
-    for (const line of r.stdout.split(/\r?\n/)) {
-      const pid = Number.parseInt(line.trim(), 10)
-      if (Number.isFinite(pid) && pid > 0) {
-        pids.push(pid)
+  // POSIX 平台：pgrep -f（异步）
+  try {
+    const r = await execFileAsync('pgrep', ['-f', `--profile ${safeProfile}`], { encoding: 'utf8' })
+    if (r.stdout) {
+      for (const line of r.stdout.split(/\r?\n/)) {
+        const pid = Number.parseInt(line.trim(), 10)
+        if (Number.isFinite(pid) && pid > 0) {
+          pids.push(pid)
+        }
       }
     }
-  }
+  } catch {}
   return pids
 }
 
@@ -325,7 +336,7 @@ export async function killAllProfileProcesses(
   pidDir: string,
   profile: string,
 ): Promise<{ killed: number; pids: number[] }> {
-  const pids = findProcessesByProfile(profile)
+  const pids = await findProcessesByProfile(profile)
   for (const pid of pids) {
     await killProcess(pid)
   }

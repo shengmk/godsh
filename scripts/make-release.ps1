@@ -1,8 +1,9 @@
 # godsh 发布打包脚本（本地 / GitHub Actions 双环境自适应）
 # 流程：打包后端 → 构建前端(tauri) → tauri build（嵌入前端）→ 打 ZIP + 复制安装器 → SHA256
-# 用法: pwsh -File scripts/make-release.ps1 [-Version 0.5.1]
+# 用法: pwsh -File scripts/make-release.ps1 [-Version x.y.z]
+#       -Version 省略时自动取唯一真源（根 package.json 的 version）。
 param(
-  [string]$Version = "0.6.1",
+  [string]$Version = "",
   [switch]$SkipBuild
 )
 
@@ -10,6 +11,12 @@ $ErrorActionPreference = "Continue"
 $root = Split-Path -Parent $PSScriptRoot
 $releaseDir = Join-Path $root "release"
 New-Item -ItemType Directory -Force $releaseDir | Out-Null
+
+# 版本号兜底：从唯一真源读取，避免脚本内再写死一个会漂移的默认值
+if (-not $Version) {
+  $Version = (Get-Content (Join-Path $root "package.json") -Raw | ConvertFrom-Json).version
+  Write-Host "未指定 -Version，已从 package.json 读取: $Version" -ForegroundColor Gray
+}
 $tauri = Join-Path $root "node_modules\@tauri-apps\cli\tauri.js"
 
 Write-Host "==> 0/5 环境检测" -ForegroundColor Cyan

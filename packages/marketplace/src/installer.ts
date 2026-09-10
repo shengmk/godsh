@@ -1,8 +1,11 @@
 import { run, type RunResult } from '@godsh/core'
-import { execSync } from 'node:child_process'
+import { execFile } from 'node:child_process'
 import { existsSync } from 'node:fs'
 import { join } from 'node:path'
 import { homedir } from 'node:os'
+import { promisify } from 'node:util'
+
+const execFileAsync = promisify(execFile)
 
 export type InstallAction = 'add' | 'remove' | 'update'
 
@@ -12,51 +15,99 @@ export const PLUGIN_ACTION_TIMEOUT_MS = 180_000
 /** 常见本地代理端口（Clash/v2rayN/系统代理等默认监听）。 */
 const LOCAL_PROXY_PORTS = [7890, 7897, 10809, 10808, 1080, 12450, 8888]
 
+/** 代理探测结果缓存时长。 */
+const PROXY_CACHE_TTL_MS = 60_000
+
 let cachedProxy: { at: number; value: string | null } | null = null
+let inflightProbe: Promise<string | null> | null = null
 
 /**
- * 探测可用的本地 HTTP 代理（同步阻塞短超时）。找不到返回 null。
+ * 探测可用的本地 HTTP 代理。找不到返回 null。
  * 目的：pnpm 安装 github:/http-tgz 源插件时走代理，否则 GitHub 443 被墙导致下载失败。
- * 注：仅当代理真的能访问目标时才返回；附带 60s 内存缓存，避免短时间内重复扫描多个端口阻塞进程。
+ * 注：仅当代理真的能访问目标时才返回；附带 60s 内存缓存。
+ *
+ * ⚠️ 必须保持异步：早期实现使用 `execSync` 在请求线程内同步执行 netstat/curl，
+ * 最坏会阻塞 Node 事件循环约 35 秒，导致整个单线程 HTTP 服务在此期间无法响应
+ * 任何请求（前端表现为「所有点击都没反应」）。此处全部改为异步子进程。
  */
-export function detectLocalProxy(): string | null {
-  if (cachedProxy && Date.now() - cachedProxy.at < 60_000) {
+export async function detectLocalProxy(): Promise<string | null> {
+  if (cachedProxy && Date.now() - cachedProxy.at < PROXY_CACHE_TTL_MS) {
     return cachedProxy.value
   }
-  // 1) 显式环境变量优先
+  // 1) 显式环境变量优先（同步可得，无需探测）
   const envProxy = process.env.HTTP_PROXY || process.env.http_proxy || process.env.HTTPS_PROXY || process.env.https_proxy
   if (envProxy) {
     cachedProxy = { at: Date.now(), value: envProxy }
     return envProxy
   }
-  // 2) 同步探测常见本地代理端口，并要求能真正访问 github（避免失效代理）
-  for (const port of LOCAL_PROXY_PORTS) {
-    try {
-      const out = execSync(`netstat -ano -p tcp | findstr "127.0.0.1:${port} LISTENING"`, {
-        encoding: 'utf8',
-        timeout: 1000,
-        windowsHide: true,
-        stdio: ['ignore', 'pipe', 'ignore'],
-      })
-      if (!out.includes('LISTENING')) continue
-      // 连通性验证：走代理访问 github（失败则跳过该端口）
-      try {
-        execSync(
-          `curl.exe -s -o NUL -w "%{http_code}" --max-time 3 -x http://127.0.0.1:${port} https://github.com 2>NUL | findstr /R "200 301 302 307"`,
-          { timeout: 4000, windowsHide: true, stdio: 'ignore' },
-        )
-        const val = `http://127.0.0.1:${port}`
-        cachedProxy = { at: Date.now(), value: val }
-        return val
-      } catch {
-        /* 该端口无法访问 github，试下一个 */
-      }
-    } catch {
-      /* 继续 */
+  // 2) 异步探测常见本地代理端口，并要求能真正访问 github（避免失效代理）
+  //    并发去重：同一时刻只跑一次探测，避免并发安装重复扫描。
+  inflightProbe ??= probeLocalProxy()
+    .then((value) => {
+      cachedProxy = { at: Date.now(), value }
+      return value
+    })
+    .finally(() => {
+      inflightProbe = null
+    })
+  return inflightProbe
+}
+
+/**
+ * 启动期预热（fire-and-forget）：把首次代理探测的等待从「用户第一次安装插件」
+ * 挪到「后端启动」阶段。失败不影响启动。
+ */
+export function warmUpLocalProxy(): void {
+  void detectLocalProxy().catch(() => {
+    /* 代理探测失败属正常情况（多数机器无本地代理） */
+  })
+}
+
+/** 读取 netstat 一次，返回其中处于 LISTENING 的候选代理端口。 */
+async function listeningProxyPorts(): Promise<number[]> {
+  let stdout: string
+  try {
+    const res = await execFileAsync('netstat', ['-ano', '-p', 'tcp'], {
+      timeout: 3000,
+      windowsHide: true,
+      encoding: 'utf8',
+      maxBuffer: 16 * 1024 * 1024,
+    })
+    stdout = res.stdout
+  } catch {
+    return [] // netstat 不可用 → 视为无候选
+  }
+  const listening = new Set<number>()
+  for (const line of stdout.split(/\r?\n/)) {
+    if (!line.includes('LISTENING')) continue
+    for (const port of LOCAL_PROXY_PORTS) {
+      if (line.includes(`127.0.0.1:${port}`)) listening.add(port)
     }
   }
-  cachedProxy = { at: Date.now(), value: null }
-  return null
+  return [...listening]
+}
+
+/** 通过指定端口访问 github 是否成功（仅代理连通才算可用）。 */
+async function canReachGithubVia(port: number): Promise<boolean> {
+  try {
+    const res = await execFileAsync(
+      'curl.exe',
+      ['-s', '-o', 'NUL', '-w', '%{http_code}', '--max-time', '3', '-x', `http://127.0.0.1:${port}`, 'https://github.com'],
+      { timeout: 4000, windowsHide: true, encoding: 'utf8' },
+    )
+    return /^(200|301|302|307)$/.test(res.stdout.trim())
+  } catch {
+    return false // 该端口无法访问 github
+  }
+}
+
+/** 并发验证候选端口，返回第一个可用代理。 */
+async function probeLocalProxy(): Promise<string | null> {
+  const candidates = await listeningProxyPorts()
+  if (candidates.length === 0) return null
+  const checks = await Promise.all(candidates.map(async (port) => ({ port, ok: await canReachGithubVia(port) })))
+  const hit = checks.find((c) => c.ok)
+  return hit ? `http://127.0.0.1:${hit.port}` : null
 }
 
 export interface PluginActionOptions {
@@ -70,7 +121,7 @@ export interface PluginActionOptions {
  * 支持单包或多包批量安装；支持超时与实时流式输出回调。
  * 自动注入本地代理环境变量或国内镜像源 + 统一 pnpm store-dir。
  */
-export function pluginAction(
+export async function pluginAction(
   profile: string,
   action: InstallAction,
   pkg: string | string[],
@@ -79,7 +130,8 @@ export function pluginAction(
   const timeoutMs = typeof optsOrTimeout === 'number' ? optsOrTimeout : optsOrTimeout?.timeoutMs ?? PLUGIN_ACTION_TIMEOUT_MS
   const onLog = typeof optsOrTimeout === 'object' ? optsOrTimeout?.onLog : undefined
 
-  const proxy = detectLocalProxy()
+  // 异步探测：绝不在请求线程内同步阻塞（见 detectLocalProxy 注释）。
+  const proxy = await detectLocalProxy()
   const env: Record<string, string> = {}
   if (proxy) {
     env.HTTP_PROXY = proxy

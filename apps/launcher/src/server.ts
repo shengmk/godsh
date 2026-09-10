@@ -4,7 +4,7 @@ import { dirname, extname, join, normalize, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { gzipSync } from 'node:zlib'
 import { MONOREPO_ROOT, DATA_DIR, findPidByPort, isPortListening, readLogTail, extractDshWebUrl, ensureDshBundles, ensureCacheIntegrity, ensureCompatibilityShims, isPortAvailable } from '@godsh/core'
-import { fetchMarketIndex } from '@godsh/marketplace'
+import { fetchMarketIndex, warmUpLocalProxy } from '@godsh/marketplace'
 import { scanProfiles, ensureProfileWorkspace, ensureProfilePatches } from '@godsh/profile-manager'
 import type { CliContext } from './context.js'
 import { routeHandlers } from './routes/index.js'
@@ -99,6 +99,10 @@ export interface ApiServerOptions {
 export async function startApiServer(ctx: CliContext, opts: ApiServerOptions): Promise<http.Server> {
   const { store, env, profilesDir, pidDir, logDir, pluginsDir, templatesDir, kernels, allocations, unifiedKernel, dshEnvs, vault, sourcePolicy } = ctx
   const config = store.readConfig()
+
+  // 启动期预热本地代理探测（fire-and-forget，不阻塞监听）：
+  // 把首次探测的等待从「用户第一次安装插件」挪到启动阶段。
+  warmUpLocalProxy()
 
   // 启动自愈：检测官方 bundle 及依赖完整性，优先对齐活跃驱动 CLI 版本
   const activeDshBin = config.dsh?.instances?.[config.dsh?.activeVersion || '']

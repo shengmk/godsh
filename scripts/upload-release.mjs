@@ -11,10 +11,16 @@ const token = credOut.match(/password=(.+)/)[1].trim();
 
 const owner = 'shengmk';
 const repo = 'godsh';
-const version = process.argv[2] || '0.6.0';
+// 版本默认取唯一真源（根 package.json），不再硬编码某一版
+const rootPkg = JSON.parse(fs.readFileSync(new URL('../package.json', import.meta.url), 'utf8'));
+const version = process.argv[2] || rootPkg.version;
 const tag = `v${version}`;
-const releaseName = `godsh v${version} — 全局 UI/UX 电影级重构与无控制台启动`;
 const releaseNotes = fs.readFileSync(path.resolve('release/RELEASE_NOTES.md'), 'utf8');
+// 标题取 RELEASE_NOTES 的首行标题，避免把上一版的宣传语带到新版本
+const releaseName =
+  (releaseNotes.split('\n').find((l) => l.startsWith('# ')) ?? `# godsh v${version}`)
+    .replace(/^#\s*/, '')
+    .trim();
 
 function request(options, data = null) {
   return new Promise((resolve, reject) => {

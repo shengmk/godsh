@@ -1,9 +1,12 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import type { LauncherConfig } from './types.js'
+import { APP_VERSION } from './version.js'
 
 const DEFAULT_CONFIG: LauncherConfig = {
-  launcher: { name: 'godsh', version: '0.5.5' },
+  // 版本号来自唯一真源（根 package.json 的 version，见 ./version.ts），不再硬编码。
+  // 此处曾写死一个旧版本号字面量，导致新版安装包的 /api/health 自报旧版本。
+  launcher: { name: 'godsh', version: APP_VERSION },
   dsh: { home: '', bin: 'dsh', profilesDir: 'profiles', instances: {}, activeVersion: '', byProfile: {}, dirs: [] },
   runtime: { node: 'node', pnpm: 'pnpm' },
   webKernel: { defaultTemplateId: 'web-default', defaultPort: 3080, allowMultiPort: false },

@@ -7,14 +7,14 @@ import { findProcessesByProfile, killAllProfileProcesses, extractDshWebUrl } fro
 import { ConfigStore } from './config-store.js'
 import { run } from './run.js'
 
-test('findProcessesByProfile: 不存在的 profile 返回空数组', () => {
-  const pids = findProcessesByProfile('non_existent_profile_xyz_' + Date.now())
+test('findProcessesByProfile: 不存在的 profile 返回空数组', async () => {
+  const pids = await findProcessesByProfile('non_existent_profile_xyz_' + Date.now())
   assert.ok(Array.isArray(pids))
   assert.equal(pids.length, 0)
 })
 
-test('findProcessesByProfile: 非法特殊字符环境名安全转义', () => {
-  const pids = findProcessesByProfile(';rm -rf /; && calc.exe')
+test('findProcessesByProfile: 非法特殊字符环境名安全转义', async () => {
+  const pids = await findProcessesByProfile(';rm -rf /; && calc.exe')
   assert.ok(Array.isArray(pids))
   assert.equal(pids.length, 0)
 })

@@ -81,37 +81,72 @@ async function probeBackend(): Promise<string | null> {
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms))
 
-/** 带自动重试与端口自愈的请求：覆盖「后端冷启动慢」与「端口被占顺延」两种首屏失败。 */
-async function reqWithRetry<T>(path: string, init?: RequestInit): Promise<T> {
+/** 带 HTTP 状态码的错误：让调用方能区分「确定性失败（4xx）」与「可重试失败（5xx/网络）」。 */
+class ApiError extends Error {
+  readonly status: number
+  constructor(message: string, status: number) {
+    super(message)
+    this.name = 'ApiError'
+    this.status = status
+  }
+}
+
+/** 单次请求，不做任何重试。 */
+async function requestOnce<T>(base: string, path: string, init?: RequestInit): Promise<T> {
+  const res = await fetch(`${base}${path}`, {
+    headers: init?.body ? { 'Content-Type': 'application/json' } : undefined,
+    ...init,
+  })
+  const data = (await res.json().catch(() => ({}))) as T & { error?: string }
+  if (!res.ok) throw new ApiError(data.error ?? `请求失败 (${res.status})`, res.status)
+  return data
+}
+
+/**
+ * 请求入口（修复 R1「点击无响应」根因）。
+ *
+ * 重试策略：
+ * - 4xx 属**确定性失败**，立即抛出，绝不重试。早期实现无条件重试 8 次并退避到 3s，
+ *   使一次「插件不存在 / 权限不足 / 冲突」这类必然失败的请求让用户白等约 13.7 秒，
+ *   表现为「点了没反应」。
+ * - 仅幂等方法（GET/HEAD）才重试，且只针对网络层失败与 5xx（后端冷启动竞态）。
+ * - POST/PATCH/PUT/DELETE **不自动重发**（非幂等，重试可能产生重复副作用）；
+ *   网络层失败时仍会做一次端口自愈探测，让**后续**请求打到正确端口。
+ */
+async function req<T>(path: string, init?: RequestInit): Promise<T> {
+  const method = (init?.method ?? 'GET').toUpperCase()
+  const idempotent = method === 'GET' || method === 'HEAD'
+  const maxAttempts = idempotent ? 5 : 1
   const primary = await resolveBase()
   let base = primary
   let lastErr: unknown
 
-  for (let attempt = 0; attempt < 8; attempt++) {
+  for (let attempt = 0; attempt < maxAttempts; attempt++) {
     try {
-      const res = await fetch(`${base}${path}`, {
-        headers: init?.body ? { 'Content-Type': 'application/json' } : undefined,
-        ...init,
-      })
-      const data = (await res.json().catch(() => ({}))) as T & { error?: string }
-      if (!res.ok) throw new Error(data.error ?? `请求失败 (${res.status})`)
-      return data
+      return await requestOnce<T>(base, path, init)
     } catch (err) {
       lastErr = err
+
+      // 4xx：确定性失败，立即抛出（服务是通的，无需端口自愈也不必重试）
+      if (err instanceof ApiError && err.status < 500) throw err
+
       // 网络层失败（TypeError：连接拒绝/中断）→ 尝试端口自愈换 base
       if (err instanceof TypeError && base === primary) {
         const found = await probeBackend()
         if (found) base = found
       }
-      // 冷启动竞态：后端起 server 需数秒，退避重试
-      await sleep(Math.min(300 * Math.pow(1.6, attempt), 3000))
+
+      // 非幂等请求：只做端口自愈，绝不重发自身
+      if (!idempotent) throw err
+
+      // 已是最后一次：不再空等
+      if (attempt === maxAttempts - 1) break
+
+      // 冷启动竞态：后端起 server 需数秒，退避重试（上限收敛到 1.5s）
+      await sleep(Math.min(300 * Math.pow(1.6, attempt), 1500))
     }
   }
   throw lastErr instanceof Error ? lastErr : new Error('请求失败')
-}
-
-async function req<T>(path: string, init?: RequestInit): Promise<T> {
-  return reqWithRetry(path, init)
 }
 
 export const api = {

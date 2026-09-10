@@ -17,7 +17,7 @@ godsh 全局 UI 电影级翻新与无控制台启动优化（v0.6.0，四大阶�
   - 4. 装饰性 UI 与微交互添加（流光点阵背景/阻尼按压/状态呼吸灯/终端扫描线）。
 
 ## Verified
-- Cargo.toml version = "0.5.1" ✅
+- Cargo.toml version = "0.6.1" ✅（更正：此前此处记为 0.5.1，属陈旧断言；已由本轮版本治理修复，现以根 package.json 为唯一真源）
 - tar.exe 与 npm.cmd 本地可用性验证通过 ✅
 - DSH 官方依赖自愈套件测试 `dsh-heal.test.ts` 4/4 通过 ✅
 - 进程管理测试 `process-manager.test.ts` 7/7 通过 ✅

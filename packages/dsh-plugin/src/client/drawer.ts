@@ -32,7 +32,7 @@ export class GodshDrawer {
             <span style="font-size: 20px;">⚡</span>
             <h2 style="margin: 0; font-size: 16px; font-weight: 600;">godsh 原生控制台</h2>
           </div>
-          <span style="background: #238636; color: #fff; font-size: 11px; padding: 2px 8px; border-radius: 12px; font-weight: bold;">v0.5.0 原生版</span>
+          <span style="background: #238636; color: #fff; font-size: 11px; padding: 2px 8px; border-radius: 12px; font-weight: bold;">原生版</span>
         </div>
 
         <!-- 1. 环境选择器 -->

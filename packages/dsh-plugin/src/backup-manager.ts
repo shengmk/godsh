@@ -1,7 +1,7 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync, readdirSync, unlinkSync, statSync } from 'node:fs'
 import { join } from 'node:path'
 import { scanProfiles } from '@godsh/profile-manager'
-import { defaultJournal } from '@godsh/core'
+import { APP_VERSION, defaultJournal } from '@godsh/core'
 import type { SnapshotMeta } from './types.js'
 
 export interface CreateSnapshotOptions {
@@ -57,7 +57,7 @@ export class BackupManager {
       tag: opts.tag,
       trigger: opts.trigger || 'manual',
       description: opts.description,
-      godshVersion: '0.5.5',
+      godshVersion: APP_VERSION,
       isLocked: Boolean(opts.isLocked),
       bundles,
       dependencies,

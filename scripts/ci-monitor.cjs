@@ -2,8 +2,15 @@ const fs = require('fs');
 
 async function monitor() {
   const headers = { 'User-Agent': 'godsh-ci' };
-  const runId = '33773743087';
+  // run id 不再硬编码：用 GODSH_RUN_ID 环境变量或第一个参数传入
+  const runId = process.env.GODSH_RUN_ID || process.argv[2];
+  if (!runId) {
+    console.error('用法: GODSH_RUN_ID=<runId> node scripts/ci-monitor.cjs  （或 node scripts/ci-monitor.cjs <runId>）');
+    process.exit(1);
+  }
   const repo = 'shengmk/godsh';
+  // 版本号取唯一真源（根 package.json），不再硬编码某一版
+  const version = JSON.parse(fs.readFileSync(require('path').join(__dirname, '..', 'package.json'), 'utf8')).version;
 
   console.log(`[Monitor] Tracking Run #${runId}...`);
 
@@ -33,7 +40,7 @@ async function monitor() {
         
         if (run.conclusion === 'success') {
           console.log('\n--- Release Assets ---');
-          const relRes = await fetch(`https://api.github.com/repos/${repo}/releases/tags/v0.5.1`, { headers });
+          const relRes = await fetch(`https://api.github.com/repos/${repo}/releases/tags/v${version}`, { headers });
           const rel = await relRes.json();
           if (rel.assets) {
             for (const a of rel.assets) {

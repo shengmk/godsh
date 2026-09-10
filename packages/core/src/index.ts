@@ -1,5 +1,6 @@
 export * from './types.js'
 export * from './paths.js'
+export * from './version.js'
 export * from './run.js'
 export * from './env-detect.js'
 export * from './config-store.js'

@@ -5,7 +5,13 @@ const token = out.split('\n').find(l => l.startsWith('password='))?.slice(9).tri
 
 async function getLogs() {
   const headers = { 'User-Agent': 'godsh-ci', 'Authorization': 'token ' + token };
-  const res = await fetch('https://api.github.com/repos/shengmk/godsh/actions/runs/33773743087/jobs', { headers });
+  // run id 不再硬编码：用 GODSH_RUN_ID 环境变量或第一个参数传入
+  const runId = process.env.GODSH_RUN_ID || process.argv[2];
+  if (!runId) {
+    console.error('用法: GODSH_RUN_ID=<runId> node scripts/fetch-log.mjs  （或 node scripts/fetch-log.mjs <runId>）');
+    process.exit(1);
+  }
+  const res = await fetch(`https://api.github.com/repos/shengmk/godsh/actions/runs/${runId}/jobs`, { headers });
   const data = await res.json();
   const jobId = data.jobs[0].id;
   console.log('Job ID:', jobId);

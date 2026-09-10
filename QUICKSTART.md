@@ -1,6 +1,6 @@
 # godsh 快速上手指南 (Quick Start)
 
-> **版本**：v0.4.1+ (原生 DSH/Cordis 插件与高级特性版)  
+> **版本**：v0.6.1+ (原生 DSH/Cordis 插件与高级特性版)  
 > **定位**：面向 DeepSeek Harness (DSH) 的多环境管理、零重启热插拔与一键配置化装机工作台。
 
 ---
