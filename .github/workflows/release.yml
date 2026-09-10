@@ -31,8 +31,11 @@ jobs:
           Remove-Item "$prefix\pnpm.ps1" -Force -ErrorAction SilentlyContinue
 
       # Rust GNU 工具链（与本地已验证的打包环境一致，会产出 WebView2Loader.dll）
+      # toolchain 必须显式写成 GNU host：仓库根的 rust-toolchain.toml 已固定该工具链，
+      # 这里显式安装可避免 CI 在构建时按需下载，也保证 CI 与本地产出同规格的二进制。
       - uses: dtolnay/rust-toolchain@stable
         with:
+          toolchain: stable-x86_64-pc-windows-gnu
           targets: x86_64-pc-windows-gnu
 
       # MinGW gcc：GNU 链接必需

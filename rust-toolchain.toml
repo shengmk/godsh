@@ -1,0 +1,12 @@
+# 固定 Rust 工具链：让「本地构建」与「CI 发布」产出同一套二进制。
+#
+# 背景（v0.6.2 发版时实测）：CI 原先只用 dtolnay/rust-toolchain@stable 装默认 host（MSVC）
+# 并额外加装 GNU target，而本机默认 host 是 x86_64-pc-windows-gnu。同一份代码因此会产出
+# 体积差约 2.5 倍的两套二进制：MSVC 的 godsh.exe 8688.5 KB、GNU 的 21438.7 KB。
+# 文件清单、server.mjs 尺寸与功能都一致，差异只来自工具链。选 GNU 的理由是：
+# 它是本仓库一直在本地验证的那一套，scripts/make-release.ps1 也是按它准备 PATH 的。
+#
+# ⚠️ 改这里的 channel 时，请同步改 .github/workflows/release.yml 里安装 Rust 的那一步，
+# 否则 CI 会退化成「构建时按需下载工具链」——能跑，但更慢，而且与本地不一致的风险会重新出现。
+[toolchain]
+channel = "stable-x86_64-pc-windows-gnu"
