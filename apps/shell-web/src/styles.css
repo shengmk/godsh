@@ -72,6 +72,16 @@
   --ease-spring: cubic-bezier(0.16, 1, 0.3, 1);
   --transition-fast: 120ms var(--ease-spring);
   --transition-normal: 200ms var(--ease-spring);
+
+  /* 仓库沙箱（vault）专用令牌的**基座值**（默认主题，即未设置 data-theme 时生效）。
+     注意：这里必须保持「基座在前、主题块在后」的顺序。
+     原先这四个令牌写在文件后半段的第二个 `:root` 里，而 `:root` 与 `[data-theme='light']`
+     特异性相同（0,1,0），位置更靠后的 `:root` 会赢 —— 于是浅色主题被静默覆盖（缺陷 U1）。
+     现在基座在 L6、浅色块在 L90 之后、深色块在更后面，三个作用域按「后写者胜」自然分层。 */
+  --vault-1: #9333ea;
+  --vault-2: #a855f7;
+  --vault-bg: rgba(147, 51, 234, 0.08);
+  --vault-border: rgba(168, 85, 247, 0.28);
 }
 
 [data-theme='dark'] {
@@ -82,6 +92,15 @@
   --brand-secondary: #818cf8;
   --text-primary: #ededef;
   --text-secondary: #8a8f98;
+
+  /* 仓库沙箱（vault）令牌的深色覆盖。
+     原先这四个令牌单独写在文件后半段第二个 `[data-theme='dark']` 块里，
+     与浅色块各自分散、维护时极易漏改（U2）。现在三个作用域各只有一块：
+     基座 `:root`（文件顶部）、深色本块、浅色见下方 `[data-theme='light']`。 */
+  --vault-1: #a855f7;
+  --vault-2: #c084fc;
+  --vault-bg: rgba(168, 85, 247, 0.14);
+  --vault-border: rgba(192, 132, 252, 0.35);
 }
 
 /* ============================================================
@@ -2350,20 +2369,10 @@ button,
    godsh — 现代化 Linear/Raycast 极客视觉扩展 (v0.5.2)
    ============================================================ */
 
-/* 仓库沙箱专用 Token */
-:root {
-  --vault-1: #9333ea;
-  --vault-2: #a855f7;
-  --vault-bg: rgba(147, 51, 234, 0.08);
-  --vault-border: rgba(168, 85, 247, 0.28);
-}
-
-[data-theme='dark'] {
-  --vault-1: #a855f7;
-  --vault-2: #c084fc;
-  --vault-bg: rgba(168, 85, 247, 0.14);
-  --vault-border: rgba(192, 132, 252, 0.35);
-}
+/* 注：沙箱（vault）令牌已按主题归位 —— 基座值在文件顶部 `:root`、
+   深色覆盖在顶部 `[data-theme='dark']`、浅色覆盖在 `[data-theme='light']`。
+   这里曾是一个额外的 `:root { --vault-*: … }`，位置更靠后、特异性与主题块相同，
+   把浅色的 --vault-* 静默覆盖掉了（缺陷 U1，见方案 §9.6）。 */
 
 /* 插件卡片排版与现代微交互 */
 .plugin-name {
