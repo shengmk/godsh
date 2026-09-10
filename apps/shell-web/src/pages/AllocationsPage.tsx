@@ -1561,7 +1561,7 @@ export default function AllocationsPage() {
           </button>
           <button
             className="btn sm"
-            style={{ background: 'rgba(99,102,241,0.15)', color: '#4f46e5', borderColor: '#4f46e5', fontWeight: 600 }}
+            style={{ background: 'rgba(99,102,241,0.15)', color: 'var(--brand-text)', borderColor: 'var(--brand-text)', fontWeight: 600 }}
             disabled={batchBusy}
             onClick={() => void handleBatchHarvest()}
           >

@@ -25,8 +25,8 @@
 
   /* 文字排版 */
   --text-primary: #ededef;
-  --text-secondary: #8a8f98;
-  --text-muted: #64748b;
+  --text-secondary: #949aa4;
+  --text-muted: #94a3b8;
   --font-sans: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
   --font-mono: 'JetBrains Mono', 'Fira Code', Consolas, monospace;
 
@@ -46,7 +46,7 @@
   --warn-glow: rgba(245, 158, 11, 0.25);
   --err: #ef4444;
   --err-glow: rgba(239, 68, 68, 0.25);
-  --muted: #64748b;
+  --muted: #94a3b8;
 
   /* 兼容既有组件的别名映射 (Aliases) */
   --brand-1: var(--brand-primary);
@@ -82,6 +82,25 @@
   --vault-2: #a855f7;
   --vault-bg: rgba(147, 51, 234, 0.08);
   --vault-border: rgba(168, 85, 247, 0.28);
+
+  /* 品牌色当**文字**用的取值（不是当背景）。
+     深色下 #6366f1 文本对深底的对比度只有 3.53:1，达不到小字要求的 4.5:1，
+     因此单独给一档更亮的 --brand-text（浅色主题另行覆盖为 #4f46e5）。
+     参考 dsh-ui-ux-pro-max 的配色库约定：强调色要配「强调色前景」，而不是把强调色本身当文字色。 */
+  --brand-text: #818cf8;
+
+  /* 琥珀（警告）的「表面 + 前景」搭档。
+     原先琥珀实底按钮用白字：深色下 2.15:1、浅色下 3.19:1，都不达标。
+     插件配色库里的强调色一律配**深色前景**（如 #F97316 + #0F172A），这里照此办理：
+     琥珀表面保持明亮（#f59e0b），文字用近黑（#0f172a），实测 8.3:1。
+     而 --warn 本身仍按主题取值、继续承担「琥珀色文字」的职责。 */
+  --warn-surface: #f59e0b;
+  --on-warn: #0f172a;
+
+  /* 品牌色当**实底**用的取值与它的前景。白字配 --brand-1(#6366f1) 实测只有 4.47:1，
+     差一点点不达标；改用更深的 #4f46e5 后是 6.29:1。与琥珀那对一样，把「实底」和「前景」显式配成一对。 */
+  --brand-surface: #4f46e5;
+  --on-brand: #ffffff;
 }
 
 [data-theme='dark'] {
@@ -91,7 +110,7 @@
   --brand-primary: #6366f1;
   --brand-secondary: #818cf8;
   --text-primary: #ededef;
-  --text-secondary: #8a8f98;
+  --text-secondary: #949aa4;
 
   /* 仓库沙箱（vault）令牌的深色覆盖。
      原先这四个令牌单独写在文件后半段第二个 `[data-theme='dark']` 块里，
@@ -122,18 +141,19 @@
   --brand-secondary: #6366f1;
   --brand-gradient: linear-gradient(135deg, #4f46e5 0%, #7c3aed 100%);
   --brand-glow: 0 0 24px rgba(79, 70, 229, 0.18);
+  --brand-text: #4f46e5;
 
   --text-primary: #0f172a;
   --text-secondary: #475569;
-  --text-muted: #94a3b8;
+  --text-muted: #64748b;
 
-  --ok: #059669;
+  --ok: #047857;
   --ok-glow: rgba(5, 150, 105, 0.18);
-  --warn: #d97706;
+  --warn: #b45309;
   --warn-glow: rgba(217, 119, 6, 0.18);
-  --err: #dc2626;
+  --err: #b91c1c;
   --err-glow: rgba(220, 38, 38, 0.18);
-  --muted: #94a3b8;
+  --muted: #64748b;
 
   --brand-1: var(--brand-primary);
   --brand-2: var(--brand-secondary);
@@ -216,7 +236,7 @@
 
 [data-theme='light'] .nav-item.active {
   background: linear-gradient(90deg, rgba(79, 70, 229, 0.12) 0%, rgba(79, 70, 229, 0.03) 100%);
-  color: #4f46e5;
+  color: var(--brand-text);
   border-color: rgba(79, 70, 229, 0.3);
   box-shadow: inset 0 0 10px rgba(79, 70, 229, 0.08);
 }
@@ -419,7 +439,7 @@
 [data-theme='light'] .pill-btn.active {
   background: #ffffff;
   border-color: rgba(0, 0, 0, 0.08);
-  color: #4f46e5;
+  color: var(--brand-text);
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08), 0 1px 2px rgba(0, 0, 0, 0.04);
 }
 
@@ -961,7 +981,7 @@ body {
 
 .badge.kind {
   background: rgba(29, 78, 216, 0.08);
-  color: var(--brand-1);
+  color: var(--brand-text);
 }
 
 /* ---------- 按钮（物理阻尼按压与微光拟态） ---------- */
@@ -1020,7 +1040,7 @@ body {
 .btn.danger {
   border: 1px solid rgba(239, 68, 68, 0.35);
   background: rgba(239, 68, 68, 0.08);
-  color: #fca5a5;
+  color: var(--err);
   box-shadow: 0 0 8px rgba(239, 68, 68, 0.12);
 }
 
@@ -1090,7 +1110,7 @@ body {
 .input:focus,
 .select:focus {
   outline: none;
-  border-color: var(--brand-1);
+  border-color: var(--brand-text);
   box-shadow: 0 0 0 3px rgba(29, 78, 216, 0.12);
 }
 
@@ -1183,7 +1203,7 @@ body {
   padding: 3px 10px;
   border-radius: 999px;
   background: rgba(29, 78, 216, 0.07);
-  color: var(--brand-1);
+  color: var(--brand-text);
   font-size: 11px;
   font-family: Consolas, monospace;
 }
@@ -1628,7 +1648,7 @@ button,
 }
 
 .checkbox-wrap input[type='checkbox'] {
-  accent-color: var(--brand-1);
+  accent-color: var(--brand-text);
   width: 15px;
   height: 15px;
   cursor: pointer;
@@ -1848,7 +1868,7 @@ button,
 .alloc-group-title {
   font-weight: 600;
   font-size: 13px;
-  color: var(--brand-1);
+  color: var(--brand-text);
 }
 
 .alloc-row {
@@ -1900,7 +1920,7 @@ button,
   width: 14px;
   height: 14px;
   margin: 0;
-  accent-color: var(--brand-1);
+  accent-color: var(--brand-text);
 }
 
 .alloc-action-group {
@@ -2445,7 +2465,7 @@ button,
 
 .segmented-btn.active {
   background: var(--surface-strong);
-  color: var(--brand-1);
+  color: var(--brand-text);
   font-weight: 600;
   box-shadow: var(--shadow);
 }
@@ -2469,14 +2489,14 @@ button,
 
 .btn.vault-inject-btn {
   background: linear-gradient(135deg, rgba(99, 102, 241, 0.15), rgba(168, 85, 247, 0.15));
-  color: var(--brand-2);
+  color: var(--brand-text);
   border: 1px solid rgba(129, 140, 248, 0.35);
   font-weight: 600;
 }
 
 .btn.vault-inject-btn:hover:not(:disabled) {
   background: linear-gradient(135deg, rgba(99, 102, 241, 0.28), rgba(168, 85, 247, 0.28));
-  border-color: var(--brand-2);
+  border-color: var(--brand-text);
 }
 
 .btn.subtle {
@@ -2561,9 +2581,9 @@ button,
 }
 
 .filter-tag.active {
-  background: var(--brand-1);
-  color: #fff;
-  border-color: var(--brand-1);
+  background: var(--brand-surface);
+  color: var(--on-brand);
+  border-color: var(--brand-surface);
 }
 
 .tasks-list {
@@ -2589,7 +2609,7 @@ button,
 }
 
 .task-card.selected {
-  border-color: var(--brand-1);
+  border-color: var(--brand-text);
   background: rgba(99, 102, 241, 0.08);
 }
 
@@ -2724,7 +2744,7 @@ button,
 
 .badge-repair { background: rgba(59, 130, 246, 0.15); color: #60a5fa; border: 1px solid rgba(59, 130, 246, 0.3); }
 .badge-vault { background: rgba(168, 85, 247, 0.15); color: #c084fc; border: 1px solid rgba(168, 85, 247, 0.3); }
-.badge-plugin { background: rgba(16, 185, 129, 0.15); color: #34d399; border: 1px solid rgba(16, 185, 129, 0.3); }
+.badge-plugin { background: rgba(16, 185, 129, 0.15); color: var(--ok); border: 1px solid rgba(16, 185, 129, 0.3); }
 .badge-install { background: rgba(245, 158, 11, 0.15); color: #fbbf24; border: 1px solid rgba(245, 158, 11, 0.3); }
 .badge-workflow { background: rgba(236, 72, 153, 0.15); color: #f472b6; border: 1px solid rgba(236, 72, 153, 0.3); }
 .badge-default { background: rgba(255, 255, 255, 0.08); color: #9ca3af; }
@@ -2737,7 +2757,7 @@ button,
 }
 
 .status-running { background: rgba(59, 130, 246, 0.15); color: #60a5fa; border: 1px solid rgba(59, 130, 246, 0.3); }
-.status-done, .status-success { background: rgba(16, 185, 129, 0.15); color: #34d399; border: 1px solid rgba(16, 185, 129, 0.3); }
+.status-done, .status-success { background: rgba(16, 185, 129, 0.15); color: var(--ok); border: 1px solid rgba(16, 185, 129, 0.3); }
 .status-error, .status-failed { background: rgba(239, 68, 68, 0.15); color: #f87171; border: 1px solid rgba(239, 68, 68, 0.3); }
 .status-warn { background: rgba(245, 158, 11, 0.15); color: #fbbf24; border: 1px solid rgba(245, 158, 11, 0.3); }
 .status-info { background: rgba(99, 102, 241, 0.15); color: #818cf8; border: 1px solid rgba(99, 102, 241, 0.3); }
@@ -2951,7 +2971,7 @@ button,
 .fault-code {
   font-family: var(--font-mono);
   font-size: 12px;
-  color: #fca5a5;
+  color: var(--err);
   white-space: pre-wrap;
   word-break: break-all;
 }
@@ -2973,7 +2993,7 @@ button,
   background: rgba(239, 68, 68, 0.1);
   border: 1px solid rgba(239, 68, 68, 0.25);
   border-radius: var(--radius-sm);
-  color: #fca5a5;
+  color: var(--err);
   font-size: 13px;
   margin: 12px 0;
 }
@@ -3119,7 +3139,7 @@ button:active:not(:disabled),
 }
 
 .log-line-success {
-  color: #34d399;
+  color: var(--ok);
 }
 
 /* 5. 极细发丝圆角滑动条全局加固 (Hairline Glowing Scrollbars) */

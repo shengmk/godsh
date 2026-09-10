@@ -730,7 +730,7 @@ export default function MarketPage() {
               共匹配 <strong>{filteredPlugins.length}</strong> 个插件 · 当前已渲染 {Math.min(visibleCount, filteredPlugins.length)}
             </span>
             {selectedCount > 0 && (
-              <span style={{ color: 'var(--brand-2)' }}>已勾选 {selectedCount} 个项目准备批量处理</span>
+              <span style={{ color: 'var(--brand-text)' }}>已勾选 {selectedCount} 个项目准备批量处理</span>
             )}
           </div>
 

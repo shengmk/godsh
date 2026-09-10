@@ -501,7 +501,7 @@ export default function VaultHubPage() {
           <h1 className="page-title" style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
             <Archive size={22} style={{ color: 'var(--brand-primary)' }} />
             <span>插件沙箱</span>
-            <span style={{ fontSize: '0.85rem', background: 'var(--brand-primary)', color: '#fff', padding: '2px 8px', borderRadius: '12px' }}>
+            <span style={{ fontSize: '0.85rem', background: 'var(--brand-surface)', color: 'var(--on-brand)', padding: '2px 8px', borderRadius: '12px' }}>
               Vault Hub
             </span>
           </h1>
@@ -560,7 +560,7 @@ export default function VaultHubPage() {
           {plugins.some((p) => p.hasUpdate) && (
             <button
               className="btn sm"
-              style={{ background: 'var(--warn)', color: '#fff', borderColor: 'var(--warn)', fontWeight: 600 }}
+              style={{ background: 'var(--warn-surface)', color: 'var(--on-warn)', borderColor: 'var(--warn-surface)', fontWeight: 600 }}
               onClick={() => void handleUpdateAll()}
               disabled={actionLoading === 'update-all'}
               title="一键自动拉取升级所有检测到新版本的沙箱插件，并原子同步已挂载环境"
@@ -918,14 +918,14 @@ export default function VaultHubPage() {
                           </span>
                           {p.hasUpdate && (
                             <span style={{ fontSize: '0.75rem', color: 'var(--warn)', fontWeight: 600, display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
-                              ⬆️ 新版 {p.latestVersion}
+                              <ArrowUpCircle size={11} /> 新版 {p.latestVersion}
                               <button
                                 className="btn sm"
                                 style={{
                                   padding: '1px 6px',
                                   fontSize: '0.7rem',
-                                  background: 'var(--warn)',
-                                  color: '#fff',
+                                  background: 'var(--warn-surface)',
+                                  color: 'var(--on-warn)',
                                   border: 'none',
                                   borderRadius: '4px',
                                   cursor: 'pointer',
@@ -1026,7 +1026,7 @@ export default function VaultHubPage() {
                             padding: '2px 6px',
                             borderRadius: '4px',
                             background: 'rgba(99,102,241,0.12)',
-                            color: '#4f46e5',
+                            color: 'var(--brand-text)',
                             fontWeight: 600,
                             display: 'inline-flex',
                             alignItems: 'center',
@@ -1082,7 +1082,7 @@ export default function VaultHubPage() {
                                   border: 'none',
                                   background: 'transparent',
                                   cursor: 'pointer',
-                                  color: 'var(--brand-2)',
+                                  color: 'var(--brand-text)',
                                   padding: '0 2px',
                                   fontSize: '0.7rem',
                                   display: 'inline-flex',
@@ -1422,7 +1422,7 @@ export default function VaultHubPage() {
                         fontWeight: 600,
                         marginRight: '6px',
                         background: h.action === 'deploy' ? 'rgba(5,150,105,0.15)' : h.action === 'rollback' ? 'rgba(217,119,6,0.15)' : 'rgba(59,130,246,0.15)',
-                        color: h.action === 'deploy' ? 'var(--ok)' : h.action === 'rollback' ? 'var(--warn)' : 'var(--brand-1)',
+                        color: h.action === 'deploy' ? 'var(--ok)' : h.action === 'rollback' ? 'var(--warn)' : 'var(--brand-text)',
                       }}
                     >
                       {h.action.toUpperCase()}
