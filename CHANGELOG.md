@@ -1,3 +1,32 @@
+## [0.6.6] - 2026-09-11
+
+「地址未就绪 ≠ 网络问题」：一个被长期误读的故障现象，终于被定位到真实原因——
+**启动前残留的孤儿凭据写锁**。本版只有一个提交，但它修的是用户最常撞上、却最无从自查的那个坑。
+
+### 🩹 启动前清理孤儿凭据写锁（修掉「地址未就绪」的真实原因）
+- **现象**：启动环境时界面只显示「地址未就绪」，用户完全看不出原因；
+  手动删掉 `~/.dsh/.credentials.yaml.lock` 后一切恢复正常。
+- **根因**（实测定位）：
+  - dsh 的 `@deepseek-ai/dsh-atomic-write` 用 `wx` 创建 `<文件>.lock` 兄弟锁，**内容为持有者 PID**；
+  - `@deepseek-ai/dsh-client-connection` 在**插件树加载期**就要写 `.credentials.yaml`，
+    所以**任何一次启动期崩溃或被强杀**都会留下这把锁；
+  - 残留锁让下次启动在 `boot()` 里抛 `atomic-write: timed out waiting for the writer lock`（默认等待 2000ms）
+    → `plugin tree failed to load` → 进程**在打印 `dsh web: …?token=…` 之前就退出**
+    → godsh 抓不到认证地址 → 界面显示「地址未就绪」；
+  - 上游**刻意不自动回收**（注释：文件年龄无法证明持有者已死，孤儿回收属人工操作）。
+- **修法**：`dsh-heal` 新增 `readLockHolderPid` / `isProcessAlive` / `clearOrphanCredentialLock` /
+  `diagnoseCredentialLock`，接入**启动前自愈**（`healDepTreeForStart`，每次启动都跑、幂等），
+  并在 `diagnoseProfile` 中报出，**把「PID 已不存在」与「表现为地址未就绪」明确对应起来**。
+- **判据保守**：**只有锁里 PID 可解析、且该进程确实不存在才删**；
+  PID 存活或读不出则**保留并报告**（`process.kill(pid, 0)` 只有 `ESRCH` 才判定已死，`EPERM` 视为存活）。
+- **测试**：新增 3 例（死 / 活 / 读不出 / 无锁 + 诊断文案），单测 **118 → 121**，`pnpm test` **121/121** 通过。
+
+### ⚠️ 实测结论：重装全局 dsh 换不来根治
+- 实测把 godsh 的兼容垫片产物（`negotiator/node_modules/content-type`）移开后，
+  dsh 实例仍在**首个带 `Accept-Encoding` 的请求**上死亡（`TypeError: invalid media type`），
+  说明**上游清单本身不自洽**（顶层 `content-type@1.0.5` 与 `negotiator@1.1.0` 要求的 `^2.1.0` 冲突）。
+- 因此 godsh 的**启动期垫片是承重的正式对策**，不是权宜之计，**请勿移除**。
+
 ## [0.6.5] - 2026-09-11
 
 「说到的，就要真的做到」收口版：把兼容垫片补到真有事故的那一处，让故障在启动阶段就被说清，
