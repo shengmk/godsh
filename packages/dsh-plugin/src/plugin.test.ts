@@ -38,7 +38,9 @@ test('PatchManager: 热启用与热禁用插件到 cordis.patch.yml', () => {
   try {
     const profileDir = join(dir, 'test-profile')
     mkdirSync(profileDir, { recursive: true })
-    const pm = new PatchManager(dir)
+    // 第二个参数是备份落点所在的数据目录：必须显式传临时目录，
+    // 否则 PatchManager 会退回默认的仓库 `data/`，让每轮测试都在仓库里留备份文件（?16）
+    const pm = new PatchManager(dir, dir)
 
     pm.enablePlugin('test-profile', 'plugin-a')
     let list = pm.readPatch('test-profile')
@@ -62,7 +64,9 @@ test('PatchManager: 遇到不可安全解析的 patch 时拒绝盲目覆盖破�
     const profileDir = join(dir, 'complex-profile')
     mkdirSync(profileDir, { recursive: true })
     writeFileSync(join(profileDir, 'cordis.patch.yml'), 'custom_directive: !!js/function >\n  function() {}\n', 'utf8')
-    const pm = new PatchManager(dir)
+    // 第二个参数是备份落点所在的数据目录：必须显式传临时目录，
+    // 否则 PatchManager 会退回默认的仓库 `data/`，让每轮测试都在仓库里留备份文件（?16）
+    const pm = new PatchManager(dir, dir)
     assert.throws(() => pm.enablePlugin('complex-profile', 'test-p'), /无法安全重写/)
   } finally {
     rmSync(dir, { recursive: true, force: true })

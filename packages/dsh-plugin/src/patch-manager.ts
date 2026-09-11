@@ -7,7 +7,22 @@ import { readPatchChecked, serializePatchList } from '@godsh/profile-manager'
  * PatchManager：操作 cordis.patch.yml 实现零重启 HMR 热插拔与规则治理
  */
 export class PatchManager {
-  constructor(private profilesDir: string) {}
+  /**
+   * @param profilesDir 环境（profile）根目录
+   * @param dataDir Launcher 数据目录，备份落在它的 `patches-backup/` 下。
+   *
+   * 为什么必须可注入（默认仍是 DATA_DIR，生产行为不变）：
+   * 原先这里直接用模块级常量 `DATA_DIR`，而它在 **import 时就固定**了，
+   * 于是测试里无法用环境变量把它指向临时目录 —— 结果是**每跑一轮 `pnpm test` 都会往
+   * 仓库的 `data/patches-backup/` 里写文件**（实测累积到 126 个 `test-profile-*.yml`），
+   * 测试污染了它本不该碰的仓库数据目录。
+   * 其它管理器（`VaultManager(dataDir = DATA_DIR)`、`Journal(dataDir = DATA_DIR)`）
+   * 本来就是可注入的写法，这里补齐一致性。
+   */
+  constructor(
+    private profilesDir: string,
+    private dataDir: string = DATA_DIR
+  ) {}
 
   private getPatchPath(profile: string): string {
     return join(this.profilesDir, profile, 'cordis.patch.yml')
@@ -16,7 +31,7 @@ export class PatchManager {
   private backupPatch(profile: string, patchPath: string): void {
     if (!existsSync(patchPath)) return
     try {
-      const backupDir = join(DATA_DIR, 'patches-backup')
+      const backupDir = join(this.dataDir, 'patches-backup')
       mkdirSync(backupDir, { recursive: true })
       const backupPath = join(backupDir, `${profile}-${Date.now()}.yml`)
       writeFileSync(backupPath, readFileSync(patchPath, 'utf8'), 'utf8')
