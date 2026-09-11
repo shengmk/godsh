@@ -18,8 +18,8 @@ godsh — DeepSeek Harness 的图形化环境配置启动器与电影级控制�
 ## 校验和 (SHA256)
 
 请对照发布资产中的 `SHA256SUMS.txt`：
-- `godsh-0.6.6-x64-setup.exe`: `__SETUP_SHA256__`
-- `godsh-0.6.6-x64.zip`: `__ZIP_SHA256__`
+- `godsh-0.6.6-x64-setup.exe`: `f3ac21b175d60f2ad3d6df2d3f1566f11a741af947525051ed82792048c9aef2`
+- `godsh-0.6.6-x64.zip`: `794feeed7fe060a2e23bf53cb98a0efdfb4e08fc84e62bb905e338c74be5b9b1`
 
 ---
 
