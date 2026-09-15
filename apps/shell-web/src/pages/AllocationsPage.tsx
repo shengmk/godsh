@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+﻿import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   ArrowUp,
   ArrowDown,
@@ -300,7 +300,7 @@ export default function AllocationsPage() {
       await refresh()
       return { count: allocIds.length }
     },
-    { show, success: ({ count }) => `已批量移除 ${count} 项分配` },
+    { show, success: ({ count }) => `已批量移除 ${count} 项已启用` },
   )
 
   /** 批量转移 / 复制到目标环境 */
@@ -382,17 +382,55 @@ export default function AllocationsPage() {
   async function assignCategory(profile: string, category: string, zh: string) {
     const count = (addableByCategory[profile] ?? []).find((g) => g.category === category)?.items.length ?? 0
     if (count === 0) return
-    if (!(await confirm({ message: `确定把 ${zh}（${count} 个）全部分配到环境 ${profile}？` }))) return
+    if (!(await confirm({ message: `确定把 ${zh}（${count} 个）全部启用至环境 ${profile}？` }))) return
     await withBusy(`assign:${profile}:${category}`, async () => {
       try {
         const r = await api.assignCategory(profile, category)
-        show(`已分配 ${r.assigned} 个 ${zh} 插件到 ${profile}${r.skipped ? `（${r.skipped} 个已分配过）` : ''}`)
+        show(`已启用 ${r.assigned} 个 ${zh} 插件到 ${profile}${r.skipped ? `（${r.skipped} 个已启用过）` : ''}`)
         await refresh()
       } catch (e) {
         show(e instanceof Error ? e.message : String(e), true)
       }
     })
   }
+
+  /**
+   * **环境级**一键全部启用（缺陷 4）。
+   *
+   * 与 `assignCategory` 的区别只有「不带分类」：集合取该环境的全部已安装非官方插件。
+   * 之所以要它：用户的原话是「能不能在总环境里实现全部，而不是分类文件夹内实现」。
+   */
+  async function assignAll(profile: string) {
+    await withBusy(`assignAll:${profile}`, async () => {
+      try {
+        const r = await api.assignAll(profile)
+        show(`已启用 ${r.enabled} 个插件到 ${profile}${r.skipped ? `（${r.skipped} 个已是启用态）` : ''}`)
+        await refresh()
+      } catch (e) {
+        show(e instanceof Error ? e.message : String(e), true)
+      }
+    })
+  }
+
+  /**
+   * **环境级**一键全部禁用（缺陷 4）。
+   *
+   * 语义必须说清楚：它只把已有分配写成 `disabled: true`，**不删除记录、不动 bundles**，
+   * 所以「全部禁用」之后环境**仍然可以启动**（这与"卸载"是两件事）。
+   */
+  async function disableAll(profile: string) {
+    if (!(await confirm({ message: `确定把环境 ${profile} 的全部插件置为禁用？环境仍可启动，可随时再次启用。` }))) return
+    await withBusy(`disableAll:${profile}`, async () => {
+      try {
+        const r = await api.disableAll(profile)
+        show(`已禁用 ${r.disabled} 个插件（该环境共 ${r.total} 条已启用）`)
+        await refresh()
+      } catch (e) {
+        show(e instanceof Error ? e.message : String(e), true)
+      }
+    })
+  }
+
 
   // 每个环境的统一列表：已分配在前，可用插件在后
   function unifiedList(profile: string): ListItem[] {
@@ -484,7 +522,7 @@ export default function AllocationsPage() {
         try {
           await api.allocate(profile, availItem.avail.pluginId, availItem.avail.pluginId, true)
           await refresh()
-          show(`已分配 ${availItem.avail.pluginId} → ${profile}`)
+          show(`已启用 ${availItem.avail.pluginId} → ${profile}`)
         } catch (e) {
           show(e instanceof Error ? e.message : String(e), true)
           await refresh()
@@ -744,7 +782,7 @@ export default function AllocationsPage() {
       }
     }
     if (allocIds.length === 0) return
-    if (!(await confirm({ message: `确定从环境中批量移除选中的 ${allocIds.length} 项分配？` }))) return
+    if (!(await confirm({ message: `确定从环境中批量移除选中的 ${allocIds.length} 项已启用？` }))) return
     await batchRemoveAction.run(allocIds)
   }
 
@@ -781,7 +819,7 @@ export default function AllocationsPage() {
         { label: '下至沙箱', onClick: () => void harvestToVault(a.profile, a.pluginId) },
         { label: '更新', onClick: () => void updatePlugin(a) },
         { separator: true, label: '', onClick: () => {} },
-        { label: '移除分配', onClick: () => void remove(a), danger: true },
+        { label: '禁用', onClick: () => void remove(a), danger: true },
         { label: '卸载插件（含依赖）', onClick: () => void uninstall(a), danger: true },
       ],
     })
@@ -815,7 +853,7 @@ export default function AllocationsPage() {
     await withBusy(`assignAvail:${profile}:${pluginId}`, async () => {
       try {
         await api.allocate(profile, pluginId, pluginId, true)
-        show(`已分配 ${pluginId} → ${profile}`)
+        show(`已启用 ${pluginId} → ${profile}`)
         await refresh()
       } catch (e) {
         show(e instanceof Error ? e.message : String(e), true)
@@ -1041,13 +1079,13 @@ export default function AllocationsPage() {
       <div className="page-head">
         <h1 className="page-title">{t('page.allocations.title')}</h1>
         <p className="page-desc">
-          {t('page.allocations.desc')} · 变更自动写回 cordis.patch.yml · 可添加插件按 dshmarket 市场分类分组，一键全部分配
+          {t('page.allocations.desc')} · 变更自动写回 cordis.patch.yml · 可添加插件按 dshmarket 市场分类分组，安装即自动启用
         </p>
       </div>
 
       <div className="toolbar">
         <span className="muted">
-          共 {profiles.length} 个环境 · {totalAllocated} 条分配 · {categories.length} 个市场分类
+          共 {profiles.length} 个环境 · {totalAllocated} 条已启用 · {categories.length} 个市场分类
         </span>
         <span className="spacer" />
         <button
@@ -1292,7 +1330,7 @@ export default function AllocationsPage() {
                 <span className="dot" />
                 <strong>{p.name}</strong>
                 <span className={`badge ${p.running ? 'running' : 'stopped'}`}>{p.running ? '运行中' : '已停止'}</span>
-                <span className="badge">{allocCount} 条分配</span>
+                <span className="badge">{allocCount} 条已启用</span>
                 {availCount > 0 && <span className="badge">{availCount} 个可添加</span>}
                 {dropBusyProfile === p.name && (
                   <span className="badge info" style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
@@ -1300,6 +1338,31 @@ export default function AllocationsPage() {
                   </span>
                 )}
                 <span className="spacer" />
+                {/* 环境级一键操作（缺陷 4）：原先只有「按分类文件夹」的全量入口，
+                    用户要的是「在总环境里实现全部」。这三个按钮都以**该环境**为粒度。 */}
+                <button
+                  className="btn sm"
+                  title={isBusy(`assignAll:${p.name}`) ? '启用中…' : '把该环境已安装的全部非官方插件落到启用态'}
+                  disabled={isBusy(`assignAll:${p.name}`)}
+                  onClick={(e) => {
+                    e.stopPropagation()
+                    void assignAll(p.name)
+                  }}
+                >
+                  <Zap size={12} className={isBusy(`assignAll:${p.name}`) ? 'animate-spin' : ''} />{' '}
+                  {isBusy(`assignAll:${p.name}`) ? '启用中…' : '全部启用'}
+                </button>
+                <button
+                  className="btn sm"
+                  title={isBusy(`disableAll:${p.name}`) ? '禁用中…' : '把该环境全部插件置为禁用（环境仍可启动）'}
+                  disabled={isBusy(`disableAll:${p.name}`)}
+                  onClick={(e) => {
+                    e.stopPropagation()
+                    void disableAll(p.name)
+                  }}
+                >
+                  {isBusy(`disableAll:${p.name}`) ? '禁用中…' : '全部禁用'}
+                </button>
                 <button
                   className="btn sm"
                   title={isBusy(`updateAll:${p.name}`) ? '更新中…' : '更新该环境全部插件'}
@@ -1336,7 +1399,7 @@ export default function AllocationsPage() {
                     <div className="empty-card compact" style={{ margin: '8px 0 14px 0' }}>
                       <p className="empty-title" style={{ fontSize: 13 }}>暂无已激活分配条目</p>
                       <p className="empty-desc" style={{ fontSize: 12, marginBottom: 0 }}>
-                        从下方分类中勾选插件或点击「全部分配」，即可将插件加载顺序应用到当前环境。
+                        从下方分类中勾选插件即可启用。新安装的插件已自动启用，这里用于调整加载顺序与显式禁用。
                       </p>
                     </div>
                   )}
@@ -1472,7 +1535,7 @@ export default function AllocationsPage() {
                                   className="alloc-action-btn"
                                   onClick={() => void remove(a)}
                                   disabled={rowRemoveBusy}
-                                  title={rowRemoveBusy ? '移除中…' : '移除分配'}
+                                  title={rowRemoveBusy ? '移除中…' : '禁用'}
                                 >
                                   {rowRemoveBusy ? (
                                     <>
@@ -1513,12 +1576,12 @@ export default function AllocationsPage() {
                           <span className="spacer" />
                           <button
                             className="btn sm"
-                            title={groupAssignBusy ? '分配中…' : `把 ${group.zh} 分类全部 ${group.items.length} 个插件分配到 ${p.name}`}
+                            title={groupAssignBusy ? '启用中…' : `把 ${group.zh} 分类全部 ${group.items.length} 个插件启用至 ${p.name}`}
                             disabled={groupAssignBusy}
                             onClick={() => void assignCategory(p.name, group.category, group.zh)}
                           >
                             <RefreshCw size={12} className={groupAssignBusy ? 'animate-spin' : ''} />{' '}
-                            {groupAssignBusy ? '分配中…' : '全部分配'}
+                            {groupAssignBusy ? '启用中…' : '全部启用'}
                           </button>
                         </div>
                         {group.items.map((av) => {
@@ -1569,10 +1632,10 @@ export default function AllocationsPage() {
                               <span className={`badge ${av.source === 'bundle' ? 'kind' : 'stopped'}`}>
                                 {av.source === 'bundle' ? 'bundle' : '依赖'}
                               </span>
-                              <span className="badge disabled">未分配 · 单击分配 / 拖动转移</span>
+                              <span className="badge disabled">未启用 · 单击启用 / 拖动转移</span>
                               {(availAssignBusy || availHarvestBusy) && (
                                 <span className="badge info" style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
-                                  <RefreshCw size={11} className="animate-spin" /> {availAssignBusy ? '分配中…' : '纳管中…'}
+                                  <RefreshCw size={11} className="animate-spin" /> {availAssignBusy ? '启用中…' : '纳管中…'}
                                 </span>
                               )}
                               <span className="spacer" />
@@ -1581,15 +1644,15 @@ export default function AllocationsPage() {
                                   className="alloc-action-btn"
                                   onClick={() => void assignAvail(p.name, av.pluginId)}
                                   disabled={availAssignBusy}
-                                  title={availAssignBusy ? '分配中…' : '分配至当前环境'}
+                                  title={availAssignBusy ? '启用中…' : '启用至当前环境'}
                                 >
                                   {availAssignBusy ? (
                                     <>
-                                      <RefreshCw size={12} className="animate-spin" /> 分配中…
+                                      <RefreshCw size={12} className="animate-spin" /> 启用中…
                                     </>
                                   ) : (
                                     <>
-                                      <Zap size={12} /> 分配
+                                      <Zap size={12} /> 启用
                                     </>
                                   )}
                                 </button>

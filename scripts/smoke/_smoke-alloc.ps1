@@ -74,6 +74,32 @@ try {
   $list = Get-Json 'http://127.0.0.1:47896/api/allocations'
   $allocPairs = @($list.allocations | ForEach-Object { "$($_.pluginId)|$($_.profile)" })
   Check 'AL10 分配列表仅剩 beta 一条' ($allocPairs -contains 'hello-a|beta')
+
+  # 5. 环境级一键全量（缺陷 4）：原先只有「按分类文件夹」的全量入口，用户要的是「在总环境里全部」
+  #    此时 alpha 没有任何分配记录（hello-a 已移走），已安装的非官方插件是 hello-a 与 hello-b。
+  $aa = Invoke-RestMethod -Method Post -Uri 'http://127.0.0.1:47896/api/allocations/assign-all' -ContentType 'application/json' -Body '{"profile":"alpha"}' -TimeoutSec 10
+  Check 'AL11 环境级全部启用：命中 2 个非官方插件' ($aa.matched -eq 2 -and $aa.enabled -eq 2) ($aa | ConvertTo-Json -Compress)
+  $patchAlpha3 = Get-Content "$work\home\profiles\alpha\cordis.patch.yml" -Raw
+  Check 'AL12 全部启用后 alpha patch 含 hello-a 与 hello-b' (($patchAlpha3 -match 'id: hello-a') -and ($patchAlpha3 -match 'id: hello-b')) $patchAlpha3
+  # 官方资产不得被「全部启用」纳管
+  Check 'AL13 全部启用未纳入官方 bundle' (-not ($patchAlpha3 -match '@deepseek-ai/')) $patchAlpha3
+
+  # 再次调用必须幂等（已是启用态 → enabled=0）
+  $aa2 = Invoke-RestMethod -Method Post -Uri 'http://127.0.0.1:47896/api/allocations/assign-all' -ContentType 'application/json' -Body '{"profile":"alpha"}' -TimeoutSec 10
+  Check 'AL14 重复全部启用是幂等的' ($aa2.enabled -eq 0 -and $aa2.matched -eq 2) ($aa2 | ConvertTo-Json -Compress)
+
+  # 环境级一键全部禁用：只写 disabled，不删记录、不动 bundles —— 环境仍可启动
+  $da = Invoke-RestMethod -Method Post -Uri 'http://127.0.0.1:47896/api/allocations/disable-all' -ContentType 'application/json' -Body '{"profile":"alpha"}' -TimeoutSec 10
+  Check 'AL15 环境级全部禁用：2 条被禁用' ($da.total -eq 2 -and $da.disabled -eq 2) ($da | ConvertTo-Json -Compress)
+  $patchAlpha4 = Get-Content "$work\home\profiles\alpha\cordis.patch.yml" -Raw
+  Check 'AL16 全部禁用后 patch 出现 disabled 标记' ($patchAlpha4 -match 'disabled: true') $patchAlpha4
+  # 记录未被删除（这是与"卸载"的关键区别）
+  $list2 = Get-Json 'http://127.0.0.1:47896/api/allocations'
+  $alphaStill = @($list2.allocations | ForEach-Object { $_.profile } | Where-Object { $_ -eq 'alpha' })
+  Check 'AL17 全部禁用未删除分配记录（仅置为禁用）' ($alphaStill.Count -eq 2) ($list2.allocations | ConvertTo-Json -Compress)
+  # 再启用回来，证明「禁用」不是单向的
+  $aa3 = Invoke-RestMethod -Method Post -Uri 'http://127.0.0.1:47896/api/allocations/assign-all' -ContentType 'application/json' -Body '{"profile":"alpha"}' -TimeoutSec 10
+  Check 'AL18 被禁用的条目可再次全部启用' ($aa3.enabled -eq 2) ($aa3 | ConvertTo-Json -Compress)
 }
 finally {
   Remove-Item Env:DSH_HOME -ErrorAction SilentlyContinue

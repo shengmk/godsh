@@ -324,6 +324,30 @@ export const api = {
       },
     ),
 
+  /**
+   * **环境级**一键全部启用（缺陷 4）：把该环境已安装的全部非官方插件落到启用态。
+   *
+   * 与 `assignCategory` 同判据、同回滚，只是**不带分类** —— 用户要的是「在总环境里全部启用」，
+   * 而不是只能按分类文件夹逐个来。
+   */
+  assignAll: (profile: string) =>
+    req<{ profile: string; matched: number; enabled: number; skipped: number }>('/allocations/assign-all', {
+      method: 'POST',
+      body: JSON.stringify({ profile }),
+    }),
+
+  /**
+   * **环境级**一键全部禁用（缺陷 4）。
+   *
+   * 语义注意：它只把已有分配置为 `disabled: true`，**不删除记录也不动 bundles** ——
+   * 因此「全部禁用」之后环境仍然可以启动。
+   */
+  disableAll: (profile: string) =>
+    req<{ profile: string; total: number; disabled: number }>('/allocations/disable-all', {
+      method: 'POST',
+      body: JSON.stringify({ profile }),
+    }),
+
   moveAllocation: (id: string, profile: string) =>
     req<{ allocation: Allocation }>(`/allocations/${encodeURIComponent(id)}/move`, {
       method: 'POST',

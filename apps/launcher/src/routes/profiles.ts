@@ -4,6 +4,7 @@ import { readLogTail, extractDshWebUrl, spawnWebProfile, stopWeb, waitForPort, w
 import { createProfile, removeProfile, scanProfiles, setProfileBundles, exportProfilePackage, importProfilePackage, type ProfilePackage } from '@godsh/profile-manager'
 import { run } from '@godsh/core'
 import { pluginAction, PLUGIN_ACTION_TIMEOUT_MS, resolveInstallArg } from '@godsh/marketplace'
+import { autoEnableAfterInstall } from './auto-enable.js'
 import type { ApiHandler, RouteContext, RuntimeProc } from './types.js'
 
 /**
@@ -764,6 +765,10 @@ export const profilesHandler: ApiHandler = async (ctx, _req, res, method, seg, b
     }
     const logFile = logPluginAction(ctx.logDir, name, action, effective, result)
     const { errorType, message } = classifyPluginError(result)
+    // 安装即启用（缺陷 2）：安装成功后立刻写入分配并落地 cordis.patch.yml，
+    // 让「启用」成为安装的默认结果；用户若要停用，去分配页显式禁用。
+    // 只在 add 成功时做；失败原因随响应回传，绝不把一次成功的安装改判成失败。
+    const autoEnabled = result.ok && action === 'add' ? autoEnableAfterInstall(ctx, name, effective) : null
     ctx.sendJson(res, result.ok ? 200 : 400, {
       ok: result.ok,
       code: result.code,
@@ -772,6 +777,7 @@ export const profilesHandler: ApiHandler = async (ctx, _req, res, method, seg, b
       errorType: result.ok ? 'ok' : errorType,
       message: result.ok ? '' : message,
       logFile: result.ok ? undefined : logFile,
+      autoEnabled: autoEnabled ?? undefined,
     })
     return true
   }
@@ -869,7 +875,7 @@ export const profilesHandler: ApiHandler = async (ctx, _req, res, method, seg, b
         marketMap = null
       }
     }
-    const results: { pkg: string; ok: boolean; error?: string; errorType?: string; logFile?: string }[] = []
+    const results: { pkg: string; ok: boolean; error?: string; errorType?: string; logFile?: string; autoEnabled?: string }[] = []
     // 最小发布年龄策略：首次命中后自动关闭限制，后续包不再失败
     let releaseAgeFixed = false
     for (let i = 0; i < packages.length; i++) {
@@ -899,7 +905,13 @@ export const profilesHandler: ApiHandler = async (ctx, _req, res, method, seg, b
         }
         const logFile = logPluginAction(ctx.logDir, name, 'add', p, r)
         const { errorType, message } = classifyPluginError(r)
-        results.push(r.ok ? { pkg: p, ok: true } : { pkg: p, ok: false, error: message, errorType, logFile })
+        if (r.ok) {
+          // 批量安装同样走「安装即启用」（缺陷 2）
+          const auto = autoEnableAfterInstall(ctx, name, p)
+          results.push({ pkg: p, ok: true, autoEnabled: auto.message })
+        } else {
+          results.push({ pkg: p, ok: false, error: message, errorType, logFile })
+        }
       } catch (err) {
         results.push({ pkg: p, ok: false, error: err instanceof Error ? err.message : String(err), errorType: 'other' })
       }

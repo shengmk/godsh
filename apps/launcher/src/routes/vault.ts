@@ -1,4 +1,33 @@
-import type { ApiHandler } from './types.js'
+import { autoEnableAfterInstall, type AutoEnableResult } from './auto-enable.js'
+import type { ApiHandler, RouteContext } from './types.js'
+
+/** 一次注入里，某个包被自动启用的结果（带上包名以便前端逐条显示）。 */
+type DeployedAutoEnable = AutoEnableResult & { pluginId: string }
+
+/**
+ * 把一次注入**真正挂上去**的包（根 + 契约伴随 + 从包自身 package.json 推导出的子依赖）
+ * 逐个落到启用态。
+ *
+ * 为什么按 `report.deployed` 而不是按调用方传进来的 id：`deployToProfile` 的入参是
+ * **沙箱条目 id**（可能是 `vault-harvested-*` 这类内部标识），而写进补丁层与分配记录的
+ * 必须是**包名**。`report.deployed / companionAdded / derivedCompanions` 才是真实的包名，
+ * 用它们才不会在补丁层里留下一个解析不到的假 id。
+ *
+ * 任何一步失败都只影响该条（`autoEnableAfterInstall` 自身不抛），注入本身已成功这一点不受影响。
+ */
+function autoEnableDeployed(
+  ctx: RouteContext,
+  profile: string,
+  report: { deployed: string[]; companionAdded: string[]; derivedCompanions?: string[] },
+): DeployedAutoEnable[] {
+  const names = new Set<string>([...report.deployed, ...report.companionAdded, ...(report.derivedCompanions ?? [])])
+  const out: DeployedAutoEnable[] = []
+  for (const name of names) {
+    if (typeof name !== 'string' || name.trim() === '') continue
+    out.push({ ...autoEnableAfterInstall(ctx, profile, name), pluginId: name })
+  }
+  return out
+}
 
 /**
  * /api/vault* —— 插件仓库沙箱管理（Plugin Vault Hub）
@@ -72,9 +101,13 @@ export const vaultHandler: ApiHandler = async (ctx, _req, res, method, seg, body
     }
     try {
       const report = await vault.deployToProfile(pluginId, targetProfile, profilesDir, version)
+      // 注入即启用（缺陷 2）：物理挂载成功之后，把本次真正挂上去的包（根 + 伴随 + 推导出的
+      // 子依赖）一并写入分配并落地 cordis.patch.yml。这样「注入完还要去分配页点一下」
+      // 这件事就不存在了 —— 注入的结果本身就是启用态。
+      const autoEnabled = report.ok ? autoEnableDeployed(ctx, targetProfile, report) : []
       // 不再无条件 200：注入未完成时必须如实反映（互斥 → 409，其它校验失败 → 400）
       const status = report.ok ? 200 : (report.blockedBy?.length ? 409 : 400)
-      ctx.sendJson(res, status, report)
+      ctx.sendJson(res, status, autoEnabled.length > 0 ? { ...report, autoEnabled } : report)
     } catch (err) {
       ctx.sendJson(res, 400, { error: err instanceof Error ? err.message : String(err) })
     }
@@ -110,6 +143,7 @@ export const vaultHandler: ApiHandler = async (ctx, _req, res, method, seg, body
       for (const pid of pluginIds) {
         try {
           const report = await vault.deployToProfile(pid, prof, profilesDir)
+          if (report.ok) autoEnableDeployed(ctx, prof, report)
           results[prof][pid] = report.ok ? { ok: true } : { ok: false, error: report.error ?? '注入未完成' }
         } catch (e) {
           results[prof][pid] = { ok: false, error: e instanceof Error ? e.message : String(e) }

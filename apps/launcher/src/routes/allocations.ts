@@ -365,5 +365,72 @@ export const allocationsHandler: ApiHandler = async (ctx, _req, res, method, seg
     return true
   }
 
+  // POST /api/allocations/assign-all  { profile } —— **环境级**一键全部启用（缺陷 4）
+  //
+  // 为什么需要它：原先只有「按分类文件夹全部分配」，而用户要的是「在总环境里实现全部」。
+  // 语义与 assign-category 完全一致（同一套官方过滤、同一套写回失败回滚），差别只是**不带分类**：
+  // 集合取该环境已安装的全部非官方插件。
+  if (seg.length === 2 && seg[0] === 'allocations' && seg[1] === 'assign-all' && method === 'POST') {
+    const profile = typeof body.profile === 'string' ? body.profile.trim() : ''
+    if (!profile) {
+      ctx.sendJson(res, 400, { error: 'body 需要 { profile }' })
+      return true
+    }
+    const profileData = scanProfiles(profilesDir).find((x) => x.name === profile)
+    if (!profileData) {
+      ctx.sendJson(res, 404, { error: `环境不存在: ${profile}` })
+      return true
+    }
+    const installedIds = [...new Set([...(profileData.bundles ?? []), ...Object.keys(profileData.dependencies ?? {})])]
+    // 官方资产不纳管（不变量 I2）：与 available / 分配入口保持同一条判据
+    const matched = installedIds.filter((id) => !isOfficialPackage(id))
+    const existing = new Map(allocations.list().filter((a) => a.profile === profile).map((a) => [a.pluginId, a]))
+    // 已存在但被禁用的也要改回启用 —— 这正是「启用是标准态」
+    const toEnable = matched.filter((id) => existing.get(id)?.enabled !== true)
+    const toCreate = toEnable.filter((id) => existing.get(id) === undefined)
+    let enabled = 0
+    for (const id of toEnable) {
+      const rec = allocations.allocate(profile, id, id)
+      if (existing.get(id)?.enabled === false) allocations.setEnabled(rec.id, true)
+      enabled++
+    }
+    const apply = ctx.tryApplyAllocation(profile)
+    if (!apply.applied) {
+      // 写回失败：回滚本次**新增**的记录（既有记录的启用位变化不在本次回滚范围内）
+      for (const id of toCreate) {
+        const rec = allocations.list().find((a) => a.profile === profile && a.pluginId === id)
+        if (rec) allocations.remove(rec.id)
+      }
+      ctx.sendJson(res, 409, { error: apply.applyError ?? '写回 cordis.patch.yml 失败' })
+      return true
+    }
+    ctx.sendJson(res, 200, { profile, matched: matched.length, enabled, skipped: matched.length - enabled, ...apply })
+    return true
+  }
+
+  // POST /api/allocations/disable-all  { profile } —— **环境级**一键全部禁用（缺陷 4）
+  //
+  // 只把该环境已有的分配记录置为 disabled（补丁层写 `disabled: true`），**不删除记录、不动
+  // bundles** —— 于是「全部禁用」之后环境**仍然可以启动**（不变量 I1）。
+  if (seg.length === 2 && seg[0] === 'allocations' && seg[1] === 'disable-all' && method === 'POST') {
+    const profile = typeof body.profile === 'string' ? body.profile.trim() : ''
+    if (!profile) {
+      ctx.sendJson(res, 400, { error: 'body 需要 { profile }' })
+      return true
+    }
+    const mine = allocations.list().filter((a) => a.profile === profile)
+    const toDisable = mine.filter((a) => a.enabled === true)
+    const before = toDisable.map((a) => a.id)
+    for (const a of toDisable) allocations.setEnabled(a.id, false)
+    const apply = ctx.tryApplyAllocation(profile)
+    if (!apply.applied) {
+      for (const id of before) allocations.setEnabled(id, true)
+      ctx.sendJson(res, 409, { error: apply.applyError ?? '写回 cordis.patch.yml 失败', rolledBack: true })
+      return true
+    }
+    ctx.sendJson(res, 200, { profile, total: mine.length, disabled: toDisable.length, ...apply })
+    return true
+  }
+
   return false
 }
