@@ -1,0 +1,17 @@
+# @godsh/dsh —— godsh 的 DSH bundle 补丁层
+#
+# 这个文件是 `package.json` 里 `dsh.bundle.patch` 指向的补丁层。dsh 只在包的
+# manifest 声明了该字段时，才把包当作**真正的 bundle** 追加进 profile 的
+# `dsh.profile.bundles`；没有这个字段时 CLI 会把它当普通依赖并在安装时给出告警。
+# 判据在 dsh 侧是硬失败（`@deepseek-ai/dsh-app-boot` 的 `loadProfileDirectory`）：
+#
+#   ${binName}: profile bundle ${JSON.stringify(packageName)} declares no dsh.bundle in its package.json
+#
+# 也就是说：这份文件 + package.json 的 `dsh.bundle.patch` 两者缺一，插件都装不进 profile。
+#
+# 行的 `id` **必须等于**宿主半 `src/index.ts` 里 `export const name` 的值
+# （本项目取 `godsh`）。这是 dsh 的 loader 把补丁行与插件实例对应起来的凭据，
+# 写错会得到一个 id 对不上、永远不注入的僵尸行。
+- insert:
+    - id: godsh
+      name: '@godsh/dsh'

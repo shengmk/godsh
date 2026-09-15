@@ -9,6 +9,9 @@ apps/launcher/dist/
 apps/launcher/src-tauri/target/
 apps/launcher/src-tauri/resources/
 
+# @godsh/dsh 双面插件的构建产物（lib/ 由 packages/dsh-godsh-plugin/scripts/build.mjs 产出）
+packages/dsh-godsh-plugin/lib/
+
 # 运行时数据（用户本机特定，可再生成；仅保留占位 .gitkeep）
 data/*
 !data/logs/

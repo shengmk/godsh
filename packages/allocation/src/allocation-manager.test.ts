@@ -3,7 +3,7 @@ import assert from 'node:assert/strict'
 import { mkdtempSync, mkdirSync, writeFileSync, rmSync, readFileSync, existsSync, readdirSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { ConfigStore } from '@godsh/core'
+import { ConfigStore, isOfficialPackage } from '@godsh/core'
 import { AllocationManager } from './allocation-manager.js'
 
 function setup(): { store: ConfigStore; manager: AllocationManager; dir: string; dataDir: string } {
@@ -94,4 +94,87 @@ test('applyProfile: removedIds 从 patch 清理', () => {
   const out = readFileSync(patchPath, 'utf8')
   assert.ok(!out.includes('gone'), '被删除的插件应从 patch 清理')
   assert.ok(out.includes('keep'))
+})
+
+// ---------- 官方 bundle 判据：经由本模块真实调用路径（applyProfile 的 patch 剔除）验证 ----------
+//
+// 本模块**不再导出**自己的官方判定函数，也不持有任何包名枚举：三处剔除点（existing 的 ids /
+// disabledIds、toPatchEntries）直接调用 `@godsh/core` 的 isOfficialPackage。因此「判据是什么」
+// 只能通过真实行为断言 —— 下面把官方包放进 patch，看 applyProfile 写回后它是否被剔除。
+
+/** 用一条 insert 条目构造 patch 文本（id 一律加引号，避免 YAML 把 @ 当保留指示符）。 */
+function patchWithIds(ids: string[], disabled: string[] = []): string {
+  const lines = ['- insert:']
+  for (const id of ids) {
+    lines.push(`    - id: "${id}"`)
+    if (disabled.includes(id)) lines.push('      disabled: true')
+  }
+  return lines.join('\n') + '\n'
+}
+
+test('applyProfile: 三个官方内核 bundle 一律从 patch 中剔除（含 disabled 引用）', () => {
+  const { manager, dir } = setup()
+  makeProfile(
+    dir,
+    'web',
+    patchWithIds(
+      ['@deepseek-ai/dsh-base', '@deepseek-ai/dsh-web-app', '@deepseek-ai/dsh-headless', 'keep-me'],
+      ['@deepseek-ai/dsh-headless'],
+    ),
+  )
+  const out = readFileSync(manager.applyProfile(dir, 'web'), 'utf8')
+  assert.ok(!out.includes('@deepseek-ai/'), `官方 bundle 必须全部剔除，实际写回:\n${out}`)
+  assert.ok(out.includes('keep-me'), '非官方条目必须保留')
+  assert.ok(!out.includes('disabled'), '被剔除的官方 id 不得残留在 disabledIds 中')
+})
+
+test('applyProfile: 相似前缀 / 裸短名 / 只有前缀的畸形输入不得被误判为官方', () => {
+  // 这几条是防「相似前缀误判」的关键：前缀必须逐字符相同且短名非空 —— 它们都应被原样保留
+  const notOfficial = ['@deepseek-ai-extra/dsh-base', 'dsh-base', '@deepseek-ai/', '@deepseek-ai', '@DeepSeek-AI/dsh-base', 'dsh-memory']
+  const { manager, dir } = setup()
+  makeProfile(dir, 'web', patchWithIds(notOfficial))
+  const out = readFileSync(manager.applyProfile(dir, 'web'), 'utf8')
+  for (const id of notOfficial) {
+    assert.ok(out.includes(id), `非官方 id 被误剔除: ${id}\n实际写回:\n${out}`)
+  }
+})
+
+test('applyProfile: 官方将来新增的包自动被剔除（前缀判定而非枚举的价值）', () => {
+  const { manager, dir } = setup()
+  makeProfile(dir, 'web', patchWithIds(['@deepseek-ai/dsh-brand-new', '@deepseek-ai/dsh-future-thing', 'keep-me']))
+  const out = readFileSync(manager.applyProfile(dir, 'web'), 'utf8')
+  assert.ok(!out.includes('dsh-brand-new'), '官方新增包必须自动被剔除，无需改代码')
+  assert.ok(!out.includes('dsh-future-thing'))
+  assert.ok(out.includes('keep-me'))
+})
+
+test('applyProfile: 逐输入与 @godsh/core 的 isOfficialPackage 结果一致（本模块无第二份判据）', () => {
+  // 「保留与否」必须恰好等于 `!isOfficialPackage(id)`：若本模块另抄了一份实现，这里会先炸。
+  const inputs = [
+    '@deepseek-ai/dsh-base',
+    '@deepseek-ai/dsh-web-app',
+    '@deepseek-ai/dsh-headless',
+    '@deepseek-ai/dsh-brand-new',
+    '@deepseek-ai/dsh-mcp-client',
+    '@deepseek-ai/',
+    '@deepseek-ai',
+    '@deepseek-ai-extra/dsh-base',
+    '@other/dsh-base',
+    '@DeepSeek-AI/dsh-base',
+    'dsh-base',
+    'dsh-web-app',
+    'dsh-headless',
+    'dsh-memory',
+    'dshmarket',
+  ]
+  for (const id of inputs) {
+    const { manager, dir } = setup()
+    makeProfile(dir, 'web', patchWithIds([id]))
+    const out = readFileSync(manager.applyProfile(dir, 'web'), 'utf8')
+    assert.equal(
+      out.includes(id),
+      !isOfficialPackage(id),
+      `applyProfile 的剔除结果与 @godsh/core 判据不一致: ${id}（写回内容:\n${out}）`,
+    )
+  }
 })

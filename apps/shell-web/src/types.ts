@@ -166,8 +166,23 @@ export interface Allocation {
   pluginName: string
   enabled: boolean
   order: number
+  /**
+   * 是否官方 DSH 资产。
+   *
+   * **由服务端判定并下发**（`@godsh/core` 的 `isOfficialPackage`，官方作用域前缀 + 非空短名），
+   * 前端只消费该字段、不做任何包名字符串判定 —— 「官方」这一事实只有一处实现。
+   * 官方资产的更新 / 卸载在前端据此拦截。
+   */
+  isOfficial: boolean
 }
 
+/**
+ * 可分配的插件条目。
+ *
+ * **不含官方资产**：服务端已按同一条官方判据把它们从 `available` 里过滤掉
+ * （官方资产退出「可分配」面，只在下方 {@link OfficialAssetView} 里只读展示）。
+ * 因此这里没有 `isOfficial` 字段 —— 它恒为 false，留着只会是死字段。
+ */
 export interface AvailablePlugin {
   pluginId: string
   source: 'dependency' | 'bundle'
@@ -179,6 +194,22 @@ export interface AvailablePlugin {
   version?: string
   /** 市场分类（dshmarket category；未归类为 undefined） */
   category?: string
+}
+
+/** 官方资产角色（与 @godsh/core 的 OfficialRole 同构；前端只用于选展示文案，不参与判定）。 */
+export type OfficialRole = 'base' | 'web-app' | 'headless' | 'other'
+
+/**
+ * 官方资产的**只读视图**（GET /api/allocations/available 的 officialAssets）。
+ *
+ * - `version` 是服务端从该 Profile 的 `node_modules/<pkg>/package.json` 读到的**实装版本**；
+ *   读不到为 `null`，界面显示「未知」（不会回退成市场最新版本号）。
+ * - 该视图仅供展示：官方资产在界面上**没有任何操作入口**（不可更新 / 不可卸载 / 不可禁用）。
+ */
+export interface OfficialAssetView {
+  name: string
+  role: OfficialRole
+  version: string | null
 }
 
 /** 批量安装的单个包结果（POST /profiles/:name/plugins/batch） */

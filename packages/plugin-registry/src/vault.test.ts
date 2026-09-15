@@ -39,15 +39,26 @@ test('VaultManager: 零拷贝 NTFS Junction 挂载与伴随插件自愈注入', 
     )
 
     // 创建源插件物理目录
+    // 注意：`dsh.bundle.patch` 是**必需**声明。门控判据是「真 bundle」（物理可解析 +
+    // 声明了该字段 + 非官方），缺了它 dsh 会在装载 bundles 时硬失败。这里如实声明，
+    // 否则用例断言的就不再是真实 bundle 的行为。
     const storeDir = join(dataDir, 'vault_store')
     const pkgDir = join(storeDir, 'dsh-web-search-pro@0.1.11')
     mkdirSync(pkgDir, { recursive: true })
-    writeFileSync(join(pkgDir, 'package.json'), JSON.stringify({ name: 'dsh-web-search-pro', version: '0.1.11' }), 'utf8')
+    writeFileSync(
+      join(pkgDir, 'package.json'),
+      JSON.stringify({ name: 'dsh-web-search-pro', version: '0.1.11', dsh: { bundle: { patch: 'cordis.patch.yml' } } }),
+      'utf8'
+    )
 
     // 创建伴随插件物理目录
     const compDir = join(storeDir, '@anweat_dsh-browser@0.1.10')
     mkdirSync(compDir, { recursive: true })
-    writeFileSync(join(compDir, 'package.json'), JSON.stringify({ name: '@anweat/dsh-browser', version: '0.1.10' }), 'utf8')
+    writeFileSync(
+      join(compDir, 'package.json'),
+      JSON.stringify({ name: '@anweat/dsh-browser', version: '0.1.10', dsh: { bundle: { patch: 'cordis.patch.yml' } } }),
+      'utf8'
+    )
 
     const vm = new VaultManager(dataDir)
     await vm.addFromMarket({ name: 'dsh-web-search-pro', version: '0.1.11', description: '网页搜索插件' })

@@ -2,6 +2,7 @@ import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync
 import { join, dirname } from 'node:path'
 import { homedir } from 'node:os'
 import { findPidByPort } from './process-manager.js'
+import { findUnloadableProfileBundles, describeUnloadableBundles } from './profile-bundle.js'
 import type { DoctorReport, PreflightResult, HealOptions, HealthSeverity } from './types.js'
 
 /**
@@ -1503,40 +1504,11 @@ export async function diagnoseProfile(
 
 /**
  * 启动前 Pre-flight 毫秒级门禁拦截校验
- */
-/** 官方内置 bundle：不参与「社区 bundle 可解析性」门禁。 */
-const OFFICIAL_BUNDLE_IDS = new Set([
-  '@deepseek-ai/dsh-base',
-  '@deepseek-ai/dsh-web-app',
-  '@deepseek-ai/dsh-headless',
-])
-
-/**
- * 返回 `dsh.profile.bundles` 中「非官方且物理不可解析」的 id 列表。
  *
- * 动机（bug 2/3 治本）：旧门禁 `runPreflightCheck` 只校验官方 dsh-base/dsh-web-app，
- * 因此「沙箱注入写入了 bundles 但物理包缺失」这种情况会被**放行**，
- * 随后 spawn 失败、表现为「环境打不开」。此函数把社区 bundle 纳入硬门禁。
+ * bundle 门禁的判据**不在本文件**：它与插件门控 `deployToProfile` 共用
+ * `./profile-bundle.js` 的 `inspectProfileBundle`（唯一实现），因此
+ * 「门控不会写进去的东西，门禁一定报得出来」是同一判据的必然结论，而不是两处对齐。
  */
-export function findUnresolvableProfileBundles(dshHome: string, profileName: string): string[] {
-  const profDir = join(dshHome, 'profiles', profileName)
-  let bundles: string[] = []
-  try {
-    const pkg = JSON.parse(readFileSync(join(profDir, 'package.json'), 'utf8')) as {
-      dsh?: { profile?: { bundles?: unknown } }
-    }
-    const raw = pkg.dsh?.profile?.bundles
-    if (Array.isArray(raw)) bundles = raw.filter((x): x is string => typeof x === 'string')
-  } catch {
-    return [] // package.json 不可读由其它层负责报错
-  }
-  const missing: string[] = []
-  for (const id of bundles) {
-    if (OFFICIAL_BUNDLE_IDS.has(id)) continue
-    if (!existsSync(join(profDir, 'node_modules', ...id.split('/'), 'package.json'))) missing.push(id)
-  }
-  return missing
-}
 
 export async function runPreflightCheck(
   dshHome: string,
@@ -1546,12 +1518,14 @@ export async function runPreflightCheck(
 ): Promise<PreflightResult> {
   const report = await diagnoseProfile(dshHome, profileName, expectedPort, activeDshBin)
 
-  // 社区 bundle 可解析性门禁（bug 2/3 治本）：缺失即前置拦截，而不是放行后 spawn 失败
-  const unresolvableBundles = findUnresolvableProfileBundles(dshHome, profileName)
-  if (unresolvableBundles.length > 0) {
+  // bundle 可装载性硬门禁：判据与插件门控（`deployToProfile`）共用同一个实现。
+  // 旧实现只验「能否解析到 package.json」，因此「能解析但不是 bundle」的普通插件会被放行，
+  // 随后 dsh 抛出英文硬失败（`declares no dsh.bundle in its package.json`）、环境打不开。
+  const unloadableBundles = findUnloadableProfileBundles(dshHome, profileName)
+  if (unloadableBundles.length > 0) {
     return {
       ok: false,
-      reason: `以下 bundle 在环境中无法解析，启动会失败：${unresolvableBundles.join('、')}`,
+      reason: describeUnloadableBundles(unloadableBundles),
       canAutoHeal: true,
       report,
     }

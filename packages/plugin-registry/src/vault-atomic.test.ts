@@ -1,9 +1,11 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { mkdtempSync, mkdirSync, writeFileSync, rmSync, readFileSync, existsSync, lstatSync, realpathSync, symlinkSync } from 'node:fs'
+import { spawnSync } from 'node:child_process'
 import { tmpdir } from 'node:os'
-import { basename, join, resolve } from 'node:path'
+import { basename, dirname, join, resolve } from 'node:path'
 import { VaultManager } from './vault.js'
+import { findUnloadableProfileBundles, describeUnloadableBundles, isLoadableProfileBundle, runPreflightCheck } from '@godsh/core'
 
 /**
  * bug 2 / 3 / 5 的回归测试：vault 写入路径原子化与删除事务化。
@@ -47,16 +49,31 @@ function makeFixture(profileName = 'web-test'): Fixture {
   return { tempDir, dataDir, profilesDir, profileDir, storeDir, vm: new VaultManager(dataDir) }
 }
 
-/** 在沙箱池里造一个物理插件包。 */
-function seedStore(fx: Fixture, name: string, version: string, extraDeps: Record<string, string> = {}): string {
+/**
+ * 在沙箱池里造一个物理插件包。
+ *
+ * `bundlePatch` 默认 `'cordis.patch.yml'`：`addFromMarket` 一律把条目标成 `kind:'bundle'`，
+ * 因此「池里的包」默认就要按真实 bundle 造（声明 `dsh.bundle.patch`），否则用例断言的
+ * 就不是真实 bundle 的行为。造「能解析但不是 bundle」的假包时显式传 `{ bundlePatch: null }`。
+ */
+function seedStore(
+  fx: Fixture,
+  name: string,
+  version: string,
+  extraDeps: Record<string, string> = {},
+  opts: { bundlePatch?: string | null; bundlePatchContent?: string } = {}
+): string {
   const sanitized = name.replace(/[^a-zA-Z0-9@._-]/g, '_')
   const dir = join(fx.storeDir, `${sanitized}@${version}`)
   mkdirSync(dir, { recursive: true })
-  writeFileSync(
-    join(dir, 'package.json'),
-    JSON.stringify({ name, version, dependencies: extraDeps }, null, 2),
-    'utf8'
-  )
+  const bundlePatch = opts.bundlePatch === undefined ? 'cordis.patch.yml' : opts.bundlePatch
+  const manifest: Record<string, unknown> = { name, version, dependencies: extraDeps }
+  if (bundlePatch !== null) {
+    manifest.dsh = { bundle: { patch: bundlePatch } }
+    // 与真实 bundle 一样落一份 patch 文件：dsh 装载时会读它，缺了会以另一条错误失败
+    writeFileSync(join(dir, bundlePatch), opts.bundlePatchContent ?? '[]\n', 'utf8')
+  }
+  writeFileSync(join(dir, 'package.json'), JSON.stringify(manifest, null, 2), 'utf8')
   return dir
 }
 
@@ -1150,4 +1167,240 @@ test('计数口径: removeMany 按「请求提交的条目数」计数，组合�
   } finally {
     rmSync(two.tempDir, { recursive: true, force: true })
   }
+})
+
+/* ------------------------------------------------------------------ */
+/* 契约：插件门控 与 启动门禁 必须共用同一个「真 bundle」判据                  */
+/*                                                                    */
+/* 缺陷：判据曾是「包目录在不在」，而 dsh 要的是「package.json 声明了          */
+/* dsh.bundle.patch」。差值（能解析但并非 bundle 的普通插件）被写进           */
+/* dsh.profile.bundles 后，dsh 装载时抛错误文本直接硬失败 → 环境打不开。      */
+/* 旧门禁同样只验可解析性，所以拦不住；用户唯一出路是跑一次自愈。              */
+/* ------------------------------------------------------------------ */
+
+/** 把某个包名强行写进 profile 的 `dsh.profile.bundles`（复现旧门控留下的坏状态）。 */
+function forceBundleEntry(fx: Fixture, name: string): void {
+  const pkgPath = join(fx.profileDir, 'package.json')
+  const pkg = JSON.parse(readFileSync(pkgPath, 'utf8')) as { dsh: { profile: { bundles: string[] } } }
+  if (!pkg.dsh.profile.bundles.includes(name)) pkg.dsh.profile.bundles.push(name)
+  writeFileSync(pkgPath, JSON.stringify(pkg, null, 2), 'utf8')
+}
+
+/** 真实 dsh CLI 的 node 入口（`lib/bin.js`）；找不到返回 null（调用方 skip 并说明原因）。 */
+function resolveDshEntry(): string | null {
+  const explicit = process.env.GODSH_DSH_BIN
+  if (explicit && existsSync(explicit)) return explicit
+  const appData = process.env.APPDATA ?? ''
+  if (!appData) return null
+  const entry = join(appData, 'npm', 'node_modules', '@deepseek-ai', 'dsh', 'lib', 'bin.js')
+  return existsSync(entry) ? entry : null
+}
+
+/** dsh 侧 `dsh.bundle.patch` 契约所在源码（`@deepseek-ai/dsh-app-boot` 的编译产物）。 */
+function resolveDshAppBootSource(): string | null {
+  const entry = resolveDshEntry()
+  if (!entry) return null
+  const dshRoot = dirname(dirname(entry)) // .../node_modules/@deepseek-ai/dsh
+  const candidates = [
+    join(dshRoot, 'node_modules', '@deepseek-ai', 'dsh-app-boot', 'lib', 'index.js'),
+    join(dshRoot, '..', 'dsh-app-boot', 'lib', 'index.js'),
+  ]
+  for (const c of candidates) if (existsSync(c)) return c
+  return null
+}
+
+/**
+ * 跑一次真实的 `dsh --profile <p> --dump-config`。
+ *
+ * `DSH_HOME` 只指向用例自己的临时目录；此处的硬断言是为了**永久**防止有人把
+ * 真实家目录传进来（本项目曾因 `$home` 与只读 `$HOME` 冲突把 DSH_HOME 误设成真实家目录）。
+ */
+function runDshDumpConfig(dshHome: string, profileName: string): { code: number | null; stdout: string; stderr: string } {
+  assert.ok(
+    resolve(dshHome).toLowerCase().startsWith(resolve(tmpdir()).toLowerCase()),
+    `DSH_HOME 必须落在临时目录内，绝不能指向真实环境：${dshHome}`
+  )
+  const entry = resolveDshEntry()
+  assert.ok(entry, '本用例需要真实 dsh CLI 入口（调用前已确认）')
+  const r = spawnSync(process.execPath, [entry, '--profile', profileName, '--dump-config'], {
+    env: { ...process.env, DSH_HOME: dshHome },
+    encoding: 'utf8',
+    timeout: 90_000,
+  })
+  return { code: r.status, stdout: r.stdout ?? '', stderr: r.stderr ?? '' }
+}
+
+test('契约反例: 声明了 dsh.bundle.patch 的包 → 门控接受、启动门禁不报', async () => {
+  const fx = makeFixture()
+  try {
+    seedStore(fx, 'real-bundle', '1.0.0') // 默认就声明 dsh.bundle.patch，与真实 bundle 同形
+    await fx.vm.addFromMarket({ name: 'real-bundle', version: '1.0.0' })
+
+    const r = await fx.vm.deployToProfile('vault-market-real-bundle', 'web-test', fx.profilesDir)
+    assert.equal(r.ok, true)
+
+    const bundles = readProfilePkg(fx).dsh?.profile?.bundles ?? []
+    assert.ok(bundles.includes('real-bundle'), `声明了 dsh.bundle.patch 的包必须被门控接受，实际=${JSON.stringify(bundles)}`)
+    assertResolvablePackage(join(fx.profileDir, 'node_modules', 'real-bundle'), '物理必须可解析')
+
+    assert.deepEqual(
+      findUnloadableProfileBundles(fx.tempDir, 'web-test'),
+      [],
+      '启动门禁不得报出合法 bundle'
+    )
+  } finally {
+    rmSync(fx.tempDir, { recursive: true, force: true })
+  }
+})
+
+test('契约: 物理可解析但无 dsh.bundle.patch 的包 → 门控拒绝写入，门禁报出包名与字段名', async () => {
+  const fx = makeFixture()
+  try {
+    // `addFromMarket` 会把条目标成 kind:'bundle'，旧门控据此 + 「能解析」就把它推进了 bundles
+    seedStore(fx, 'plain-plugin', '1.0.0', {}, { bundlePatch: null })
+    await fx.vm.addFromMarket({ name: 'plain-plugin', version: '1.0.0' })
+
+    const r = await fx.vm.deployToProfile('vault-market-plain-plugin', 'web-test', fx.profilesDir)
+    assert.equal(r.ok, true, '注入本身应当成功（它仍是合法依赖，只是不该进 bundles）')
+
+    assertResolvablePackage(
+      join(fx.profileDir, 'node_modules', 'plain-plugin'),
+      '该包必须物理可解析 —— 用来证明拒绝的原因不是「不可解析」，而是判据升级'
+    )
+
+    // ① 门控拒绝写入
+    const bundles = readProfilePkg(fx).dsh?.profile?.bundles ?? []
+    assert.ok(!bundles.includes('plain-plugin'), `不得把非 bundle 写进 dsh.profile.bundles，实际=${JSON.stringify(bundles)}`)
+    assert.equal(isLoadableProfileBundle(fx.profileDir, 'plain-plugin'), false, '判据必须判它不可装载')
+
+    // ② 复现旧门控留下的坏状态：启动门禁必须报出它，且文案要点名包名与缺失字段
+    forceBundleEntry(fx, 'plain-plugin')
+    const issues = findUnloadableProfileBundles(fx.tempDir, 'web-test')
+    assert.equal(issues.length, 1, `应恰好报出 1 个不可装载条目，实际=${JSON.stringify(issues.map((i) => i.name))}`)
+    assert.equal(issues[0]!.name, 'plain-plugin')
+    assert.equal(issues[0]!.status, 'no-bundle-manifest')
+
+    const reason = describeUnloadableBundles(issues)
+    assert.ok(reason.includes('plain-plugin'), `诊断必须点名包名，实际=${reason}`)
+    assert.ok(reason.includes('dsh.bundle.patch'), `诊断必须点名缺失字段 dsh.bundle.patch，实际=${reason}`)
+  } finally {
+    rmSync(fx.tempDir, { recursive: true, force: true })
+  }
+})
+
+test('契约: 已存在的坏 bundles 条目会被门控顺带剔除，官方条目豁免', async () => {
+  const fx = makeFixture()
+  try {
+    seedStore(fx, 'plain-plugin', '1.0.0', {}, { bundlePatch: null })
+    await fx.vm.addFromMarket({ name: 'plain-plugin', version: '1.0.0' })
+    await fx.vm.deployToProfile('vault-market-plain-plugin', 'web-test', fx.profilesDir)
+    forceBundleEntry(fx, 'plain-plugin')
+    assert.ok(
+      (readProfilePkg(fx).dsh?.profile?.bundles ?? []).includes('plain-plugin'),
+      '前置条件：坏条目已存在于 bundles'
+    )
+
+    // 再来一次任意注入 → 修剪 pass 必须剔除坏条目，同时保留官方条目
+    seedStore(fx, 'real-bundle', '1.0.0')
+    await fx.vm.addFromMarket({ name: 'real-bundle', version: '1.0.0' })
+    const r = await fx.vm.deployToProfile('vault-market-real-bundle', 'web-test', fx.profilesDir)
+    assert.equal(r.ok, true)
+
+    const bundles = readProfilePkg(fx).dsh?.profile?.bundles ?? []
+    assert.ok(!bundles.includes('plain-plugin'), `坏条目必须被剔除，实际=${JSON.stringify(bundles)}`)
+    assert.ok(bundles.includes('@deepseek-ai/dsh-base'), `官方条目必须豁免（dsh 从安装目录自带解析），实际=${JSON.stringify(bundles)}`)
+    assert.ok(bundles.includes('real-bundle'))
+  } finally {
+    rmSync(fx.tempDir, { recursive: true, force: true })
+  }
+})
+
+test('契约: 门控后的环境 dsh 仍可装载（--dump-config exit 0）；坏条目则硬失败', async (t) => {
+  const entry = resolveDshEntry()
+  if (!entry) {
+    t.skip('未找到真实 dsh CLI 入口，跳过「环境可启动」端到端证明（跳过 ≠ 通过）')
+    return
+  }
+  const fx = makeFixture()
+  try {
+    // real-bundle 的 patch 真的插入一条条目：这样 dsh 的输出里会出现 `# == real-bundle`
+    // 这一段（空 patch 的层不会出现在 dump 里，那样就没有阳性对照可言了）
+    seedStore(fx, 'real-bundle', '1.0.0', {}, {
+      bundlePatchContent: '- insert:\n    - id: real-bundle-marker\n      name: probe-pkg\n',
+    })
+    await fx.vm.addFromMarket({ name: 'real-bundle', version: '1.0.0' })
+    seedStore(fx, 'plain-plugin', '1.0.0', {}, { bundlePatch: null })
+    await fx.vm.addFromMarket({ name: 'plain-plugin', version: '1.0.0' })
+
+    assert.equal((await fx.vm.deployToProfile('vault-market-real-bundle', 'web-test', fx.profilesDir)).ok, true)
+    assert.equal((await fx.vm.deployToProfile('vault-market-plain-plugin', 'web-test', fx.profilesDir)).ok, true)
+
+    const bundles = readProfilePkg(fx).dsh?.profile?.bundles ?? []
+    assert.ok(!bundles.includes('plain-plugin'), '前置条件：非 bundle 不得被写进 bundles')
+
+    // ① 环境可启动的直接证明
+    const okRun = runDshDumpConfig(fx.tempDir, 'web-test')
+    assert.equal(okRun.code, 0, `dsh --profile web-test --dump-config 必须 exit 0，实际=${okRun.code}\nstderr=${okRun.stderr}`)
+    // 阳性对照：dsh 必须真的把 real-bundle 当 patch 层装载了。
+    // 没有这一条，exit 0 可能只是因为「dsh 压根没读这个 profile」，断言就是空转。
+    assert.ok(
+      okRun.stdout.includes('# == real-bundle'),
+      `dsh 输出里必须出现 real-bundle 这一层（否则 exit 0 是空转），stdout 片段=${okRun.stdout.slice(0, 300)}`
+    )
+    assert.ok(okRun.stdout.includes('real-bundle-marker'), '该层声明的 patch 必须真的生效')
+
+    // ② 负对照：把非 bundle 强行写进 bundles → dsh 立刻硬失败（本缺陷的原始现场）
+    forceBundleEntry(fx, 'plain-plugin')
+    const badRun = runDshDumpConfig(fx.tempDir, 'web-test')
+    assert.notEqual(badRun.code, 0, '把非 bundle 列进 dsh.profile.bundles 必须让 dsh 失败')
+    assert.ok(
+      `${badRun.stderr}${badRun.stdout}`.includes('declares no dsh.bundle'),
+      `dsh 的硬失败文案应与判据对应，实际 stderr 尾部=${badRun.stderr.slice(-500)}`
+    )
+  } finally {
+    rmSync(fx.tempDir, { recursive: true, force: true })
+  }
+})
+
+test('契约: 启动门禁接线在 runPreflightCheck 上生效（不只是判据函数本身）', async () => {
+  const fx = makeFixture()
+  try {
+    seedStore(fx, 'plain-plugin', '1.0.0', {}, { bundlePatch: null })
+    await fx.vm.addFromMarket({ name: 'plain-plugin', version: '1.0.0' })
+    await fx.vm.deployToProfile('vault-market-plain-plugin', 'web-test', fx.profilesDir)
+    forceBundleEntry(fx, 'plain-plugin')
+
+    // 走真正的启动门禁入口（`profiles.ts` 的启动路由消费的就是它）。
+    // 只断言判据函数本身不够：那证明不了门禁真的把它接上了 —— 「门禁存在但不站岗」正是本项目的老病。
+    const preflight = await runPreflightCheck(fx.tempDir, 'web-test', 3999)
+    assert.equal(preflight.ok, false, '坏 bundles 条目必须被启动门禁拦下')
+    assert.ok(
+      preflight.reason?.includes('plain-plugin'),
+      `门禁原因必须点名包名，实际=${preflight.reason}`
+    )
+    assert.ok(
+      preflight.reason?.includes('dsh.bundle.patch'),
+      `门禁原因必须点名缺失字段 dsh.bundle.patch，实际=${preflight.reason}`
+    )
+    assert.equal(preflight.canAutoHeal, true)
+  } finally {
+    rmSync(fx.tempDir, { recursive: true, force: true })
+  }
+})
+
+test('契约锚点: dsh 仍要求 profile bundle 声明 dsh.bundle.patch（漂移哨兵）', (t) => {
+  const src = resolveDshAppBootSource()
+  if (!src) {
+    t.skip('未找到 dsh-app-boot 源码（无真实 dsh 安装），锚点未校验（跳过 ≠ 通过）')
+    return
+  }
+  const code = readFileSync(src, 'utf8')
+  // 这条**不是**承重用例：它只回答「dsh 的硬失败文案还在不在」。真正证明契约的是上面
+  // 那条行为用例（坏条目 → dsh 退出码非 0）。这里保留字符串断言，是为了让 dsh 改动这条
+  // 文案时立刻有人来看一眼 —— 代价是文案若被无意义地改写，本用例会误报。
+  assert.ok(
+    code.includes('declares no dsh.bundle in its package.json'),
+    'dsh 的 profile bundle 硬失败文案变了 —— 说明装载契约可能已改，请重新核对 ' +
+      `packages/core/src/profile-bundle.ts 的判据。文件=${src}`
+  )
 })

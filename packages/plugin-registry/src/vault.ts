@@ -1,6 +1,6 @@
 import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, cpSync, writeFileSync, lstatSync, statSync, symlinkSync, renameSync, realpathSync } from 'node:fs'
 import { basename, dirname, join, resolve, sep } from 'node:path'
-import { DATA_DIR, run, ensureCompatibilityShims } from '@godsh/core'
+import { DATA_DIR, run, ensureCompatibilityShims, isOfficialPackage, resolveProfilePackageDir, isLoadableProfileBundle, isRetainableProfileBundle } from '@godsh/core'
 import { auditPackage, type PluginAuditReport, type SecurityLevel } from '@godsh/security'
 import { inspectManifest } from './bundle.js'
 import { getVaultContract, detectPluginConflicts, findDependentsOf } from './vault-contract.js'
@@ -285,9 +285,15 @@ function readPackageVersion(dir: string): string | null {
   }
 }
 
-/** 某包名在 profile 的 node_modules 下是否**物理可解析**（能读到 package.json）。 */
+/**
+ * 某包名在 profile 的 node_modules 下是否**物理可解析**（能读到真实存在的 package.json）。
+ *
+ * 判据本体在 `@godsh/core` 的 `resolveProfilePackageDir`（`lstat` + `realpath` 口径），
+ * 与 bundle 门控 / 启动门禁共用同一实现 —— 本项目已实测 `existsSync` 在断链 junction 上的
+ * 行为与「真实可解析」不一致，故此处不再自己写一遍 `existsSync` 判定。
+ */
 function isResolvableInProfile(profileDir: string, name: string): boolean {
-  return existsSync(join(profileDir, 'node_modules', ...name.split('/'), 'package.json'))
+  return resolveProfilePackageDir(profileDir, name) !== null
 }
 
 /**
@@ -1339,12 +1345,9 @@ export class VaultManager {
       const profileNm = join(profileDir, 'node_modules')
 
       // ---------- 1. 干跑校验（此阶段绝不写盘） ----------
-      const OFFICIAL_BUNDLES = new Set([
-        '@deepseek-ai/dsh-base',
-        '@deepseek-ai/dsh-web-app',
-        '@deepseek-ai/dsh-headless',
-      ])
-      if (OFFICIAL_BUNDLES.has(plugin.name)) {
+      // 官方资产判据的唯一事实源是 `@godsh/core` 的 `isOfficialPackage`（作用域前缀口径），
+      // 此处不再内联枚举 —— 官方新增/重命名 bundle 时无需改这里。
+      if (isOfficialPackage(plugin.name)) {
         return fail(`官方内置 bundle 不允许也不需要通过沙箱注入：${plugin.name}`)
       }
 
@@ -1408,7 +1411,7 @@ export class VaultManager {
         // 把根自己记录的 bundledDeps 也一起喂进去：若某条子副本条目被误删，这里能自愈重建
         // （下一段的不变量校验否则会一直拒绝注入，用户无路可走）。
         const bundlingInput = [...declaredDeps.map((d) => d.name), ...(plugin.bundledDeps ?? [])].filter(
-          (n) => !OFFICIAL_BUNDLES.has(n)
+          (n) => !isOfficialPackage(n)
         )
         const bundled = this.bundleChildrenInData(data, plugin.id, bundlingInput)
         if (bundled.length > 0) this.saveData(data)
@@ -1439,7 +1442,7 @@ export class VaultManager {
         const pSrc = parentEntry.parentId ? this.resolveCombinationMemberDir(parentEntry) : sourceDir
         if (!pSrc) continue // 物理源缺失已由 ③ 报错，这里不重复报
         for (const spec of readPackageDependencySpecs(pSrc)) {
-          if (OFFICIAL_BUNDLES.has(spec.name)) continue
+          if (isOfficialPackage(spec.name)) continue
           if (data.plugins.some((c) => c.parentId === parentEntry.id && c.name === spec.name)) continue // 已挂上
           if (!data.plugins.some((e) => e.name === spec.name)) continue // 沙箱里没有 → 交给 dsh/pnpm 自行解析
           return fail(
@@ -1466,7 +1469,7 @@ export class VaultManager {
       const derivedCompanions: string[] = []
       for (const member of combination) {
         if (member.id === plugin.id) continue // 根自己走既有逻辑
-        if (OFFICIAL_BUNDLES.has(member.name)) continue
+        if (isOfficialPackage(member.name)) continue
         if (companionPlans.some((c) => c.name === member.name)) continue // 契约伴随已计划
 
         // 子副本只认自己那份按父隔离的目录：绝不回退到同名公共/别人的目录
@@ -1536,6 +1539,11 @@ export class VaultManager {
       }
 
       // ---------- 3. 物理就绪后再计算 bundles（门控） ----------
+      // 判据是「真 bundle」而非「包目录在不在」：物理可解析 + package.json 声明了字符串型
+      // dsh.bundle.patch + 非官方包，三者同时成立才写。旧判据只验可解析性，于是「能解析但
+      // 并非 bundle」的普通插件被写进 bundles，dsh 装载时硬失败（declares no dsh.bundle）、
+      // 环境打不开 —— 症状就是「必须启用自愈才能打开环境」。
+      // 判据实现共用 `@godsh/core` 的 `inspectProfileBundle`，与启动门禁同源。
       const previousVersion = deps[plugin.name]
       deps[plugin.name] = targetVersion.startsWith('^') ? targetVersion : `^${targetVersion}`
       const companionAdded = companionPlans.map((c) => c.name)
@@ -1543,13 +1551,14 @@ export class VaultManager {
 
       const bundles = new Set<string>(pkg.dsh?.profile?.bundles || [])
       const addBundleIfReady = (name: string) => {
-        if (isResolvableInProfile(profileDir, name)) bundles.add(name)
+        if (isLoadableProfileBundle(profileDir, name)) bundles.add(name)
       }
       if (plugin.kind === 'bundle' || plugin.kind === 'both') addBundleIfReady(plugin.name)
       for (const c of companionPlans) if (c.isBundle) addBundleIfReady(c.name)
-      // 顺带剔除「已声明但物理不存在」的历史遗留 bundle，避免继续用坏状态启动
+      // 顺带剔除「已声明但不可装载」的历史遗留 bundle，避免继续用坏状态启动。
+      // 官方条目豁免（dsh 从安装目录自带解析），既不写入也不修剪。
       for (const b of [...bundles]) {
-        if (!OFFICIAL_BUNDLES.has(b) && !isResolvableInProfile(profileDir, b)) bundles.delete(b)
+        if (!isRetainableProfileBundle(profileDir, b)) bundles.delete(b)
       }
 
       // ---------- 4. 原子写声明 ----------

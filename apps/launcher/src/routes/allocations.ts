@@ -1,8 +1,47 @@
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
+import { isOfficialPackage, KNOWN_OFFICIAL_BUNDLES, type OfficialRole } from '@godsh/core'
 import { scanProfiles } from '@godsh/profile-manager'
 import { pluginAction, resolveInstallArg } from '@godsh/marketplace'
 import type { ApiHandler } from './types.js'
+
+/**
+ * 官方资产的**只读视图**（服务端构造，前端只渲染）。
+ *
+ * `version` 必须是该 Profile 的 `node_modules/<pkg>/package.json` 里**实际装到**的版本；
+ * 读不到就是 `null`（界面显示「未知」），**绝不回退成市场最新版本号或任何猜测值**。
+ */
+interface OfficialAssetView {
+  name: string
+  role: OfficialRole
+  version: string | null
+}
+
+/**
+ * 可分配插件条目。
+ *
+ * 注意：这里**不含**官方 bundle —— 官方资产在 available 负载里被 {@link isOfficialPackage} 过滤掉
+ * （官方资产退出「可分配」面，只经 `officialAssets` 只读展示）。
+ */
+interface AvailableItemView {
+  pluginId: string
+  source: 'dependency' | 'bundle'
+  allocated: boolean
+  enabled: boolean
+  description?: string
+  version?: string
+  category?: string
+}
+
+/**
+ * 给分配记录负载加上「是否官方资产」分类字段。
+ *
+ * 「官方」这一事实在本仓库只有一处判定实现（`@godsh/core` 的 `isOfficialPackage`）；
+ * 这里只是把结果**随负载下发**，让前端零判定代码地消费它。
+ */
+function tagOfficial<T extends { pluginId: string }>(a: T): T & { isOfficial: boolean } {
+  return { ...a, isOfficial: isOfficialPackage(a.pluginId) }
+}
 
 /** /api/allocations* —— 分配 CRUD / 排序 / 移动 / 可分配清单（含 patch 写回守护与回滚） */
 export const allocationsHandler: ApiHandler = async (ctx, _req, res, method, seg, body, _url) => {
@@ -10,7 +49,7 @@ export const allocationsHandler: ApiHandler = async (ctx, _req, res, method, seg
 
   // GET /api/allocations
   if (seg.length === 1 && seg[0] === 'allocations' && method === 'GET') {
-    ctx.sendJson(res, 200, { allocations: allocations.list() })
+    ctx.sendJson(res, 200, { allocations: allocations.list().map(tagOfficial) })
     return true
   }
 
@@ -23,6 +62,13 @@ export const allocationsHandler: ApiHandler = async (ctx, _req, res, method, seg
       ctx.sendJson(res, 400, { error: 'body 需要 { profile, pluginId }' })
       return true
     }
+    // 官方资产退出「可分配」面：godsh 不纳管官方 bundle（它们由 dsh 的 dsh.profile.bundles 机制加载），
+    // 因此拒绝为其新建分配记录。判据走唯一事实源 `@godsh/core` 的 isOfficialPackage。
+    // 注：历史遗留的官方分配记录不受影响 —— 它们仍由 GET /api/allocations 如实返回（只读徽标呈现）。
+    if (isOfficialPackage(pluginId)) {
+      ctx.sendJson(res, 400, { error: `官方资产由 dsh 维护，godsh 不纳管，不能分配: ${pluginId}` })
+      return true
+    }
     // 幂等：同一 Profile 已分配该插件时返回既有记录（created=false，不重复创建）
     const before = allocations.list().find((x) => x.profile === profile && x.pluginId === pluginId)
     const a = allocations.allocate(profile, pluginId, pluginName)
@@ -32,10 +78,10 @@ export const allocationsHandler: ApiHandler = async (ctx, _req, res, method, seg
     const apply = ctx.tryApplyAllocation(profile)
     if (!apply.applied) {
       if (!before) allocations.remove(a.id)
-      ctx.sendJson(res, 409, { error: apply.applyError ?? '写回 cordis.patch.yml 失败', allocation: before ? a : undefined })
+      ctx.sendJson(res, 409, { error: apply.applyError ?? '写回 cordis.patch.yml 失败', allocation: before ? tagOfficial(a) : undefined })
       return true
     }
-    ctx.sendJson(res, 201, { allocation: a, created: !before, ...apply })
+    ctx.sendJson(res, 201, { allocation: tagOfficial(a), created: !before, ...apply })
     return true
   }
 
@@ -67,7 +113,7 @@ export const allocationsHandler: ApiHandler = async (ctx, _req, res, method, seg
       ctx.sendJson(res, 409, { error: apply.applyError ?? '写回 cordis.patch.yml 失败' })
       return true
     }
-    ctx.sendJson(res, 200, { allocations: allocations.listByProfile(profile), ...apply })
+    ctx.sendJson(res, 200, { allocations: allocations.listByProfile(profile).map(tagOfficial), ...apply })
     return true
   }
 
@@ -82,7 +128,7 @@ export const allocationsHandler: ApiHandler = async (ctx, _req, res, method, seg
       ctx.sendJson(res, 409, { error: apply.applyError ?? '写回 cordis.patch.yml 失败' })
       return true
     }
-    ctx.sendJson(res, 200, { allocation: a, ...apply })
+    ctx.sendJson(res, 200, { allocation: tagOfficial(a), ...apply })
     return true
   }
 
@@ -128,13 +174,18 @@ export const allocationsHandler: ApiHandler = async (ctx, _req, res, method, seg
         return {}
       }
     }
-    const available: Record<string, { pluginId: string; source: 'dependency' | 'bundle'; allocated: boolean; enabled: boolean; description?: string; version?: string; category?: string }[]> = {}
+    const available: Record<string, AvailableItemView[]> = {}
+    // 官方资产的只读视图（含本环境实际装到的版本）：与 available 用同一份 scanProfiles 结果构造，键集一致
+    const officialAssets: Record<string, OfficialAssetView[]> = {}
     for (const p of scanProfiles(profilesDir)) {
       const byId = new Map(all.filter((a) => a.profile === p.name).map((a) => [a.pluginId, a]))
       const seen = new Set<string>()
-      const items: { pluginId: string; source: 'dependency' | 'bundle'; allocated: boolean; enabled: boolean; description?: string; version?: string; category?: string }[] = []
+      const items: AvailableItemView[] = []
       const add = (pluginId: string, source: 'dependency' | 'bundle') => {
         if (!pluginId || seen.has(pluginId)) return
+        // 官方资产退出「可分配」列表：godsh 不纳管官方 bundle，它们在本环境里只由下方
+        // officialAssets（只读视图，见 OfficialAssetView）如实展示，不给任何分配入口。
+        if (isOfficialPackage(pluginId)) return
         seen.add(pluginId)
         const a = byId.get(pluginId)
         const m = marketMap.get(pluginId)
@@ -152,8 +203,14 @@ export const allocationsHandler: ApiHandler = async (ctx, _req, res, method, seg
       for (const dep of Object.keys(p.dependencies ?? {})) add(dep, 'dependency')
       for (const b of p.bundles ?? []) add(b, 'bundle')
       available[p.name] = items
+      // 版本只认 node_modules 里的实装版本（不经市场索引），读不到即 null → 前端显示「未知」
+      officialAssets[p.name] = KNOWN_OFFICIAL_BUNDLES.map((asset) => ({
+        name: asset.name,
+        role: asset.role,
+        version: readPkgDesc(p.dir, asset.name).version ?? null,
+      }))
     }
-    ctx.sendJson(res, 200, { available })
+    ctx.sendJson(res, 200, { available, officialAssets })
     return true
   }
 
@@ -191,7 +248,9 @@ export const allocationsHandler: ApiHandler = async (ctx, _req, res, method, seg
       const c = catByName.get(id) ?? catByName.get(id.split('#')[0]!)
       return c === category
     }
-    const matched = installedIds.filter(belongs)
+    // 官方资产退出「可分配」面：分类一键分配同样是「新增分配」，不得把官方 bundle 纳进来
+    // （available 列表已过滤它们，这里按同一条判据保持一致，避免绕过前端直接调 API 时漏掉）
+    const matched = installedIds.filter((id) => belongs(id) && !isOfficialPackage(id))
     const existing = new Set(allocations.list().filter((a) => a.profile === profile).map((a) => a.pluginId))
     const toAssign = matched.filter((id) => !existing.has(id))
     let assigned = 0
@@ -275,7 +334,7 @@ export const allocationsHandler: ApiHandler = async (ctx, _req, res, method, seg
       ctx.sendJson(res, 409, { error: apply.applyError ?? '写回 cordis.patch.yml 失败' })
       return true
     }
-    ctx.sendJson(res, 200, { ok: true, allocation: a, installed: targetInstalled.includes(pluginId) || targetInstalled.includes(installArg ?? '') })
+    ctx.sendJson(res, 200, { ok: true, allocation: tagOfficial(a), installed: targetInstalled.includes(pluginId) || targetInstalled.includes(installArg ?? '') })
     return true
   }
 
@@ -302,7 +361,7 @@ export const allocationsHandler: ApiHandler = async (ctx, _req, res, method, seg
     if (!target.enabled) allocations.setEnabled(moved.id, false)
     const oldApply = ctx.tryApplyAllocation(fromProfile, [target.pluginId])
     const newApply = ctx.tryApplyAllocation(toProfile)
-    ctx.sendJson(res, 200, { allocation: moved, fromProfile, ...oldApply, newApply })
+    ctx.sendJson(res, 200, { allocation: tagOfficial(moved), fromProfile, ...oldApply, newApply })
     return true
   }
 

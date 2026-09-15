@@ -18,9 +18,17 @@ import {
   CheckCircle2,
   AlertCircle,
   Archive,
+  ShieldCheck,
 } from 'lucide-react'
 import { api } from '../api'
-import type { Allocation, AvailablePlugin, MarketCategory, ProfileView, VaultPlugin } from '../types'
+import type {
+  Allocation,
+  AvailablePlugin,
+  MarketCategory,
+  OfficialAssetView,
+  ProfileView,
+  VaultPlugin,
+} from '../types'
 import { ContextMenu, EmptyState, ToastStack, type MenuState } from '../components'
 import { useAsyncAction, useToast } from '../hooks'
 import { useI18n } from '../i18n'
@@ -58,10 +66,68 @@ interface DragState {
   overKey: string | null
 }
 
+/** 官方资产角色 → i18n 键（角色只是展示事实，不是操作判据）。 */
+const OFFICIAL_ROLE_LABEL: Record<OfficialAssetView['role'], string> = {
+  base: 'alloc.official.role.base',
+  'web-app': 'alloc.official.role.webApp',
+  headless: 'alloc.official.role.headless',
+  other: 'alloc.official.role.other',
+}
+
+/**
+ * 「官方内核（由 dsh 维护）」——**只读事实**面板。
+ *
+ * 官方 bundle 由 dsh 自身维护，godsh 不纳管：这里只如实渲染服务端下发的
+ * `OfficialAssetView`（`GET /api/allocations/available` 的 `officialAssets`），
+ * 其中 `version` 是服务端从该 Profile 的 `node_modules/<pkg>/package.json`
+ * 读到的**实装版本**；为 `null` 时显示「未知」。
+ *
+ * 前端**不做任何包名 / 作用域判定，也不持有任何包名清单** —— 官方资产有哪些、
+ * 各自什么角色，全部来自服务端（`@godsh/core` 的唯一事实源）。
+ *
+ * **刻意不提供任何按钮**：不可更新、不可卸载、不可禁用。
+ */
+function OfficialKernelFacts({ assets }: { assets: OfficialAssetView[] }) {
+  const { t } = useI18n()
+  // 服务端未下发该环境的官方资产视图（如环境目录缺失）时不渲染，绝不自行拼一份
+  if (assets.length === 0) return null
+  return (
+    <div
+      style={{
+        margin: '4px 0 12px',
+        padding: '8px 10px',
+        border: '1px solid var(--border-subtle, rgba(148, 163, 184, 0.25))',
+        borderRadius: 8,
+        background: 'rgba(148, 163, 184, 0.06)',
+      }}
+    >
+      <div className="row" style={{ alignItems: 'center', gap: 6, marginBottom: 6 }}>
+        <ShieldCheck size={13} />
+        <strong style={{ fontSize: 13 }}>{t('alloc.official.title')}</strong>
+        <span className="badge">{t('alloc.official.readonly')}</span>
+        <span className="spacer" />
+        <span className="muted" style={{ fontSize: 11 }}>{t('alloc.official.hint')}</span>
+      </div>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+        {assets.map((asset) => (
+          <div key={asset.name} className="row" style={{ alignItems: 'center', gap: 6, fontSize: 12 }}>
+            <span style={{ fontFamily: 'var(--font-mono, monospace)' }}>{asset.name}</span>
+            <span className="badge">{t(OFFICIAL_ROLE_LABEL[asset.role])}</span>
+            <span className="spacer" />
+            <span className="muted">{asset.version ?? t('alloc.official.unknownVersion')}</span>
+          </div>
+        ))}
+      </div>
+    </div>
+  )
+}
+
 export default function AllocationsPage() {
   const [profiles, setProfiles] = useState<ProfileView[]>([])
   const [allocations, setAllocations] = useState<Allocation[]>([])
   const [available, setAvailable] = useState<Record<string, AvailablePlugin[]>>({})
+  /** profile → 官方资产只读视图（服务端下发：包名 / 角色 / 实装版本；前端零判定） */
+  const [officialAssets, setOfficialAssets] = useState<Record<string, OfficialAssetView[]>>({})
   const [categories, setCategories] = useState<MarketCategory[]>([])
   const [expanded, setExpanded] = useState<Set<string>>(new Set())
   const [drag, setDrag] = useState<DragState | null>(null)
@@ -148,7 +214,8 @@ export default function AllocationsPage() {
       ])
       setProfiles(p)
       setAllocations(a)
-      setAvailable(av)
+      setAvailable(av.available)
+      setOfficialAssets(av.officialAssets)
       setCategories(cats)
       setExpanded((prev) => (prev.size ? prev : new Set(p.length ? [p[0]!.name] : [])))
     } catch (e) {
@@ -163,7 +230,8 @@ export default function AllocationsPage() {
     try {
       const [a, av] = await Promise.all([api.allocations(), api.allocationsAvailable()])
       setAllocations(a)
-      setAvailable(av)
+      setAvailable(av.available)
+      setOfficialAssets(av.officialAssets)
     } catch (e) {
       show(e instanceof Error ? e.message : String(e), true)
     }
@@ -268,7 +336,14 @@ export default function AllocationsPage() {
     return m
   }, [allocations])
 
-  // profile → 已安装但未分配的插件
+  /**
+   * profile → 已安装但未分配的插件（「可添加」区）。
+   *
+   * 这里**天然不含官方资产**：服务端 `GET /api/allocations/available` 已按官方判据把它们过滤掉
+   * （官方资产退出「可分配」面）。因此「单击分配 / 拖动转移 / 全部分配 / 按分类全部分配」这些
+   * 基于本列表的入口都不会碰到官方 bundle —— 官方 bundle 在界面上只出现在只读面板
+   * OfficialKernelFacts 里；历史遗留的官方分配记录则仍以只读徽标出现在「已分配」区。
+   */
   const addable = useMemo(() => {
     const m: Record<string, AvailablePlugin[]> = {}
     for (const [profile, items] of Object.entries(available)) {
@@ -763,14 +838,17 @@ export default function AllocationsPage() {
     setTooltip(null)
   }
 
-  /** 官方内核 bundle：由 dsh 自动维护，禁止手动更新/卸载。 */
-  const OFFICIAL_BUNDLES = new Set(['@deepseek-ai/dsh-base', '@deepseek-ai/dsh-web-app', '@deepseek-ai/dsh-headless'])
-  const isOfficialBundle = (id: string) => OFFICIAL_BUNDLES.has(id)
-
-  /** 更新单个插件（分配页每行）。 */
+  /**
+   * 更新单个插件（分配页每行）。
+   *
+   * 官方资产由 dsh 自身维护，godsh 不纳管：拦截判据是服务端下发的
+   * `a.isOfficial`（服务端由 `@godsh/core` 的 `isOfficialPackage` 判定），
+   * 前端不做任何包名字符串判定，也没有按包名分支的特判文案 ——
+   * 官方新增 bundle 时这里无需改动即可一并拦住。
+   */
   async function updatePlugin(a: Allocation) {
-    if (isOfficialBundle(a.pluginId)) {
-      show('官方内核 bundle 由 dsh 自动维护，无需手动更新', true)
+    if (a.isOfficial) {
+      show(`${t('alloc.official.noUpdate')}: ${a.pluginId}`, true)
       return
     }
     await withBusy(`update:${a.id}`, async () => {
@@ -840,21 +918,19 @@ export default function AllocationsPage() {
     })
   }
 
-  /** 卸载插件：智能卸载（依赖 → pnpm remove；纯 bundle → 从 bundles 移除不再加载），并同步移除分配记录。 */
+  /**
+   * 卸载插件：智能卸载（依赖 → pnpm remove；纯 bundle → 从 bundles 移除不再加载），并同步移除分配记录。
+   *
+   * 官方资产由 dsh 自身维护，godsh 不纳管：一律按服务端下发的 `a.isOfficial` 拦截，
+   * 不再对 dsh-base / dsh-headless / dsh-web-app 三个包名分别分支给不同文案 ——
+   * 前端不持有任何包名清单，官方新增 bundle 时这里同样无需改动。
+   */
   async function uninstall(a: Allocation) {
-    if (a.pluginId === '@deepseek-ai/dsh-base') {
-      show('dsh-base 是核心内核 bundle，不能卸载（环境依赖它才能启动）', true)
+    if (a.isOfficial) {
+      show(`${t('alloc.official.noUninstall')}: ${a.pluginId}`, true)
       return
     }
-    if (a.pluginId === '@deepseek-ai/dsh-headless') {
-      show('dsh-headless 是官方内核 bundle，不能卸载', true)
-      return
-    }
-    const isWebApp = a.pluginId === '@deepseek-ai/dsh-web-app'
-    const hint = isWebApp
-      ? '卸载 @deepseek-ai/dsh-web-app 后，该环境将失去 Web 界面（仅保留命令行能力）。确定继续？'
-      : `确定从环境 ${a.profile} 卸载插件 ${a.pluginId}？`
-    if (!(await confirm({ message: hint }))) return
+    if (!(await confirm({ message: `确定从环境 ${a.profile} 卸载插件 ${a.pluginId}？` }))) return
     await withBusy(`uninstall:${a.id}`, async () => {
       try {
         const r = await api.uninstallPlugin(a.profile, a.pluginId)
@@ -1243,6 +1319,9 @@ export default function AllocationsPage() {
 
               {isOpen && (
                 <div style={{ marginTop: 12 }}>
+                  {/* 官方内核：只读事实（由 dsh 维护，godsh 不纳管 —— 无任何操作按钮） */}
+                  <OfficialKernelFacts assets={officialAssets[p.name] ?? []} />
+
                   {list.length === 0 && (
                     <EmptyState
                       compact
@@ -1292,10 +1371,16 @@ export default function AllocationsPage() {
                           style={{ cursor: 'grab' }}
                           onMouseEnter={(e) => {
                             const title = a ? a.pluginId : ''
-                            // 描述：已分配卡片从同环境 available 列表按 pluginId 匹配
+                            // 描述：已分配卡片从同环境 available 列表按 pluginId 匹配。
+                            // 官方 bundle 不在 available 里（服务端已过滤），故从 officialAssets 取实装版本。
                             const descInfo = (() => {
                               const match = (available[p.name] ?? []).find((x) => x.pluginId === title)
-                              return match ? { desc: match.description, version: match.version, source: match.source === 'bundle' ? 'bundle' : '依赖' } : {}
+                              if (match) return { desc: match.description, version: match.version, source: match.source === 'bundle' ? 'bundle' : '依赖' }
+                              if (a?.isOfficial) {
+                                const asset = (officialAssets[p.name] ?? []).find((x) => x.name === title)
+                                if (asset) return { version: asset.version ?? undefined, source: t('alloc.official.tag') }
+                              }
+                              return {}
                             })()
                             if (title) showTooltip(e, title, descInfo)
                           }}
@@ -1322,6 +1407,7 @@ export default function AllocationsPage() {
                               <span style={{ fontFamily: 'Consolas, monospace', fontWeight: 600, fontSize: compactMode ? '0.85rem' : '0.95rem' }}>
                                 {a.pluginId}
                               </span>
+                              {a.isOfficial && <span className="badge info">{t('alloc.official.tag')}</span>}
                               <button
                                 className={`alloc-power-btn ${a.enabled ? 'on' : 'off'}`}
                                 disabled={rowToggleBusy}

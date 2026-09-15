@@ -102,6 +102,12 @@ importers:
         specifier: workspace:*
         version: link:../profile-manager
 
+  packages/dsh-godsh-plugin:
+    devDependencies:
+      esbuild:
+        specifier: ^0.28.2
+        version: 0.28.2
+
   packages/dsh-plugin:
     dependencies:
       '@godsh/allocation':

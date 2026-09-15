@@ -17,6 +17,7 @@ import type {
   PortInfo,
   ProfileStatus,
   ProfileView,
+  OfficialAssetView,
   SettingsInfo,
   UnifiedKernelConfig,
   ProfilePackage,
@@ -301,8 +302,17 @@ export const api = {
       body: JSON.stringify({ profile, orderedIds }),
     }).then((r) => r.allocations),
 
+  /**
+   * 可分配清单 + 官方资产只读视图。
+   *
+   * `available` **不含官方资产**（服务端按官方判据过滤 —— 官方 bundle 退出「可分配」面）；
+   * `officialAssets` 是服务端从各 Profile 的 `node_modules/<pkg>/package.json` 读出的
+   * 官方资产实装版本（读不到为 null）—— 前端只渲染，不做任何包名判定。
+   */
   allocationsAvailable: () =>
-    req<{ available: Record<string, AvailablePlugin[]> }>('/allocations/available').then((r) => r.available),
+    req<{ available: Record<string, AvailablePlugin[]>; officialAssets: Record<string, OfficialAssetView[]> }>(
+      '/allocations/available',
+    ),
 
   /** 按市场分类一键分配：把该环境已安装的该分类插件全部分配。 */
   assignCategory: (profile: string, category: string) =>

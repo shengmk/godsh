@@ -1,4 +1,6 @@
 export * from './types.js'
+export * from './dsh-official.js'
+export * from './profile-bundle.js'
 export * from './paths.js'
 export * from './version.js'
 export * from './run.js'

@@ -88,6 +88,18 @@ const ZH: Record<string, string> = {
   'dash.quickMarket': '浏览市场',
   'dash.quickKernels': '管理内核',
   'dash.quickSettings': '打开设置',
+
+  'alloc.official.title': '官方内核（由 dsh 维护）',
+  'alloc.official.readonly': '只读',
+  'alloc.official.hint': '官方资产由 dsh 自身维护，godsh 不纳管：不可更新 / 不可卸载 / 不可禁用',
+  'alloc.official.unknownVersion': '未知',
+  'alloc.official.role.base': '基座',
+  'alloc.official.role.webApp': 'Web 应用',
+  'alloc.official.role.headless': '无头',
+  'alloc.official.role.other': '其它',
+  'alloc.official.tag': '官方',
+  'alloc.official.noUpdate': '官方内核由 dsh 维护，无法更新',
+  'alloc.official.noUninstall': '官方内核由 dsh 维护，无法卸载',
 }
 
 const EN: Record<string, string> = {
@@ -174,6 +186,18 @@ const EN: Record<string, string> = {
   'dash.quickMarket': 'Browse market',
   'dash.quickKernels': 'Manage kernels',
   'dash.quickSettings': 'Open settings',
+
+  'alloc.official.title': 'Official kernels (maintained by dsh)',
+  'alloc.official.readonly': 'Read-only',
+  'alloc.official.hint': 'Official assets are maintained by dsh itself and not managed by godsh: no update / uninstall / disable',
+  'alloc.official.unknownVersion': 'Unknown',
+  'alloc.official.role.base': 'Base',
+  'alloc.official.role.webApp': 'Web app',
+  'alloc.official.role.headless': 'Headless',
+  'alloc.official.role.other': 'Other',
+  'alloc.official.tag': 'Official',
+  'alloc.official.noUpdate': 'Official kernels are maintained by dsh and cannot be updated',
+  'alloc.official.noUninstall': 'Official kernels are maintained by dsh and cannot be uninstalled',
 }
 
 const DICTS: Record<Locale, Record<string, string>> = { 'zh-CN': ZH, en: EN }

@@ -102,7 +102,11 @@
      特异性相同（0,1,0），位置更靠后的 `:root` 会赢 —— 于是浅色主题被静默覆盖（缺陷 U1）。
      现在基座在 L6、浅色块在 L90 之后、深色块在更后面，三个作用域按「后写者胜」自然分层。 */
   --vault-1: #9333ea;
-  --vault-2: #a855f7;
+  /* 基座即「深色档」：按本文件「基座=深色取值、浅色块在最后覆盖」的纪律，把 --vault-2 与
+     深色块对齐为 #c084fc。原先基座写 #a855f7，而 #a855f7 作为 .btn.vault/.badge.vault 的**前景**
+     压在深色卡片上只有 4.41:1（分部 A 逐节点审计在无主题档实测），差一点点不到小字 4.5。
+     深色块与浅色块各自都已显式覆盖本令牌，故本行只影响「未设置 data-theme」的基座档。 */
+  --vault-2: #c084fc;
   --vault-bg: rgba(147, 51, 234, 0.08);
   --vault-border: rgba(168, 85, 247, 0.28);
 
@@ -141,6 +145,26 @@
      深色主题本来就应该用这套浅色前景，故基座即终值，`[data-theme='dark']` 无需覆盖。 */
   --terminal-surface: #050508;
   --on-terminal: #e2e8f0;
+
+  /* 暗井（Dark Well）：双主题恒深容器 —— 它是「一个重新定义中性色令牌的作用域」，
+     不是「一个改了背景色的容器」。按本节 :101 / :126 记载的顺序纪律：暗井段必须排在
+     `[data-theme='light']` 之后（见文件下方「暗井令牌作用域」那一段），
+     否则同特异性下后写者胜，井内的令牌重定义会被浅色块盖掉。
+
+     为什么不能只给井容器加两条 !important 就够了：`color` 只沿**继承**往下传，
+     而后代只要在浅色块里被显式改过颜色（`.badge` / `.mono-tag` / `.table th,td` /
+     `.card-title` / `.btn` 全部中招），容器上的 `color: … !important` 一样会被后代的
+     显式声明盖掉 —— 这正是「浅色模式下黑色框里的字看不见」的成因。
+     暗井把中性色令牌在自身作用域内重新定义成深色档，于是井内后代无论是用 var() 取色
+     还是被下面的「井内后代替换」重新指向，拿到的都是深底适配的取值。
+
+     井成员（新增组件一律加 `.dark-well` 这个主题无关的类，不要往这份名单里塞新类名）：
+     .terminal-window / .terminal-container / pre.log-stream / .log-viewer /
+     .console-terminal / .fault-details（历史补丁点），
+     .terminal-panel（SystemTasksPage 的终端）/ .log-panel（ProfilesPage:1076、
+     KernelsPage:537、DshEnvsPage:312）/ .fault-card（ErrorBoundary 外层卡片）——
+     后三者是同一缺陷类在别处的实例，本次逐节点审计实测到 `.fault-card` 内 `.btn`
+     只有 1.01:1、`.fault-details` 内 `.fault-code` 只有 2.76:1。 */
 }
 
 [data-theme='dark'] {
@@ -408,17 +432,127 @@
   color: #334155;
 }
 
-/* 浅色模式下终端窗口保持黑底极客高对比度 */
+/* 分部 A 逐节点审计查出的**井外**遗留项（与暗井缺陷无关，单独记）：
+   浅色主题下拖拽手柄用的 --muted(#64748b) 压在白卡上只有 4.08:1，差一点点不到小字 4.5。
+   拖拽手柄语义上属于「可操作图形对象」（WCAG 图形阈值 3:1），但它在这里是一个文本节点（⠿），
+   逐节点审计按小字 4.5 判定，所以把它单独压深到 #475569（约 7.0:1）。
+   刻意**不动** --muted 这个全局令牌：那会改变全站次要文字的观感，超出本次缺陷范围。 */
+[data-theme='light'] .drag-grip {
+  color: #475569;
+}
+
+/* 浅色档把 .badge.disabled 换回 --err（浅色档的 #b91c1c 在浅底上达标；统一的 #f87171 会太亮）。
+   基线规则里的 #f87171 是给深色/无主题档用的，见那条规则的注释。 */
+[data-theme='light'] .badge.disabled {
+  color: var(--err);
+}
+
+/* ============================================================
+   暗井令牌作用域（Dark Well）—— 替换原先「浅色模式下终端窗口保持黑底极客高对比度」
+   那一段只改容器自身 background/color 的 !important 补丁（原 411-422 行）。
+   位置必须在本文件的 `[data-theme='light']` 之后：井的令牌重定义与浅色块的显式后代规则
+   靠「同特异性后写者胜」分层，与 :101 / :126 记载的是同一条纪律。
+
+   两条腿：
+     ① 作用域重定义 —— 管所有用 var() 取色的后代（.muted / .fault-desc / .fault-code /
+        .log-panel 文本 / .terminal-title …），它们无需任何特判就自动变成深底适配；
+     ② 井内后代替换 —— 只管在浅色块里被**写死字面色**的那几个后代
+        （.badge / .mono-tag / .table th,td / .card-title / .btn），把它们重新指回井内令牌。
+   ② 刻意**不写 !important**：靠选择器落点与特异性站住，不用优先级硬压。
+   ============================================================ */
+
+/* ① 井内局部令牌重定义：中性色 = 深色档，表面 = 浅色玻璃档（井内没有"白色卡片"这回事）。
+   井成员名单与文件顶部令牌纪律注释里记的那份保持同步；新增组件请直接用 .dark-well。 */
+[data-theme='light'] :is(.terminal-window, .terminal-container, pre.log-stream, .log-viewer, .console-terminal, .fault-details, .terminal-panel, .log-panel, .fault-card),
+.dark-well {
+  --text-primary: #e2e8f0;
+  --text-secondary: #cbd5e1;
+  --text-muted: #94a3b8;
+  --muted: #94a3b8;
+  --text: var(--text-primary);
+  --text-dim: var(--text-secondary);
+
+  --surface-soft: rgba(255, 255, 255, 0.06);
+  --surface-hover: rgba(255, 255, 255, 0.1);
+  --surface: rgba(255, 255, 255, 0.06);
+  --surface-strong: rgba(255, 255, 255, 0.1);
+  --card: rgba(255, 255, 255, 0.06);
+  --bg-glass: rgba(255, 255, 255, 0.06);
+  --bg-glass-hover: rgba(255, 255, 255, 0.1);
+  --bg-glass-active: rgba(255, 255, 255, 0.14);
+  --card-border: rgba(255, 255, 255, 0.12);
+  --surface-border: rgba(255, 255, 255, 0.12);
+  --border-hairline: rgba(255, 255, 255, 0.12);
+  --border-subtle: rgba(255, 255, 255, 0.16);
+
+  /* 语义色同理：浅色档的 --err(#b91c1c) / --ok(#047857) 压在深底上会塌到 2.7~3.2:1，
+     井内一律改用深色主题那一档（实测 #ef4444 vs #0f172a = 4.68:1，达小字 4.5:1）。 */
+  --ok: #10b981;
+  --warn: #f59e0b;
+  --warn-text: #fbbf24;
+  --err: #ef4444;
+
+  --well-badge-fg: #cbd5e1;
+  --well-badge-bg: rgba(255, 255, 255, 0.1);
+
+  color: var(--text-primary);
+}
+
+/* ② 井表面：仅历史 411-422 那批类名 + 主题无关的 .dark-well。
+   `.terminal-panel`（#050508）/ `.log-panel`（#08080d）/ `.fault-card`（半透明酒红）不在 ② 里 ——
+   它们是刻意的产品决策，只吃 ① 的令牌作用域，底色不动。 */
 [data-theme='light'] .terminal-window,
 [data-theme='light'] .terminal-container,
 [data-theme='light'] pre.log-stream,
 [data-theme='light'] .log-viewer,
 [data-theme='light'] .console-terminal,
-[data-theme='light'] .fault-details {
-  background: #0f172a !important;
-  border-color: rgba(15, 23, 42, 0.18) !important;
-  color: #e2e8f0 !important;
-  box-shadow: 0 6px 20px rgba(15, 23, 42, 0.15) !important;
+[data-theme='light'] .fault-details,
+.dark-well {
+  background: #0f172a;
+  border-color: rgba(15, 23, 42, 0.18);
+  box-shadow: 0 6px 20px rgba(15, 23, 42, 0.15);
+}
+
+/* ③ 井内后代替换：浅色块里写死字面色的那几个后代（行号见 :266 / :338 / :375-391 / :400-409）。
+   `.terminal-panel` 的按钮不在名单里 —— 它在 :2745 有自己的「浅白底 + 深字」终端工具条设计。 */
+[data-theme='light'] :is(.terminal-window, .terminal-container, .log-stream, .log-viewer, .console-terminal, .fault-details, .terminal-panel, .log-panel, .fault-card, .dark-well) :is(.badge, .mono-tag, .task-badge) {
+  background: var(--well-badge-bg);
+  color: var(--well-badge-fg);
+  border-color: rgba(255, 255, 255, 0.16);
+}
+
+[data-theme='light'] :is(.terminal-window, .terminal-container, .log-stream, .log-viewer, .console-terminal, .fault-details, .terminal-panel, .log-panel, .fault-card, .dark-well) :is(.table, .data-table) :is(th, td) {
+  background: transparent;
+  color: var(--text-secondary);
+  border-bottom-color: rgba(255, 255, 255, 0.1);
+}
+
+[data-theme='light'] :is(.terminal-window, .terminal-container, .log-stream, .log-viewer, .console-terminal, .fault-details, .terminal-panel, .log-panel, .fault-card, .dark-well) .card-title {
+  color: var(--text-primary);
+}
+
+[data-theme='light'] :is(.terminal-window, .terminal-container, pre.log-stream, .log-viewer, .console-terminal, .fault-details, .log-panel, .fault-card, .dark-well) :is(.btn, .btn-secondary):not(.primary) {
+  background: rgba(255, 255, 255, 0.1);
+  border-color: rgba(255, 255, 255, 0.18);
+  color: var(--text-primary);
+}
+
+[data-theme='light'] :is(.terminal-window, .terminal-container, .log-stream, .log-viewer, .console-terminal, .fault-details, .terminal-panel, .log-panel, .fault-card, .dark-well) :is(input, select, textarea) {
+  background: rgba(255, 255, 255, 0.06);
+  border-color: rgba(255, 255, 255, 0.16);
+  color: var(--text-primary);
+}
+
+/* 分部 A 取证时的**井外**额外发现（不属于暗井，单独一段，免得被误当成井的一部分）：
+   控制台「accent」统计卡的 .dash-value 用 background-clip:text 渲染渐变文字，
+   浅色档的亮端 #34d399 压在白卡上只有 1.88:1（32px 加粗，大字阈值 3.0），
+   逐节点审计把它报了出来。这里只把**浅色主题**这条渐变两端都换成能达标的深绿档
+   （#047857 5.35:1 / #0f766e 5.34:1），深色主题与其它 .dash-value 一律不动。 */
+[data-theme='light'] .dash-card.accent .dash-value {
+  background: linear-gradient(135deg, #047857 0%, #0f766e 100%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
 }
 
 /* ---------- 系统任务中心与分段胶囊选择器 (Segmented Pill Tabs) ---------- */
@@ -1024,7 +1158,10 @@ body {
 
 .badge.disabled {
   background: rgba(220, 38, 38, 0.09);
-  color: var(--err);
+  /* 深色/无主题档用 #f87171 而非 --err：分部 A 的逐节点审计实测 --err(#ef4444) 压在本枚
+     徽章自身合成的深底（rgb(46,33,49)）上只有 4.05:1，不到小字 4.5。同色系再亮一档约 5.7:1。
+     浅色档不用这个值（会太亮），在下方 [data-theme='light'] 里换回 --err。 */
+  color: #f87171;
 }
 
 .badge.kind {

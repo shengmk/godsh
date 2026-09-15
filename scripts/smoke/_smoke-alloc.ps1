@@ -20,7 +20,9 @@ foreach ($name in 'alpha', 'beta') {
   $dir = Join-Path $work "home\profiles\$name"
   New-Item -ItemType Directory -Path $dir -Force | Out-Null
 }
-$alpha = @{ name = 'alpha'; private = $true; dependencies = @{ 'hello-a' = '^1.0.0' }; dsh = @{ profile = @{ bundles = @('@deepseek-ai/dsh-base', '@deepseek-ai/dsh-web-app') } } } | ConvertTo-Json -Depth 10
+# alpha：1 个非官方依赖 + 2 个官方 bundle（dsh-base/dsh-web-app）+ 1 个非官方 bundle（hello-b）。
+# 后者的存在是为了证明「官方退出可分配面」的过滤**只**针对官方，没有把普通 bundle 一起误杀。
+$alpha = @{ name = 'alpha'; private = $true; dependencies = @{ 'hello-a' = '^1.0.0' }; dsh = @{ profile = @{ bundles = @('@deepseek-ai/dsh-base', '@deepseek-ai/dsh-web-app', 'hello-b') } } } | ConvertTo-Json -Depth 10
 $beta = @{ name = 'beta'; private = $true; dependencies = @{ }; dsh = @{ profile = @{ bundles = @('@deepseek-ai/dsh-base') } } } | ConvertTo-Json -Depth 10
 [System.IO.File]::WriteAllText("$work\home\profiles\alpha\package.json", $alpha)
 [System.IO.File]::WriteAllText("$work\home\profiles\beta\package.json", $beta)
@@ -42,7 +44,11 @@ try {
   $av = Get-Json 'http://127.0.0.1:47896/api/allocations/available'
   $alphaPairs = @($av.available.alpha | ForEach-Object { "$($_.pluginId)|$($_.source)" })
   Check 'AL1 alpha 含依赖 hello-a' ($alphaPairs -contains 'hello-a|dependency')
-  Check 'AL2 alpha 含 bundle web-app' ($alphaPairs -contains '@deepseek-ai/dsh-web-app|bundle')
+  # 读法 α：官方资产退出「可分配」面 —— 它们只出现在 officialAssets 只读视图里。
+  # 反例同时验证过滤没有误伤普通 bundle（hello-b 必须仍在）。
+  Check 'AL2 alpha 不含官方 bundle（退出可分配面）' (-not ($alphaPairs -contains '@deepseek-ai/dsh-web-app|bundle'))
+  Check 'AL2b alpha 仍含非官方 bundle hello-b' ($alphaPairs -contains 'hello-b|bundle')
+  Check 'AL2c officialAssets 给出三项官方内核' (@($av.officialAssets.alpha).Count -eq 3)
   Check 'AL3 初始均未分配' (-not (@($av.available.alpha | ForEach-Object { $_.allocated }) -contains $true))
 
   # 2. 分配（点选路径：allocate）

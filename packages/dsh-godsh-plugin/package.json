@@ -1,0 +1,52 @@
+{
+  "name": "@godsh/dsh",
+  "version": "0.6.6",
+  "private": true,
+  "type": "module",
+  "description": "godsh 的 DSH 双面插件：在 dsh 进程内提供插件沙箱、瞬时注入与热装载（不中断对话）",
+  "keywords": [
+    "dsh",
+    "deepseek-harness",
+    "dsh-plugin",
+    "cordis",
+    "godsh",
+    "sandbox",
+    "hot-reload"
+  ],
+  "exports": {
+    ".": {
+      "types": "./src/index.ts",
+      "default": "./lib/index.js"
+    },
+    "./client": {
+      "types": "./src/client/index.ts",
+      "default": "./lib/client.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "inject": [
+        "@deepseek-ai/dsh-client-runtime",
+        "@deepseek-ai/dsh-client-connection",
+        "@deepseek-ai/dsh-client-ui-settings"
+      ],
+      "platform": "web"
+    }
+  },
+  "files": [
+    "lib",
+    "cordis.patch.yml",
+    "README.md"
+  ],
+  "scripts": {
+    "build": "node scripts/build.mjs"
+  },
+  "dependencies": {},
+  "devDependencies": {
+    "esbuild": "^0.28.2"
+  }
+}
