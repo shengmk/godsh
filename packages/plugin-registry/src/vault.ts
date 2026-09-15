@@ -4,6 +4,7 @@ import { DATA_DIR, run, ensureCompatibilityShims, isOfficialPackage, resolveProf
 import { auditPackage, type PluginAuditReport, type SecurityLevel } from '@godsh/security'
 import { inspectManifest } from './bundle.js'
 import { getVaultContract, detectPluginConflicts, findDependentsOf } from './vault-contract.js'
+import { inferVaultOrigin, isUpdatableEntry, originLabel, type VaultOrigin } from './vault-origin.js'
 import type { PluginKind, PluginManifest } from './types.js'
 
 export interface VaultPlugin {
@@ -51,6 +52,11 @@ export interface VaultPlugin {
    * 又绝不碰另一个父的副本（两者物理路径完全不同）。
    */
   childOrigin?: 'standalone' | 'shared-copy'
+  /**
+   * 真实来源（可选）。缺失时由 `inferVaultOrigin` 按 id / source / childOrigin 推断，
+   * 因此历史数据无需迁移即可正确判定「能否从 npm 自动更新」。
+   */
+  origin?: VaultOrigin
   /** 仅根插件使用：本插件名下已捆绑的子依赖名（供 UI 折叠展示与「父是否还在」判定） */
   bundledDeps?: string[]
 }
@@ -1920,6 +1926,9 @@ export class VaultManager {
           activeVersion: version,
           sizeBytes,
           installedProfiles: [prof.name],
+          // 收割来的条目真实来源是「某个环境」，而它的包名通常仍来自 npm ——
+          // 显式记下来，更新器才能把它纳入（旧实现按 source==='local' 一刀切排除，导致全量更新失效）
+          origin: { kind: 'profile-harvest', ref: prof.name },
           securityLevel: item.name.startsWith('@deepseek-ai/') || item.name.startsWith('@godsh/') ? 'official' : 'safe',
           securityScore: 100,
           stagedAt: Date.now(),
@@ -2203,7 +2212,9 @@ export class VaultManager {
     // 于是两个父的副本又指向同一条物理路径，按父隔离的前提当场失效
     // （之后删掉任何一个父都会连带毁掉另一个父的依赖）。
     // standalone 那份本来就是独占目录，保持既有可更新语义不变。
-    const toCheck = data.plugins.filter((p) => p.source !== 'local' && p.childOrigin !== 'shared-copy')
+    // 判据收敛到 isUpdatableEntry 一处：原先这里按 source !== 'local' 过滤，而收割条目
+    // 恰恰是 source === 'local'，于是沙箱主体永远进不了更新器（缺陷 3 前半的根因）。
+    const toCheck = data.plugins.filter((p) => isUpdatableEntry(p))
     const resultsMap = new Map<string, { hasUpdate: boolean; latestVersion?: string }>()
 
     // 采用受控并发池（8路并发，快速获取最新版本）
@@ -2438,7 +2449,11 @@ export class VaultManager {
     const data = this.readData()
     const plugin = this.findByRef(data, id)
     if (!plugin) throw new Error(`沙箱中未找到插件: ${id}`)
-    if (plugin.source === 'local') throw new Error(`本地导入插件不支持从 npm 自动更新`)
+    // 不再按 `source === 'local'` 一刀切（那会把收割来的沙箱主体一并拒掉 —— 缺陷 3 前半）。
+    // 判据与 `checkUpdates` 同源（`isUpdatableEntry`），失败时按**真实来源**给出可读原因。
+    if (!isUpdatableEntry(plugin)) {
+      throw new Error(`来源为「${originLabel(inferVaultOrigin(plugin))}」的插件不支持从 npm 自动更新`)
+    }
 
     let ver = targetVersion
     if (!ver || ver === 'latest') {
@@ -2613,11 +2628,10 @@ export class VaultManager {
     onLog?.(`正在比对沙箱插件最新版本...\n`)
     await this.checkUpdates()
     const data = this.readData()
-    // 二次过滤 shared-copy 子副本：历史数据里可能残留 hasUpdate=true（checkUpdates 已不再标记它们），
-    // 只靠上一步的过滤挡不住旧标记，这里再挡一次，避免升级动作破坏按父隔离。
-    const needUpdate = data.plugins.filter(
-      (p) => p.hasUpdate && p.latestVersion && p.childOrigin !== 'shared-copy'
-    )
+    // 判据与 checkUpdates 同源（isUpdatableEntry 已含 shared-copy 排除），
+    // 外加"确实被标记为有新版本"这一条：历史数据里可能残留 hasUpdate=true，
+    // 只靠 checkUpdates 的过滤挡不住旧标记，这里再挡一次，避免升级动作破坏按父隔离。
+    const needUpdate = data.plugins.filter((p) => isUpdatableEntry(p) && p.hasUpdate === true && Boolean(p.latestVersion))
 
     if (needUpdate.length === 0) {
       onLog?.(`所有沙箱插件均已是最新版本，无需更新 ✨\n`)
@@ -2644,16 +2658,25 @@ export class VaultManager {
       onProgress?.(current, needUpdate.length, `正在升级 ${p.name} [${current}/${needUpdate.length}]`)
       try {
         const res = await this.updatePlugin(p.id, p.latestVersion, profilesDir, onLog)
-        results.push({
-          id: p.id,
-          name: p.name,
-          ok: res.ok,
-          fromVersion: res.fromVersion,
-          toVersion: res.toVersion,
-          profileResults: res.profileResults,
-        })
-        updated++
-        onLog?.(`✓ ${p.name} 升级成功 (${res.fromVersion} -> ${res.toVersion})\n`)
+        if (res.ok) {
+          results.push({
+            id: p.id,
+            name: p.name,
+            ok: true,
+            fromVersion: res.fromVersion,
+            toVersion: res.toVersion,
+            profileResults: res.profileResults,
+          })
+          updated++
+          onLog?.(`✓ ${p.name} 升级成功 (${res.fromVersion} -> ${res.toVersion})\n`)
+        } else {
+          // 诚实计数：`updatePlugin` 返回 ok:false 时不得计入 updated，也不得打印"升级成功"。
+          // 旧实现无条件 `updated++` + 打印成功，是本项目"报告说谎"那一类缺陷。
+          const msg = res.message ?? '更新器返回 ok:false'
+          failed++
+          results.push({ id: p.id, name: p.name, ok: false, error: msg })
+          onLog?.(`✗ ${p.name} 升级失败: ${msg}\n`)
+        }
       } catch (err) {
         failed++
         const errMsg = err instanceof Error ? err.message : String(err)

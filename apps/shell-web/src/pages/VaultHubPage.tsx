@@ -851,17 +851,20 @@ export default function VaultHubPage() {
               </>
             )}
           </button>
-          {plugins.some((p) => p.hasUpdate) && (
-            <button
-              className="btn sm"
-              style={{ background: 'var(--warn-surface)', color: 'var(--on-warn)', borderColor: 'var(--warn-surface)', fontWeight: 600 }}
-              onClick={() => void handleUpdateAll()}
-              disabled={actionLoading === 'update-all'}
-              title="一键自动拉取升级所有检测到新版本的沙箱插件，并原子同步已挂载环境"
-            >
-              <Zap size={12} /> {actionLoading === 'update-all' ? '正在自动更新…' : '自动更新全部'}
-            </button>
-          )}
+          {/* 「自动更新全部」**常驻**，不再被 `plugins.some(p => p.hasUpdate)` 门控。
+              原门控的问题：没有 `hasUpdate` 标记时按钮根本不出现，用户无法主动触发一次
+              「全量比对 + 全量更新」；而且 `hasUpdate` 依赖上一次检查的残留状态，
+              在沙箱主体是收割条目（历史实现里永远检查不到更新）时按钮会长期消失 ——
+              用户看到的正是「沙箱不能全部更新」。现在点击即先比对再更新，无更新时如实提示。 */}
+          <button
+            className="btn sm"
+            style={{ background: 'var(--warn-surface)', color: 'var(--on-warn)', borderColor: 'var(--warn-surface)', fontWeight: 600 }}
+            onClick={() => void handleUpdateAll()}
+            disabled={actionLoading === 'update-all'}
+            title="先比对全部沙箱插件的最新版本，再一键升级所有有新版本者，并原子同步已挂载环境"
+          >
+            <Zap size={12} /> {actionLoading === 'update-all' ? '正在自动更新…' : '自动更新全部'}
+          </button>
           <button
             className="btn sm primary"
             onClick={() => void handleHarvest()}
