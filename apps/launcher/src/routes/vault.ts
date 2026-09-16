@@ -1,4 +1,4 @@
-import { autoEnableAfterInstall, type AutoEnableResult } from './auto-enable.js'
+import { autoEnableAfterInstall, captureRemovalTargets, purgeDeclarationsAfterRemoval, type AutoEnableResult } from './auto-enable.js'
 import type { ApiHandler, RouteContext } from './types.js'
 
 /** 一次注入里，某个包被自动启用的结果（带上包名以便前端逐条显示）。 */
@@ -122,8 +122,12 @@ export const vaultHandler: ApiHandler = async (ctx, _req, res, method, seg, body
       return true
     }
     try {
+      // 先留档再卸载：卸载会解除 Junction 与 package.json/bundles 声明，但**不认识分配层**。
+      // 不清理补丁行的话，该环境下次启动会因「装载一个不存在的条目」而直接失败（实测复现过）。
+      const targets = captureRemovalTargets(vault, [pluginId])
       const report = await vault.unmountFromProfile(pluginId, targetProfile, profilesDir)
-      ctx.sendJson(res, 200, report)
+      const purge = purgeDeclarationsAfterRemoval(ctx, targets.filter((t) => t.profiles.includes(targetProfile)))
+      ctx.sendJson(res, 200, purge.length > 0 ? { ...report, declarationCleanup: purge } : report)
     } catch (err) {
       ctx.sendJson(res, 400, { error: err instanceof Error ? err.message : String(err) })
     }
@@ -339,7 +343,13 @@ export const vaultHandler: ApiHandler = async (ctx, _req, res, method, seg, body
       ctx.startInstallTask(taskKey, `${taskKey}.log`, async (log) => {
         log(`[INFO] 批量移除 ${ids.length} 个沙箱插件（mode=${mode}${purge ? ', purge' : ''}）...\n`)
         try {
+          const targets = captureRemovalTargets(vault, ids)
           const r = await vault.removeMany(ids, { mode, purge, profilesDir })
+          const cleaned = purgeDeclarationsAfterRemoval(ctx, targets)
+          for (const c of cleaned) {
+            if (c.error !== undefined) log(`  [WARN] 声明层清理失败 ${c.profile}：${c.error}\n`)
+            else log(`  [OK]   已清理声明层 ${c.profile}：${c.purged.join(', ')}\n`)
+          }
           for (const item of r.results) {
             const label = item.name ?? item.id
             if (item.status === 'removed') log(`  [OK]   ${label}\n`)
@@ -357,8 +367,10 @@ export const vaultHandler: ApiHandler = async (ctx, _req, res, method, seg, body
     }
 
     try {
+      const targets = captureRemovalTargets(vault, ids)
       const r = await vault.removeMany(ids, { mode, purge, profilesDir })
-      ctx.sendJson(res, 200, { ok: r.failed === 0, ...r })
+      const cleaned = purgeDeclarationsAfterRemoval(ctx, targets)
+      ctx.sendJson(res, 200, { ok: r.failed === 0, ...r, declarationCleanup: cleaned })
     } catch (err) {
       ctx.sendJson(res, 400, { error: err instanceof Error ? err.message : String(err) })
     }
@@ -371,14 +383,16 @@ export const vaultHandler: ApiHandler = async (ctx, _req, res, method, seg, body
     const rawMode = url.searchParams.get('mode')
     const mode = rawMode === 'cascade' || rawMode === 'force' ? rawMode : 'block'
     const purge = url.searchParams.get('purge') === '1'
+    const targets = captureRemovalTargets(vault, [id])
     const result = await vault.remove(id, { mode, purge, profilesDir })
+    const cleaned = purgeDeclarationsAfterRemoval(ctx, targets)
     if (!result.ok) {
       // 未找到 → 404；被依赖而阻断 → 409。都带上 dependents 供前端提示。
       const status = result.dependents.length > 0 ? 409 : 404
       ctx.sendJson(res, status, result)
       return true
     }
-    ctx.sendJson(res, 200, result)
+    ctx.sendJson(res, 200, { ...result, declarationCleanup: cleaned })
     return true
   }
 

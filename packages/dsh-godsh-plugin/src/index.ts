@@ -31,7 +31,9 @@
 import { join } from 'node:path'
 import { HotBridge, type BridgeProbe, type HotEntryView, type HotResult } from './hot-bridge.js'
 import { buildRoutes, registerRoutes, GODSH_API_PREFIX } from './routes.js'
-import type { HostContext } from './host-types.js'
+import { buildSandboxRoutes, SANDBOX_API_PREFIX } from './sandbox/routes.js'
+import { SandboxService } from './sandbox/service.js'
+import { hostBaseDir, type HostContext } from './host-types.js'
 
 /** 插件名。**必须逐字等于 `cordis.patch.yml` 里那条 patch 行的 `id`。** */
 export const name = 'godsh'
@@ -48,8 +50,10 @@ export const SERVICE_NAME = 'godsh'
 
 /** `ctx.get('godsh')` 拿到的对象形状。 */
 export interface GodshHostService {
-  /** 热装载桥（分部 G/H 的执行体）。 */
+  /** 热装载桥（分部 H 的执行体）。 */
   bridge: HotBridge
+  /** 沙箱服务（分部 G：注入 / 移除 / GC / 收割 / 检查更新）。 */
+  sandbox: SandboxService
   /** 自检快照。 */
   probe(): BridgeProbe
   /** 运行树条目（只读）。 */
@@ -60,6 +64,8 @@ export interface GodshHostService {
   unmount(pkg: string): Promise<HotResult>
   /** 路由前缀（浏览器半必须用同一个）。 */
   apiPrefix: string
+  /** 沙箱路由前缀。 */
+  sandboxApiPrefix: string
   /** 解析出的补丁文件路径（自检用）。 */
   patchFile: string
 }
@@ -72,8 +78,8 @@ export interface GodshHostService {
  * 自检显示，不会成为任何写入目标，所以退化的后果只是提示文本不准。
  */
 function resolvePatchFile(ctx: HostContext): string {
-  const rawBase = (ctx as { baseUrl?: unknown }).baseUrl
-  const base = typeof rawBase === 'string' && rawBase !== '' ? rawBase : process.cwd()
+  // hostBaseDir 会处理 baseUrl 是 file:// URL 这件事（它确实是），否则这里会拼出垃圾路径
+  const base = hostBaseDir(ctx) ?? process.cwd()
   return join(base, 'cordis.patch.yml')
 }
 
@@ -86,14 +92,19 @@ function resolvePatchFile(ctx: HostContext): string {
 export function apply(ctx: HostContext, _config?: unknown): void {
   const patchFile = resolvePatchFile(ctx)
   const bridge = new HotBridge(ctx, patchFile)
+  // 沙箱服务（分部 G）。构造失败不致命：服务内部把失败记成 `broken`，各方法返回可读错误，
+  // 插件本身照样装载 —— "因为沙箱目录不可用就整个装不上"是不可接受的。
+  const sandbox = new SandboxService(ctx, bridge)
 
   const service: GodshHostService = {
     bridge,
+    sandbox,
     probe: () => bridge.probe(),
     entries: () => bridge.list(),
     mount: (pkg, options) => bridge.mount(pkg, options),
     unmount: (pkg) => bridge.unmount(pkg),
     apiPrefix: GODSH_API_PREFIX,
+    sandboxApiPrefix: SANDBOX_API_PREFIX,
     patchFile,
   }
 
@@ -106,7 +117,7 @@ export function apply(ctx: HostContext, _config?: unknown): void {
 
   // 2) 注册路由：webServer 是**可选**服务
   //    优先用 Cordis 的延迟挂载（服务出现后再跑），拿不到该能力时退化为一次性尝试。
-  const routes = buildRoutes(bridge)
+  const routes = [...buildRoutes(bridge), ...buildSandboxRoutes(sandbox)]
   const registerNow = (host: HostContext): void => {
     const dispose = registerRoutes(host.get('webServer'), routes)
     // 把卸载器挂到插件 fiber 上，插件卸载时路由一起消失
@@ -116,7 +127,12 @@ export function apply(ctx: HostContext, _config?: unknown): void {
       /* effect 不可用时忽略：路由会随进程结束而消失 */
     }
     const present = host.get('webServer') !== undefined
-    ctx.logger?.info(`[godsh] 宿主半已就绪（routes=${present ? String(routes.length) : '0（本 profile 无 webServer，已降级）'}，patch=${patchFile}）`)
+    const st = sandbox.status()
+    ctx.logger?.info(
+      `[godsh] 宿主半已就绪（routes=${present ? String(routes.length) : '0（本 profile 无 webServer，已降级）'}，` +
+        `patch=${patchFile}，sandbox=${st.dataDir}（${st.dataDirReason}），own=${st.ownProfile ?? '未知'}）`
+    )
+    if (st.error !== undefined) ctx.logger?.warn(`[godsh] 沙箱状态异常：${st.error}`)
   }
 
   try {
@@ -128,6 +144,11 @@ export function apply(ctx: HostContext, _config?: unknown): void {
 }
 
 export { HotBridge, GODSH_API_PREFIX }
+export { SandboxService } from './sandbox/service.js'
+export { SANDBOX_API_PREFIX } from './sandbox/routes.js'
+export { resolveSandboxDataDir } from './sandbox/data-dir.js'
+export type { SandboxEntryView, SandboxStatus, InjectResult, InjectEffectiveness, InjectPhases } from './sandbox/service.js'
+export type { DataDirResolution } from './sandbox/data-dir.js'
 export type { BridgeProbe, HotEntryView, HotResult }
 export type { RestartReason, HotBackend, HotResult as HotActionResult } from './hot-bridge.js'
 export type { HostContext, WebRoute, WebServerLike } from './host-types.js'

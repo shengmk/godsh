@@ -1,4 +1,4 @@
-﻿import { existsSync, mkdirSync, appendFileSync, readFileSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, appendFileSync, readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { DATA_DIR } from './paths.js'
 

@@ -16,6 +16,7 @@
  */
 
 import type { IncomingMessage, ServerResponse } from 'node:http'
+import { fileURLToPath } from 'node:url'
 
 /** dsh web 服务器的路由种类（来自 `@deepseek-ai/dsh-host-webserver` 的 `WebRouteKind`）。 */
 export type WebRouteKind = 'exact' | 'prefix'
@@ -79,6 +80,32 @@ export interface HostContext {
   provide(name: string, value: unknown): void
 }
 
+/**
+ * 把 `ctx.baseUrl` 归一化成**文件系统目录**。
+ *
+ * 为什么需要它（这是实测踩到的坑）：dsh 的 `ctx.baseUrl` 不是普通路径，而是
+ * **`file://` URL**（实测形如 `file:///C:/Users/<用户>/.dsh/profiles/<profile>`）。
+ * 直接拿它去 `basename` / `dirname` / `join` 会得到形如
+ * `.\file:\C:\Users\...\profiles` 的垃圾路径 —— 沙箱服务的第一版就是这么错的：
+ * 注入预检报「目标环境不存在」，而那个环境明明存在。
+ *
+ * 因此所有「从 baseUrl 反推目录」的地方都必须先过这个函数。
+ *
+ * @param ctx - 宿主上下文。
+ * @returns 绝对目录路径；`baseUrl` 缺失或无法解析时返回 `null`。
+ */
+export function hostBaseDir(ctx: HostContext): string | null {
+  const raw = (ctx as { baseUrl?: unknown }).baseUrl
+  if (typeof raw !== 'string' || raw === '') return null
+  if (raw.startsWith('file://')) {
+    try {
+      return fileURLToPath(raw)
+    } catch {
+      return null
+    }
+  }
+  return raw
+}
 /** 把一个 `unknown` 收窄成具备某个方法的对象；不具备时返回 `null`（绝不抛）。 */
 export function asObjectWith<T extends string>(
   value: unknown,

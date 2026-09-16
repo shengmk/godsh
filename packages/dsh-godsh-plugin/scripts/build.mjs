@@ -26,18 +26,47 @@
  */
 
 import { build } from 'esbuild'
-import { mkdirSync, readFileSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from 'node:fs'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 const here = dirname(fileURLToPath(import.meta.url))
 const pkgRoot = resolve(here, '..')
+const repoRoot = resolve(pkgRoot, '..', '..')
 const libDir = join(pkgRoot, 'lib')
 const pkg = JSON.parse(readFileSync(join(pkgRoot, 'package.json'), 'utf8'))
 
 mkdirSync(libDir, { recursive: true })
 
-// ---------- 1) 宿主半：ESM，零外部依赖 ----------
+/**
+ * 把每个工作区包 `@godsh/*` 映射到它的**源码入口**。
+ *
+ * 为什么必须走 alias，而不是在 package.json 里写 `dependencies`：
+ * 本插件是用 `dsh plugin add link:<path>` 装进 dsh profile 的，而那个 profile **不是**
+ * 本仓库的 workspace 成员。清单里若写 `"@godsh/core": "workspace:*"`，pnpm 在 profile 里
+ * 解析这个说明符会直接失败；写普通版本号也不行 —— 这些包**没有发布到 npm**。
+ *
+ * 所以正确做法是：**清单里零依赖，构建期把工作区源码打进产物**。
+ * alias 让 esbuild 在构建时解析到源码，运行时不依赖任何外部包。
+ */
+function workspaceAliases() {
+  const alias = {}
+  const base = join(repoRoot, 'packages')
+  if (!existsSync(base)) return alias
+  for (const name of readdirSync(base)) {
+    const manifest = join(base, name, 'package.json')
+    if (!existsSync(manifest)) continue
+    const meta = JSON.parse(readFileSync(manifest, 'utf8'))
+    if (typeof meta.name !== 'string') continue
+    const entry = join(base, name, 'src', 'index.ts')
+    if (existsSync(entry)) alias[meta.name] = entry
+  }
+  return alias
+}
+
+const aliases = workspaceAliases()
+
+// ---------- 1) 宿主半：ESM —— 只把 @deepseek-ai/* 留作外部 ----------
 const hostOut = join(libDir, 'index.js')
 await build({
   entryPoints: [join(pkgRoot, 'src/index.ts')],
@@ -46,9 +75,11 @@ await build({
   platform: 'node',
   format: 'esm',
   target: 'node22',
-  // 宿主半边不 import 任何 @deepseek-ai/*（服务都是运行时 ctx.get 拿的），
+  alias: aliases,
+  // 宿主半不 import 任何 @deepseek-ai/*（服务都是运行时 ctx.get 拿的），
   // 但仍显式 external 一遍：将来若有人加了 import，这里会立刻暴露成"未打包进来的裸 import"，
   // 而不是把官方包的一份副本打进产物（那会造成两份实例）。
+  // 注意：@godsh/* **不** external —— 它们必须被打进来（见 workspaceAliases 的注释）。
   external: ['@deepseek-ai/*'],
   logLevel: 'warning',
 })

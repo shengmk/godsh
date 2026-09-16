@@ -24,13 +24,13 @@ export const GODSH_API_PREFIX = '/api/dsh-godsh'
 const MAX_BODY_BYTES = 64 * 1024
 
 /** 回环地址判定（IPv4 / IPv6 / IPv4-mapped）。 */
-function isLoopback(req: IncomingMessage): boolean {
+export function isLoopback(req: IncomingMessage): boolean {
   const addr = req.socket.remoteAddress ?? ''
   return addr === '127.0.0.1' || addr === '::1' || addr === '::ffff:127.0.0.1'
 }
 
 /** 读取并解析 JSON 请求体；超限或非法返回 `null`。 */
-async function readJsonBody(req: IncomingMessage): Promise<Record<string, unknown> | null> {
+export async function readJsonBody(req: IncomingMessage): Promise<Record<string, unknown> | null> {
   const chunks: Buffer[] = []
   let total = 0
   try {
@@ -55,7 +55,7 @@ async function readJsonBody(req: IncomingMessage): Promise<Record<string, unknow
 }
 
 /** 统一的 JSON 应答。 */
-function sendJson(res: ServerResponse, status: number, payload: unknown): void {
+export function sendJson(res: ServerResponse, status: number, payload: unknown): void {
   const body = JSON.stringify(payload)
   res.writeHead(status, {
     'Content-Type': 'application/json; charset=utf-8',
@@ -66,7 +66,7 @@ function sendJson(res: ServerResponse, status: number, payload: unknown): void {
 }
 
 /** 参数取值助手：非空字符串才接受。 */
-function str(value: unknown): string | null {
+export function str(value: unknown): string | null {
   return typeof value === 'string' && value.trim() !== '' ? value : null
 }
 
@@ -76,6 +76,32 @@ function str(value: unknown): string | null {
  * @param bridge - 热装载桥实例。
  * @returns 待注册的 `WebRoute` 列表（调用方负责 `webServer.register`）。
  */
+/**
+ * 把一段处理器包上「回环信任围栏 + 异常兜底」。
+ *
+ * 为什么抽出来给沙箱路由复用：沙箱的写操作（注入/移除）比自检端点危险得多，
+ * 它们必须有**完全一致**的鉴权与兜底语义 —— 两处各写一遍就一定会漂移。
+ */
+export function guarded(handler: WebRoute['handler']): WebRoute['handler'] {
+  return async (req, res) => {
+    if (!isLoopback(req)) {
+      sendJson(res, 403, { ok: false, error: '这些端点仅允许回环访问' })
+      return
+    }
+    try {
+      await handler(req, res)
+    } catch (error) {
+      if (!res.headersSent) sendJson(res, 500, { ok: false, error: describe(error) })
+      else {
+        try {
+          res.end()
+        } catch {
+          /* 响应已断，无能为力 */
+        }
+      }
+    }
+  }
+}
 export function buildRoutes(bridge: HotBridge): WebRoute[] {
   const guard = (handler: WebRoute['handler']): WebRoute['handler'] => {
     return async (req, res) => {

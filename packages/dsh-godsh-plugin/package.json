@@ -1,6 +1,6 @@
 {
     "name":  "@godsh/dsh",
-    "version":  "0.7.0",
+    "version":  "0.7.1",
     "private":  true,
     "type":  "module",
     "description":  "godsh 的 DSH 双面插件：在 dsh 进程内提供插件沙箱、瞬时注入与热装载（不中断对话）",

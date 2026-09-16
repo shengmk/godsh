@@ -83,3 +83,82 @@ export function autoEnableAfterInstall(
     return { applied: false, message: `插件已安装，但自动启用失败：${err instanceof Error ? err.message : String(err)}` }
   }
 }
+
+/** 一次移除操作涉及的目标（移除前留档：vault 删掉之后就查不到了）。 */
+export interface RemovalTarget {
+  id: string
+  name: string
+  /** 该条目当时挂载在哪些环境里。 */
+  profiles: string[]
+}
+
+/**
+ * **移除前**留档：记下这些沙箱条目叫什么、挂在哪些环境。
+ *
+ * 为什么必须先留档：`vault.removeMany` 一执行，条目记录连同 `installedProfiles` 都没了，
+ * 再想清理声明层就无从下手。
+ *
+ * @param vault - 沙箱管理器（只用到 `list()`）。
+ * @param ids - 待移除的条目 id 或包名。
+ * @returns 留档结果（查不到的项直接跳过）。
+ */
+export function captureRemovalTargets(
+  vault: { list(): { id: string; name: string; installedProfiles?: string[] }[] },
+  ids: string[],
+): RemovalTarget[] {
+  const out: RemovalTarget[] = []
+  try {
+    const all = vault.list()
+    for (const id of ids) {
+      const hit = all.find((p) => p.id === id || p.name === id)
+      if (hit !== undefined) out.push({ id: hit.id, name: hit.name, profiles: [...(hit.installedProfiles ?? [])] })
+    }
+  } catch {
+    /* 留档失败不阻断移除：清理阶段退化为尽力而为 */
+  }
+  return out
+}
+
+/**
+ * **移除后**清理声明层。
+ *
+ * ⚠️ 这是实测暴露出来的一个**真缺陷**，不是洁癖：从沙箱移除一个插件时，
+ * `vault.removeMany` 只解除环境里的 Junction 挂载与 `package.json`/`bundles` 声明，
+ * 它**不认识「分配层」**。而分配层（`<profile>/cordis.patch.yml`）里那一行如果不一起清掉，
+ * dsh 下次启动就会在装载阶段抛：
+ *
+ *     failed to apply loader entry include (cordis:include):
+ *     failed to import loader entry <包名> (undefined): Cannot read properties of undefined (reading 'startsWith')
+ *
+ * 也就是**环境直接打不开**。实测已复现（并用 `scripts/exp/fix-dangling-patch-rows.mjs` 修复）。
+ *
+ * 清理分两步（顺序不能反）：先摘掉分配记录，再用 `removedIds` 让 `applyProfile` 把补丁行一并抹掉。
+ * 只做第二步的话，下一次任意 `applyProfile` 都会把这些行重新写回去。
+ *
+ * @param ctx - 路由上下文。
+ * @param targets - {@link captureRemovalTargets} 的留档结果。
+ * @returns 逐环境的清理结果；**不抛异常**。
+ */
+export function purgeDeclarationsAfterRemoval(
+  ctx: RouteContext,
+  targets: RemovalTarget[],
+): { profile: string; purged: string[]; error?: string }[] {
+  const out: { profile: string; purged: string[]; error?: string }[] = []
+  const profiles = [...new Set(targets.flatMap((t) => t.profiles))]
+  for (const profile of profiles) {
+    const names = targets.filter((t) => t.profiles.includes(profile)).map((t) => t.name)
+    if (names.length === 0) continue
+    try {
+      for (const a of ctx.allocations.list()) {
+        if (a.profile === profile && names.includes(a.pluginId)) ctx.allocations.remove(a.id)
+      }
+      const apply = ctx.tryApplyAllocation(profile, names)
+      out.push(
+        apply.applied ? { profile, purged: names } : { profile, purged: names, error: apply.applyError ?? '写回补丁层失败' },
+      )
+    } catch (err) {
+      out.push({ profile, purged: names, error: err instanceof Error ? err.message : String(err) })
+    }
+  }
+  return out
+}
